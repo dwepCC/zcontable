@@ -1,0 +1,115 @@
+import client from '../api/client';
+import type { Company, CompanyStatement } from '../types/dashboard';
+
+export interface CompaniesListParams {
+  q?: string;
+  status?: string;
+}
+
+export interface PaginationMeta {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface RucValidationResult {
+  ruc: string;
+  business_name: string;
+  address?: string;
+  estado?: string;
+  condicion?: string;
+  departamento?: string;
+  provincia?: string;
+  distrito?: string;
+}
+
+export interface CompanyUpsertInput {
+  ruc: string;
+  business_name: string;
+  code: string;
+  status: string;
+  trade_name?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  service_start_at?: string;
+  accountant_user_id?: number;
+  supervisor_user_id?: number;
+  assistant_user_id?: number;
+  subscription_plan_id?: number | null;
+  billing_cycle?: string;
+  subscription_started_at?: string;
+  subscription_ended_at?: string;
+  subscription_active?: boolean;
+  declared_billing_amount?: number | null;
+}
+
+export const companiesService = {
+  /** Siguiente código interno sugerido (4 dígitos, único en BD). */
+  async getNextInternalCode(): Promise<string> {
+    const res = await client.get<{ code: string }>('/companies/next-internal-code');
+    const code = res.data?.code?.trim();
+    if (!code) throw new Error('Respuesta inválida del servidor');
+    return code;
+  },
+
+  async list(params: CompaniesListParams = {}): Promise<Company[]> {
+    const res = await client.get<{ data: Company[] }>('/companies', {
+      params,
+    });
+    return res.data?.data ?? [];
+  },
+
+  async listPaged(params: CompaniesListParams & { page: number; per_page: number }): Promise<{
+    items: Company[];
+    pagination: PaginationMeta;
+  }> {
+    const res = await client.get<{ data: Company[]; pagination: PaginationMeta }>('/companies', { params });
+    return {
+      items: res.data?.data ?? [],
+      pagination: res.data?.pagination ?? { page: params.page, per_page: params.per_page, total: 0, total_pages: 0 },
+    };
+  },
+
+  async get(id: number): Promise<Company> {
+    const res = await client.get<Company>(`/companies/${id}`);
+    return res.data;
+  },
+
+  async create(input: CompanyUpsertInput): Promise<Company> {
+    const res = await client.post<Company>('/companies', input);
+    return res.data;
+  },
+
+  async update(id: number, input: CompanyUpsertInput): Promise<Company> {
+    const res = await client.put<Company>(`/companies/${id}`, input);
+    return res.data;
+  },
+
+  async patchStatus(id: number, status: 'activo' | 'inactivo'): Promise<Company> {
+    const res = await client.patch<Company>(`/companies/${id}/status`, { status });
+    return res.data;
+  },
+
+  async delete(id: number): Promise<void> {
+    await client.delete(`/companies/${id}`);
+  },
+
+  async getStatement(id: number, period?: string): Promise<CompanyStatement> {
+    const res = await client.get<CompanyStatement>(`/companies/${id}/statement`, {
+      params: period?.trim() ? { period: period.trim() } : {},
+    });
+    return res.data;
+  },
+
+  async search(term: string): Promise<Company[]> {
+    return this.list({ q: term });
+  },
+
+  /** Consulta SUNAT vía ApiPeru.dev (credenciales en Ajustes del estudio). */
+  async validateRuc(ruc: string): Promise<RucValidationResult> {
+    const res = await client.post<RucValidationResult>('/companies/validate-ruc', { ruc });
+    return res.data;
+  },
+};
