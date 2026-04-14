@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearTukifacSeriesSessionCache } from '../constants/tukifacSeriesSessionKeys';
 
 const backendUrl = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '');
 
@@ -46,6 +47,7 @@ client.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
     if (status === 401) {
+      clearTukifacSeriesSessionCache();
       try {
         window.sessionStorage.removeItem('token');
         window.sessionStorage.removeItem('user');

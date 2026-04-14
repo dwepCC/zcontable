@@ -209,14 +209,14 @@ const TaxSettlementNew = () => {
 
   if (!allowed) {
     return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900 text-sm">
+      <div className="w-full min-w-0 max-w-full rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900 text-sm">
         No tiene permiso para crear liquidaciones.
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-6">
       <div>
         <Link to="/tax-settlements" className="text-sm text-primary-700 hover:text-primary-800 font-medium">
           ← Volver al listado
@@ -230,7 +230,10 @@ const TaxSettlementNew = () => {
 
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-      <form onSubmit={(e) => void submit(e)} className="space-y-8 bg-white rounded-xl border border-slate-200 p-6 sm:p-8 shadow-sm">
+      <form
+        onSubmit={(e) => void submit(e)}
+        className="w-full min-w-0 space-y-8 bg-white rounded-xl border border-slate-200 p-4 sm:p-6 md:p-8 shadow-sm"
+      >
         <section className="space-y-4">
           <h3 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Datos generales</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -297,9 +300,9 @@ const TaxSettlementNew = () => {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm min-w-0">
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+              <table className="min-w-full w-full text-sm">
                 <thead>
                   <tr className="bg-slate-100/90 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600">
                     <th className="px-3 py-3 w-10 text-center">#</th>

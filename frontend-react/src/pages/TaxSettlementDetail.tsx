@@ -93,7 +93,7 @@ const TaxSettlementDetail = () => {
 
   if (loading) {
     return (
-      <div className="text-slate-500 text-sm py-12 text-center">
+      <div className="w-full min-w-0 max-w-full text-slate-500 text-sm py-12 text-center">
         <i className="fas fa-spinner fa-spin mr-2" />
         Cargando…
       </div>
@@ -102,7 +102,7 @@ const TaxSettlementDetail = () => {
 
   if (error || !row) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="w-full min-w-0 max-w-full rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         {error || 'No encontrado'}
         <div className="mt-2">
           <Link to="/tax-settlements" className="text-primary-700 font-medium">
@@ -118,25 +118,51 @@ const TaxSettlementDetail = () => {
     return 'Concepto';
   };
 
+  /** Pastillas compactas; ancho al contenido y salto de línea en pantallas estrechas */
+  const btnBase =
+    'inline-flex w-auto max-w-full shrink-0 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1.5 text-center text-[11px] font-medium leading-tight transition-colors sm:px-3.5 sm:py-2 sm:text-sm';
+
   return (
-    <div className="max-w-4xl space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div>
-          <Link to="/tax-settlements" className="text-sm text-primary-700 hover:text-primary-800 font-medium">
-            ← Listado
+    <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-6">
+      <header className="min-w-0 space-y-4 border-b border-slate-200/80 pb-4">
+        <div className="min-w-0 pr-1">
+          <Link
+            to="/tax-settlements"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-700 hover:text-primary-800"
+          >
+            <i className="fas fa-arrow-left text-xs opacity-80" aria-hidden />
+            Listado de liquidaciones
           </Link>
-          <h2 className="text-xl font-semibold text-slate-800 mt-2">Liquidación {row.number || `#${row.id}`}</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {row.company?.business_name} · {row.status === 'emitida' ? 'Emitida' : row.status === 'borrador' ? 'Borrador' : row.status}
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-800 sm:text-2xl break-words">
+            Liquidación {row.number || `#${row.id}`}
+          </h2>
+          <p className="mt-2 text-sm text-slate-600 sm:text-base break-words leading-relaxed">
+            {row.company ? (
+              <>
+                <span className="font-mono text-xs text-slate-600 sm:text-sm">{row.company.ruc}</span>
+                <span className="mx-1.5 text-slate-300">—</span>
+                <span className="font-medium text-slate-800">{row.company.business_name}</span>
+              </>
+            ) : (
+              <span className="text-slate-500">Sin datos de empresa</span>
+            )}
+            <span className="mx-2 text-slate-300">·</span>
+            <span className="text-slate-500">
+              {row.status === 'emitida' ? 'Emitida' : row.status === 'borrador' ? 'Borrador' : row.status}
+            </span>
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+
+        <nav
+          className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:gap-2"
+          aria-label="Acciones de la liquidación"
+        >
           {row.status === 'borrador' && canEmit ? (
             <button
               type="button"
               onClick={() => void emit()}
               disabled={emitting}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
+              className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50`}
             >
               {emitting ? <i className="fas fa-spinner fa-spin text-xs" /> : null}
               Emitir liquidación
@@ -145,42 +171,45 @@ const TaxSettlementDetail = () => {
           {row.status === 'emitida' ? (
             <Link
               to={`/payments/new?company_id=${row.company_id}&tax_settlement_id=${row.id}`}
-              className="inline-flex items-center justify-center px-4 py-2.5 rounded-full bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 shadow-sm"
+              className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 shadow-sm max-sm:max-w-[min(100%,14rem)]`}
             >
-              Registrar pago (desde liquidación)
+              <span className="sm:hidden">Pago desde liquidación</span>
+              <span className="hidden sm:inline">Registrar pago (desde liquidación)</span>
             </Link>
           ) : null}
           <Link
             to={`/payments/new?company_id=${row.company_id}`}
-            className="inline-flex items-center justify-center px-4 py-2.5 rounded-full border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
           >
             {row.status === 'emitida' ? 'Pago sin vínculo' : 'Registrar pago'}
           </Link>
           <Link
             to={`/comprobantes?tax_settlement_id=${row.id}`}
-            className="inline-flex items-center justify-center px-4 py-2.5 rounded-full border border-primary-200 bg-primary-50/80 text-sm font-medium text-primary-900 hover:bg-primary-50"
+            title="Comprobantes de esta liquidación"
+            className={`${btnBase} border-primary-200 bg-primary-50/90 text-primary-950 hover:bg-primary-50`}
           >
-            Comprobantes de esta liquidación
+            Comprobantes
           </Link>
           <Link
             to={`/documents/fiscal-receipts?company_id=${row.company_id}`}
-            className="inline-flex items-center justify-center px-4 py-2.5 rounded-full border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Conciliación — comprobantes pendientes"
+            className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
           >
-            Conciliación (pendientes)
+            Conciliación
           </Link>
           <button
             type="button"
             onClick={() => void downloadPdf()}
             disabled={exportingPdf}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50 shadow-sm"
+            className={`${btnBase} border-slate-700 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 shadow-sm`}
           >
-            <i className={`fas ${exportingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'} text-xs`} aria-hidden />
-            {exportingPdf ? 'Generando PDF…' : 'Descargar PDF (cliente)'}
+            <i className={`fas ${exportingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'} text-xs shrink-0`} aria-hidden />
+            {exportingPdf ? 'Generando PDF…' : 'PDF cliente'}
           </button>
-        </div>
-      </div>
+        </nav>
+      </header>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4 text-sm">
+      <div className="w-full min-w-0 bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-4 text-sm">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <span className="text-xs font-medium text-slate-500">Fecha emisión</span>
@@ -215,8 +244,9 @@ const TaxSettlementDetail = () => {
         ) : null}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+        <table className="min-w-full w-full text-sm">
           <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
             <tr>
               <th className="px-4 py-3 text-left">Tipo</th>
@@ -234,6 +264,7 @@ const TaxSettlementDetail = () => {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -296,3 +296,21 @@ func (ctrl *TukifacController) DiscardReceiptAPI(c fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"message": "Comprobante descartado"})
 }
+
+// DocumentSeriesAPI GET /api/document/series — series SUNAT factura (01) y boleta (03) desde Tukifac.
+func (ctrl *TukifacController) DocumentSeriesAPI(c fiber.Ctx) error {
+	list, err := ctrl.tukifacService.ListDocumentSeriesFacturaBoleta()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(list)
+}
+
+// SaleNoteSeriesAPI GET /api/sale-note/series — series de nota de venta desde Tukifac.
+func (ctrl *TukifacController) SaleNoteSeriesAPI(c fiber.Ctx) error {
+	list, err := ctrl.tukifacService.ListSaleNoteSeriesRemote()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(list)
+}

@@ -85,6 +85,8 @@ func Setup(app *fiber.App) {
 
 	// Tukifac sync
 	api.Get("/tukifac/documents/lists", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), tukifacCtrl.ListDocumentsAPI)
+	api.Get("/document/series", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), tukifacCtrl.DocumentSeriesAPI)
+	api.Get("/sale-note/series", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), tukifacCtrl.SaleNoteSeriesAPI)
 	api.Get("/tukifac/sale-note/lists", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), tukifacCtrl.ListSaleNotesAPI)
 	api.Post("/documents/sync-tukifac", tukifacCtrl.SyncDocumentsAPI)
 	api.Post("/tukifac/sale-note/sync", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), tukifacCtrl.SyncSaleNotesAPI)

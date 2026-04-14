@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Payment, Company } from '../types/dashboard';
@@ -150,21 +150,46 @@ const Payments = () => {
     }
   };
 
-  const handleFilterSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (companyId) next.set('company_id', companyId);
-      else next.delete('company_id');
-      if (type) next.set('type', type);
-      else next.delete('type');
-      next.set('date_from', dateFrom || currentMonthRange.from);
-      next.set('date_to', dateTo || currentMonthRange.to);
-      next.set('page', '1');
-      if (next.get('per_page') == null) next.set('per_page', String(initialPerPage));
-      return next;
-    });
-  };
+  const lastPaymentsFilterKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const filterKey = [companyId, type, dateFrom, dateTo].join('\t');
+    const prevFilterKey = lastPaymentsFilterKeyRef.current;
+    const filtersJustChanged = prevFilterKey !== null && prevFilterKey !== filterKey;
+
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (companyId) next.set('company_id', companyId);
+        else next.delete('company_id');
+        if (type) next.set('type', type);
+        else next.delete('type');
+        next.set('date_from', dateFrom || currentMonthRange.from);
+        next.set('date_to', dateTo || currentMonthRange.to);
+        if (filtersJustChanged) {
+          next.set('page', '1');
+        } else {
+          const p = prev.get('page');
+          next.set('page', p && /^[1-9]\d*$/.test(p) ? p : '1');
+        }
+        if (next.get('per_page') == null) next.set('per_page', String(initialPerPage));
+        if (next.toString() === prev.toString()) return prev;
+        return next;
+      },
+      { replace: true },
+    );
+
+    lastPaymentsFilterKeyRef.current = filterKey;
+  }, [
+    companyId,
+    type,
+    dateFrom,
+    dateTo,
+    currentMonthRange.from,
+    currentMonthRange.to,
+    initialPerPage,
+    setSearchParams,
+  ]);
 
   const handlePageChange = (nextPage: number) => {
     setSearchParams((prev) => {
@@ -247,7 +272,7 @@ const Payments = () => {
         ) : null}
       </div>
 
-      <form onSubmit={handleFilterSubmit} className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+      <div className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Empresa</label>
           <SearchableSelect
@@ -292,13 +317,7 @@ const Payments = () => {
             className="w-[160px] px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
           />
         </div>
-        <div className="pt-5">
-          <button type="submit"
-                  className="inline-flex items-center px-4 py-2 rounded-full bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">
-            <i className="fas fa-filter mr-2 text-xs"></i> Filtrar
-          </button>
-        </div>
-      </form>
+      </div>
 
       {error ? (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">

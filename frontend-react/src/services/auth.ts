@@ -1,3 +1,4 @@
+import { clearTukifacSeriesSessionCache } from '../constants/tukifacSeriesSessionKeys';
 import client from '../api/client';
 
 export interface AuthUser {
@@ -71,6 +72,8 @@ export const auth = {
       throw new Error('Respuesta inválida del servidor');
     }
 
+    clearTukifacSeriesSessionCache();
+
     try {
       window.sessionStorage.setItem(TOKEN_KEY, token);
       window.localStorage.removeItem(TOKEN_KEY);
@@ -117,6 +120,7 @@ export const auth = {
     try {
       await client.get('/logout');
     } finally {
+      clearTukifacSeriesSessionCache();
       try {
         window.sessionStorage.removeItem(TOKEN_KEY);
         window.sessionStorage.removeItem(USER_KEY);
@@ -133,6 +137,7 @@ export const auth = {
   },
 
   clear(): void {
+    clearTukifacSeriesSessionCache();
     try {
       window.sessionStorage.removeItem(TOKEN_KEY);
       window.sessionStorage.removeItem(USER_KEY);

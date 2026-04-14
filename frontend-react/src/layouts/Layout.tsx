@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { auth } from '../services/auth';
+import { ensureTukifacSeriesCached } from '../services/tukifacSeriesCache';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -39,6 +40,10 @@ const Layout = () => {
     { id: 'theme3', src: '/themes/theme3.jpg', label: 'Tema 3' },
     { id: 'theme4', src: '/themes/theme4.jpg', label: 'Tema 4' },
   ];
+
+  useEffect(() => {
+    void ensureTukifacSeriesCached().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     try {

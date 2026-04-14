@@ -5,12 +5,62 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
+	"miappfiber/config"
 	"miappfiber/database"
 	"miappfiber/models"
 )
+
+func tukifacItemTypeIDForNewItem() int {
+	if config.AppConfig == nil || config.AppConfig.TukifacDefaultItemTypeID <= 0 {
+		return 1
+	}
+	return config.AppConfig.TukifacDefaultItemTypeID
+}
+
+// Moneda para ítems creados en Tukifac (tabla `items` solo expone currency_type_id; no enviar currency_type_symbol: en algunas versiones se usa en WHERE y la columna no existe).
+func tukifacItemCurrencyPEN() map[string]interface{} {
+	return map[string]interface{}{
+		"currency_type_id": "PEN",
+	}
+}
+
+// tukifacUnidadMedidaFromDocument devuelve código SUNAT de unidad (ZZ servicio, NIU unidad, etc.) para líneas Tukifac.
+// - Si el producto (manual o sincronizado desde el módulo de productos) tiene unit_type_id, se usa tal cual (NIU, ZZ, …).
+// - Si no hay unidad guardada: servicio → ZZ; producto u otro → ZZ por defecto (operación habitual); NIU solo llega por catálogo explícito.
+// - Sin líneas con producto: ZZ (deudas / liquidaciones mayormente servicios).
+func tukifacUnidadMedidaFromDocument(d *models.Document) string {
+	if d == nil {
+		return "ZZ"
+	}
+	items := append([]models.DocumentItem(nil), d.Items...)
+	sort.Slice(items, func(i, j int) bool { return items[i].SortOrder < items[j].SortOrder })
+	for i := range items {
+		p := items[i].Product
+		if p == nil {
+			continue
+		}
+		if u := strings.TrimSpace(strings.ToUpper(p.UnitTypeID)); u != "" {
+			return u
+		}
+		kind := strings.TrimSpace(strings.ToLower(p.ProductKind))
+		if kind == "service" {
+			return "ZZ"
+		}
+		// product (u otro) sin unit_type_id en BD: no inventar NIU; predominio servicios / evitar líneas mal rotuladas
+		return "ZZ"
+	}
+	if len(items) > 0 {
+		return "ZZ"
+	}
+	if strings.TrimSpace(d.ServiceMonth) != "" {
+		return "ZZ"
+	}
+	return "ZZ"
+}
 
 // PaymentTukifacIssueInput emisión SUNAT desde un pago ya registrado (imputaciones = líneas del comprobante).
 type PaymentTukifacIssueInput struct {
@@ -81,7 +131,11 @@ func receptorMapFromCompany(c *models.Company) map[string]interface{} {
 	}
 }
 
-func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64, totalConIGV float64) map[string]interface{} {
+func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64, totalConIGV float64, unidadMedida string) map[string]interface{} {
+	um := strings.TrimSpace(strings.ToUpper(unidadMedida))
+	if um == "" {
+		um = "ZZ"
+	}
 	qty := cantidad
 	if qty < 0.0001 {
 		qty = 1
@@ -95,7 +149,7 @@ func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64,
 		"codigo_interno":               codigoInterno,
 		"descripcion":                  descripcion,
 		"nombre":                       descripcion,
-		"unidad_de_medida":             "NIU",
+		"unidad_de_medida":             um,
 		"codigo_tipo_item":             "01",
 		"codigo_producto_sunat":        "",
 		"codigo_producto_gsl":          "",
@@ -130,31 +184,48 @@ func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64,
 		"lots":                         []interface{}{},
 		"IdLoteSelected":               nil,
 		"esFusionado":                  false,
-		"item": map[string]interface{}{
-			"description":  descripcion,
-			"unit_type_id": "NIU",
-			"has_igv":      true,
-			"presentation": map[string]interface{}{"quantity_unit": 1},
-			"lots":         []interface{}{},
+		"item": mergeMaps(map[string]interface{}{
+			"description":    descripcion,
+			"unit_type_id":   um,
+			"item_type_id":   tukifacItemTypeIDForNewItem(),
+			"has_igv":        true,
+			"presentation":   map[string]interface{}{"quantity_unit": 1},
+			"lots":           []interface{}{},
 			"IdLoteSelected": nil,
-		},
+		}, tukifacItemCurrencyPEN()),
 	}
 }
 
-func buildSaleNoteItem(desc string, totalConIGV float64) map[string]interface{} {
+func mergeMaps(base map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(base)+len(extra))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
+func buildSaleNoteItem(desc string, totalConIGV float64, unidadMedida string) map[string]interface{} {
+	um := strings.TrimSpace(strings.ToUpper(unidadMedida))
+	if um == "" {
+		um = "ZZ"
+	}
 	totalItem := roundMoney2(totalConIGV)
 	base := roundMoney2(totalItem / 1.18)
 	igv := roundMoney2(totalItem - base)
 	pu := totalItem
 	uv := base
 	return map[string]interface{}{
-		"full_item": map[string]interface{}{
+		"full_item": mergeMaps(map[string]interface{}{
 			"description":                      desc,
-			"unit_type_id":                     "NIU",
+			"unit_type_id":                     um,
+			"item_type_id":                     tukifacItemTypeIDForNewItem(),
 			"sale_unit_price":                  pu,
 			"sale_affectation_igv_type_id":     "10",
 			"purchase_affectation_igv_type_id": "10",
-		},
+		}, tukifacItemCurrencyPEN()),
 		"quantity":                1,
 		"unit_value":              uv,
 		"price_type_id":           "01",
@@ -168,17 +239,37 @@ func buildSaleNoteItem(desc string, totalConIGV float64) map[string]interface{} 
 		"total_charge":            0,
 		"total_discount":          0,
 		"total":                   totalItem,
-		"item": map[string]interface{}{
-			"description":  desc,
-			"unit_type_id": "NIU",
-			"lots":         []interface{}{},
-			"presentation": map[string]interface{}{"quantity_unit": 1},
-			"IdLoteSelected": nil,
-		},
+		// No enviar objeto anidado `item` si ya va `full_item`: en Tukifac el merge con el modelo Item
+		// puede añadir `currency_type_symbol` al WHERE aunque la tabla `items` no tenga esa columna.
 	}
 }
 
-// IssueComprobanteFromPayment construye el JSON según docs del proyecto y lo envía a Tukifac (pago vinculado a liquidación emitida).
+// tukifacPaymentReferenceContext texto para OC/leyendas del comprobante; fromSettlement indica liquidación emitida.
+func tukifacPaymentReferenceContext(pay *models.Payment) (ref string, fromSettlement bool, err error) {
+	if pay.TaxSettlementID != nil && *pay.TaxSettlementID > 0 {
+		if pay.TaxSettlement == nil || pay.TaxSettlement.Status != models.TaxSettlementStatusIssued {
+			return "", false, errors.New("la liquidación debe estar emitida")
+		}
+		fromSettlement = true
+		if strings.TrimSpace(pay.TaxSettlement.Number) != "" {
+			return strings.TrimSpace(pay.TaxSettlement.Number), fromSettlement, nil
+		}
+		return fmt.Sprintf("LI-%d", *pay.TaxSettlementID), fromSettlement, nil
+	}
+	if pay.Type != "applied" || len(pay.Allocations) == 0 {
+		return "", false, errors.New("solo se puede emitir en Tukifac para pagos aplicados con imputación a deudas")
+	}
+	if len(pay.Allocations) == 1 {
+		r := strings.TrimSpace(documentLineDescription(pay.Allocations[0].Document))
+		if r == "" {
+			r = fmt.Sprintf("Documento #%d", pay.Allocations[0].DocumentID)
+		}
+		return r, false, nil
+	}
+	return fmt.Sprintf("Pago %d · %d deuda(s)", pay.ID, len(pay.Allocations)), false, nil
+}
+
+// IssueComprobanteFromPayment construye el JSON según docs y lo envía a Tukifac (liquidación emitida o pago aplicado a deuda(s) sin liquidación).
 func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentTukifacIssueInput) (*models.TukifacFiscalReceipt, []byte, error) {
 	kind := strings.ToLower(strings.TrimSpace(in.Kind))
 	if kind != "boleta" && kind != "factura" && kind != "sale_note" {
@@ -187,16 +278,15 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 
 	var pay models.Payment
 	if err := database.DB.
-		Preload("Allocations.Document").
+		Preload("Allocations.Document.Items.Product").
 		Preload("TaxSettlement").
 		First(&pay, paymentID).Error; err != nil {
 		return nil, nil, errors.New("pago no encontrado")
 	}
-	if pay.TaxSettlementID == nil || *pay.TaxSettlementID == 0 {
-		return nil, nil, errors.New("solo se puede emitir desde pagos vinculados a una liquidación")
-	}
-	if pay.TaxSettlement == nil || pay.TaxSettlement.Status != models.TaxSettlementStatusIssued {
-		return nil, nil, errors.New("la liquidación debe estar emitida")
+
+	settleRef, fromSettlement, err := tukifacPaymentReferenceContext(&pay)
+	if err != nil {
+		return nil, nil, err
 	}
 	if pay.Type != "applied" || len(pay.Allocations) == 0 {
 		return nil, nil, errors.New("el pago debe estar aplicado con imputaciones a deudas")
@@ -235,13 +325,6 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 	dateStr := issueDate.Format("2006-01-02")
 	timeStr := issueDate.Format("15:04:05")
 
-	settleRef := ""
-	if pay.TaxSettlement != nil && strings.TrimSpace(pay.TaxSettlement.Number) != "" {
-		settleRef = pay.TaxSettlement.Number
-	} else {
-		settleRef = fmt.Sprintf("LI-%d", *pay.TaxSettlementID)
-	}
-
 	if kind == "sale_note" {
 		if in.SaleNoteSeriesID == 0 {
 			return nil, nil, errors.New("indique sale_note_series_id (serie numérica en Tukifac)")
@@ -250,7 +333,8 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 		var totalVenta float64
 		for _, a := range pay.Allocations {
 			desc := documentLineDescription(a.Document)
-			items = append(items, buildSaleNoteItem(desc, a.Amount))
+			um := tukifacUnidadMedidaFromDocument(a.Document)
+			items = append(items, buildSaleNoteItem(desc, a.Amount, um))
 			totalVenta += roundMoney2(a.Amount)
 		}
 		totalVenta = roundMoney2(totalVenta)
@@ -326,7 +410,8 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 	for _, a := range pay.Allocations {
 		desc := documentLineDescription(a.Document)
 		cod := fmt.Sprintf("DEU-%d", a.DocumentID)
-		it := buildSUNATDocumentItem(cod, desc, 1, a.Amount)
+		um := tukifacUnidadMedidaFromDocument(a.Document)
+		it := buildSUNATDocumentItem(cod, desc, 1, a.Amount, um)
 		items = append(items, it)
 		t := roundMoney2(a.Amount)
 		b := roundMoney2(t / 1.18)
@@ -340,6 +425,11 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 	totVenta = roundMoney2(totVenta)
 	if math.Abs(totVenta-pay.Amount) > 0.03 {
 		return nil, nil, errors.New("inconsistencia en totales del comprobante")
+	}
+
+	terminos := fmt.Sprintf("Cobro aplicado a deuda(s). Ref.: %s.", settleRef)
+	if fromSettlement {
+		terminos = fmt.Sprintf("Honorarios según liquidación %s.", settleRef)
 	}
 
 	totales := map[string]interface{}{
@@ -418,7 +508,7 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 		"relacionados":         []interface{}{},
 		"hotel":                []interface{}{},
 		"transport":            []interface{}{},
-		"terminos_condiciones": fmt.Sprintf("Honorarios según liquidación %s.", settleRef),
+		"terminos_condiciones": terminos,
 	}
 
 	raw, err := json.Marshal(doc)

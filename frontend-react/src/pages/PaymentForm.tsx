@@ -6,6 +6,12 @@ import { documentsService } from '../services/documents';
 import { paymentsService, type PaymentTukifacIssuePayload, type PaymentUpsertInput } from '../services/payments';
 import { taxSettlementsService } from '../services/taxSettlements';
 import { auth } from '../services/auth';
+import {
+  ensureTukifacSeriesCached,
+  getCachedDocumentSeries,
+  getCachedSaleNoteSeries,
+  pickDefaultSeries,
+} from '../services/tukifacSeriesCache';
 import type { Company, Document } from '../types/dashboard';
 import SearchableSelect from '../components/SearchableSelect';
 import { resolveBackendUrl } from '../api/client';
@@ -45,13 +51,59 @@ function getTukifacErrorMessage(e: unknown): string {
   return 'Error al enviar el comprobante a Tukifac';
 }
 
+function newManualAllocKey(): string {
+  return `alloc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function truncateText(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * Etiqueta en selects de deuda: descripción, monto y estado (pendiente/parcial, etc.).
+ * No incluye número ni external_id (códigos); esos sí entran en searchText para buscar.
+ */
+function debtSelectLabel(d: Document): string {
+  const descRaw = (d.description ?? '').trim();
+  const desc = descRaw ? truncateText(descRaw, 80) : 'Sin descripción';
+  const amt = Number.isFinite(d.total_amount) ? d.total_amount.toFixed(2) : '0.00';
+  const status = (d.status ?? '').trim();
+  const vcto = d.due_date && d.due_date.length >= 10 ? d.due_date.slice(0, 10) : '';
+  const parts: string[] = [desc, `S/ ${amt}`];
+  if (status) parts.push(status);
+  if (vcto) parts.push(`vcto ${vcto}`);
+  return parts.join(' · ');
+}
+
+function debtSelectSearchText(d: Document): string {
+  return [d.number, d.external_id, d.description, d.type, d.status, d.due_date].filter(Boolean).join(' ');
+}
+
+type ManualAllocRow = { key: string; doc: string; amt: string };
+
+/** Tipo de pago inferido en altas: según FIFO, deuda única o líneas manuales con monto. */
+function derivePaymentType(
+  applyMode: 'single' | 'fifo' | 'manual',
+  documentId: string,
+  manualAlloc: ManualAllocRow[],
+): 'applied' | 'on_account' {
+  if (applyMode === 'fifo') return 'applied';
+  if (applyMode === 'single') {
+    const n = Number(documentId);
+    return Number.isFinite(n) && n > 0 ? 'applied' : 'on_account';
+  }
+  const lines = manualAlloc.filter((l) => l.doc.trim() && Number(l.amt) > 0);
+  return lines.length > 0 ? 'applied' : 'on_account';
+}
+
 const PaymentForm = () => {
   const navigate = useNavigate();
   const params = useParams();
   const [searchParams] = useSearchParams();
   const paymentId = params.id ? Number(params.id) : null;
   const isEdit = Boolean(paymentId);
-  const initialType = searchParams.get('type') ?? '';
   const taxSettlementIdFromUrl = searchParams.get('tax_settlement_id');
 
   const role = auth.getRole() ?? '';
@@ -78,13 +130,8 @@ const PaymentForm = () => {
 
   const [companyId, setCompanyId] = useState(searchParams.get('company_id') ?? '');
   const [documentId, setDocumentId] = useState(searchParams.get('document_id') ?? '');
-  const [paymentType, setPaymentType] = useState<'applied' | 'on_account'>(
-    initialType === 'applied' || initialType === 'on_account'
-      ? (initialType as 'applied' | 'on_account')
-      : searchParams.get('document_id')
-        ? 'applied'
-        : 'on_account',
-  );
+  /** Solo edición: tipo guardado en servidor (en altas se usa derivePaymentType). */
+  const [loadedPaymentType, setLoadedPaymentType] = useState<'applied' | 'on_account' | null>(null);
   const [date, setDate] = useState(() => (isEdit ? '' : peruvianToday));
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('');
@@ -92,27 +139,42 @@ const PaymentForm = () => {
   const [attachment, setAttachment] = useState('');
   const [notes, setNotes] = useState('');
   const [applyMode, setApplyMode] = useState<'single' | 'fifo' | 'manual'>('single');
-  const [manualAlloc, setManualAlloc] = useState<{ doc: string; amt: string }[]>([{ doc: '', amt: '' }]);
+  const [manualAlloc, setManualAlloc] = useState<ManualAllocRow[]>([{ key: newManualAllocKey(), doc: '', amt: '' }]);
   /** Pago vinculado a liquidación emitida (precarga imputaciones; se anula si cambia la empresa). */
   const [settlementLink, setSettlementLink] = useState<{ id: number; companyId: number; number: string } | null>(null);
   const [settlementLoadError, setSettlementLoadError] = useState('');
   const settlementLoadedRef = useRef(false);
   const lastSettlementParamRef = useRef<string | null>(null);
 
-  const [issueTukifac, setIssueTukifac] = useState(true);
-  const [tukifacKind, setTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('boleta');
+  const [tukifacKind, setTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
   const [tukifacSerie, setTukifacSerie] = useState('');
   const [tukifacSaleNoteSeriesId, setTukifacSaleNoteSeriesId] = useState('');
-  const [tukifacPayMethodId, setTukifacPayMethodId] = useState('01');
-  const [tukifacPayDest, setTukifacPayDest] = useState('cash');
-  const [tukifacPayRef, setTukifacPayRef] = useState('Caja');
+  const [seriesRefresh, setSeriesRefresh] = useState(0);
+
+  const effectivePaymentType: 'applied' | 'on_account' = isEdit
+    ? (loadedPaymentType ?? 'on_account')
+    : derivePaymentType(applyMode, documentId, manualAlloc);
+
+  /** Nuevo pago desde liquidación emitida: siempre se emite comprobante en Tukifac tras guardar el pago. */
+  const showComprobanteTukifac =
+    !isEdit && Boolean(settlementLink) && effectivePaymentType === 'applied' && canIssueTukifac;
+
+  const isFromTaxSettlement = Boolean((taxSettlementIdFromUrl ?? '').trim());
+  const hideCompanyField = isFromTaxSettlement && !isEdit;
+
+  const settlementCompanyDisplay = useMemo(() => {
+    const id = Number(companyId);
+    if (!Number.isFinite(id) || id <= 0) return '—';
+    const c = companies.find((x) => x.id === id);
+    return c?.business_name?.trim() || `ID ${id}`;
+  }, [companies, companyId]);
 
   const methodOptions = useMemo(() => {
     const base = [
       { value: 'Efectivo', label: 'Efectivo' },
       { value: 'Yape', label: 'Yape' },
       { value: 'Plin', label: 'Plin' },
-      { value: 'Tarjeta', label: 'Tarjeta' },
+      { value: 'Transferencia', label: 'Transferencia' },
     ];
 
     const hasCurrent = method.trim() && base.some((o) => o.value === method.trim());
@@ -122,6 +184,27 @@ const PaymentForm = () => {
       ...base,
     ];
   }, [method]);
+
+  const manualImputationSum = useMemo(
+    () =>
+      manualAlloc.reduce((s, l) => {
+        const a = Number(l.amt);
+        return s + (Number.isFinite(a) && a > 0 ? a : 0);
+      }, 0),
+    [manualAlloc],
+  );
+
+  const amountNumForSummary = useMemo(() => {
+    const n = Number(amount);
+    return Number.isFinite(n) ? n : 0;
+  }, [amount]);
+
+  const selectedDebtTotal = useMemo(() => {
+    if (applyMode !== 'single' || !documentId) return null;
+    const d = documents.find((x) => String(x.id) === documentId);
+    if (!d || !Number.isFinite(d.total_amount)) return null;
+    return d.total_amount;
+  }, [applyMode, documentId, documents]);
 
   const handleAttachmentFileChange = async (file: File | null) => {
     if (!file) return;
@@ -165,7 +248,9 @@ const PaymentForm = () => {
           }
           setCompanyId(String(pay.company_id ?? ''));
           setDocumentId(pay.document_id ? String(pay.document_id) : '');
-          setPaymentType(pay.type === 'applied' || pay.type === 'on_account' ? pay.type : pay.document_id ? 'applied' : 'on_account');
+          setLoadedPaymentType(
+            pay.type === 'applied' || pay.type === 'on_account' ? pay.type : pay.document_id ? 'applied' : 'on_account',
+          );
           setDate(toDateInput(pay.date));
           setAmount(Number.isFinite(pay.amount) ? pay.amount.toFixed(2) : '');
           setMethod(pay.method ?? '');
@@ -185,12 +270,12 @@ const PaymentForm = () => {
   }, [isEdit, paymentId]);
 
   useEffect(() => {
+    if (!isEdit) setLoadedPaymentType(null);
+  }, [isEdit]);
+
+  useEffect(() => {
     const companyIdNum = Number(companyId);
     if (!Number.isFinite(companyIdNum) || companyIdNum <= 0) {
-      setDocuments([]);
-      return;
-    }
-    if (paymentType !== 'applied') {
       setDocuments([]);
       return;
     }
@@ -206,13 +291,7 @@ const PaymentForm = () => {
     };
 
     run();
-  }, [companyId, paymentType]);
-
-  useEffect(() => {
-    if (paymentType === 'on_account' && documentId) {
-      setDocumentId('');
-    }
-  }, [documentId, paymentType]);
+  }, [companyId]);
 
   useEffect(() => {
     if (isEdit) return;
@@ -232,7 +311,6 @@ const PaymentForm = () => {
         if (cancelled) return;
         settlementLoadedRef.current = true;
         setCompanyId(String(sug.company_id));
-        setPaymentType('applied');
         setApplyMode('manual');
         if (sug.status === 'emitida') {
           setSettlementLink({
@@ -244,7 +322,13 @@ const PaymentForm = () => {
           setSettlementLink(null);
         }
         if (sug.lines.length > 0) {
-          setManualAlloc(sug.lines.map((l) => ({ doc: String(l.document_id), amt: l.amount.toFixed(2) })));
+          setManualAlloc(
+            sug.lines.map((l) => ({
+              key: newManualAllocKey(),
+              doc: String(l.document_id),
+              amt: l.amount.toFixed(2),
+            })),
+          );
           setAmount(sug.suggested_total.toFixed(2));
           setSettlementLoadError(
             sug.status !== 'emitida'
@@ -252,7 +336,7 @@ const PaymentForm = () => {
               : '',
           );
         } else {
-          setManualAlloc([{ doc: '', amt: '' }]);
+          setManualAlloc([{ key: newManualAllocKey(), doc: '', amt: '' }]);
           setAmount('');
           setSettlementLoadError(
             sug.status !== 'emitida'
@@ -282,6 +366,42 @@ const PaymentForm = () => {
     }
   }, [companyId, settlementLink]);
 
+  useEffect(() => {
+    if (!settlementLink || !canIssueTukifac || isEdit) return;
+    let cancelled = false;
+    void ensureTukifacSeriesCached()
+      .then(() => {
+        if (!cancelled) setSeriesRefresh((n) => n + 1);
+      })
+      .catch(() => {
+        if (!cancelled) setSeriesRefresh((n) => n + 1);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settlementLink, canIssueTukifac, isEdit]);
+
+  useEffect(() => {
+    if (!settlementLink || isEdit || !canIssueTukifac || effectivePaymentType !== 'applied') return;
+    if (tukifacKind === 'sale_note') {
+      const rows = getCachedSaleNoteSeries();
+      const d = pickDefaultSeries(rows);
+      setTukifacSaleNoteSeriesId((prev) => {
+        if (prev && rows.some((r) => String(r.id) === prev)) return prev;
+        return d ? String(d.id) : '';
+      });
+      return;
+    }
+    const sunat = tukifacKind === 'factura' ? '01' : '03';
+    const rows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
+    const d = pickDefaultSeries(rows);
+    setTukifacSerie((prev) => {
+      const ok = rows.some((r) => r.number === prev);
+      if (ok) return prev;
+      return d?.number ?? '';
+    });
+  }, [settlementLink, isEdit, canIssueTukifac, tukifacKind, seriesRefresh, effectivePaymentType]);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isEdit && editLocked) {
@@ -307,7 +427,16 @@ const PaymentForm = () => {
       return;
     }
 
-    if (paymentType === 'applied') {
+    if (
+      settlementLink &&
+      Number(companyId) === settlementLink.companyId &&
+      effectivePaymentType === 'on_account'
+    ) {
+      setError('Este pago está vinculado a una liquidación: debe imputar montos a las deudas (una deuda, FIFO o manual).');
+      return;
+    }
+
+    if (effectivePaymentType === 'applied') {
       if (applyMode === 'single') {
         if (!documentId || !Number.isFinite(documentIdNum) || documentIdNum <= 0) {
           setError('Seleccione la deuda o use FIFO / manual');
@@ -330,12 +459,24 @@ const PaymentForm = () => {
       }
     }
 
-    const tryTukifacAfterCreate =
-      !isEdit && issueTukifac && settlementLink && canIssueTukifac && paymentType === 'applied';
+    const tryTukifacAfterCreate = showComprobanteTukifac;
     if (tryTukifacAfterCreate && tukifacKind === 'sale_note') {
       const sid = Number(tukifacSaleNoteSeriesId);
+      const nvRows = getCachedSaleNoteSeries();
       if (!Number.isFinite(sid) || sid <= 0) {
-        setError('Para nota de venta indique el ID numérico de la serie en Tukifac.');
+        setError(
+          nvRows.length
+            ? 'Seleccione la serie de nota de venta.'
+            : 'No hay series de nota de venta disponibles en Tukifac para este usuario.',
+        );
+        return;
+      }
+    }
+    if (tryTukifacAfterCreate && (tukifacKind === 'boleta' || tukifacKind === 'factura')) {
+      const sunat = tukifacKind === 'factura' ? '01' : '03';
+      const fbRows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
+      if (fbRows.length > 0 && !tukifacSerie.trim()) {
+        setError('Seleccione la serie del comprobante (factura o boleta).');
         return;
       }
     }
@@ -343,7 +484,7 @@ const PaymentForm = () => {
     const payload: PaymentUpsertInput = {
       company_id: companyIdNum,
       amount: amountNum,
-      type: paymentType,
+      type: effectivePaymentType,
       date: toRFC3339FromDateInput(date),
       method: method.trim() ? method.trim() : undefined,
       reference: reference.trim() ? reference.trim() : undefined,
@@ -351,7 +492,7 @@ const PaymentForm = () => {
       notes: notes.trim() ? notes.trim() : undefined,
     };
 
-    if (paymentType === 'applied') {
+    if (effectivePaymentType === 'applied') {
       if (applyMode === 'fifo') {
         payload.allocation_mode = 'fifo';
       } else if (applyMode === 'manual') {
@@ -391,9 +532,10 @@ const PaymentForm = () => {
               serie_documento: tukifacSerie.trim() || undefined,
               sale_note_series_id:
                 tukifacKind === 'sale_note' ? Number(tukifacSaleNoteSeriesId) : undefined,
-              payment_method_type_id: tukifacPayMethodId.trim() || undefined,
-              payment_destination_id: tukifacPayDest.trim() || undefined,
-              payment_reference: tukifacPayRef.trim() || undefined,
+              /** SUNAT efectivo en Tukifac; el método real del pago queda guardado en el pago del sistema. */
+              payment_method_type_id: '01',
+              payment_destination_id: 'cash',
+              payment_reference: method.trim() || reference.trim() || 'Caja',
             };
             await paymentsService.issueTukifacFromPayment(created.id, tukBody);
             window.dispatchEvent(
@@ -425,7 +567,7 @@ const PaymentForm = () => {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="space-y-4 w-full min-w-0 max-w-full">
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-sm text-slate-600">
           <i className="fas fa-spinner fa-spin mr-2"></i> Cargando...
         </div>
@@ -434,19 +576,17 @@ const PaymentForm = () => {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">{isEdit ? 'Editar pago' : 'Nuevo pago'}</h2>
-          <p className="text-sm text-slate-500">
-            Pagos aplicados a deudas (una deuda, FIFO o imputación manual) o a cuenta. Si entra desde una liquidación emitida,
-            las imputaciones se precargan y puede añadir más líneas; opcionalmente se emite factura, boleta o nota de venta en Tukifac
-            con esas líneas como ítems.
-          </p>
+    <div className="space-y-3 sm:space-y-4 w-full min-w-0 max-w-full">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <div className="min-w-0 pr-1">
+          <h2 className="text-lg sm:text-xl font-semibold text-slate-800">{isEdit ? 'Editar pago' : 'Nuevo pago'}</h2>
+          {hideCompanyField ? (
+            <p className="text-sm font-medium text-slate-800 mt-2">{settlementCompanyDisplay}</p>
+          ) : null}
         </div>
         <Link
           to="/payments"
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          className="shrink-0 self-start sm:self-auto inline-flex items-center gap-2 px-3 py-2 sm:py-1.5 rounded-full border border-slate-300 text-xs sm:text-sm font-medium text-slate-700 hover:bg-slate-50 min-h-[44px] sm:min-h-0"
         >
           <i className="fas fa-arrow-left text-xs"></i> Volver al listado
         </Link>
@@ -454,15 +594,6 @@ const PaymentForm = () => {
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      ) : null}
-
-      {settlementLink ? (
-        <div className="rounded-xl border border-primary-200 bg-primary-50/90 px-4 py-3 text-sm text-primary-950">
-          <span className="font-semibold">Pago vinculado a liquidación</span>
-          {settlementLink.number ? ` (${settlementLink.number})` : ` (#${settlementLink.id})`}. Las deudas de la liquidación con
-          saldo se cargaron en modo manual: puede ajustar montos o usar «+ Añadir línea» para imputar a otras deudas. Si cambia de
-          empresa, se quita el vínculo.
-        </div>
       ) : null}
 
       {settlementLoadError ? (
@@ -474,57 +605,133 @@ const PaymentForm = () => {
           Este pago está aplicado a una deuda. Puedes eliminarlo desde el listado de pagos.
         </div>
       ) : (
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label htmlFor="company_id" className="block text-sm font-medium text-slate-700 mb-1">
-              Empresa
-            </label>
-            <SearchableSelect
-              id="company_id"
-              name="company_id"
-              required
-              value={companyId}
-              onChange={setCompanyId}
-              placeholder="Selecciona una empresa…"
-              searchPlaceholder="Buscar empresa..."
-              options={companies.map((c) => ({ value: String(c.id), label: c.business_name }))}
-            />
-          </div>
-          <div>
-            <label htmlFor="type" className="block text-sm font-medium text-slate-700 mb-1">
-              Tipo
-            </label>
-            <SearchableSelect
-              id="type"
-              name="type"
-              value={paymentType}
-              onChange={(v) => setPaymentType(v as 'applied' | 'on_account')}
-              options={[
-                { value: 'applied', label: 'Aplicado a deuda' },
-                { value: 'on_account', label: 'Pago a cuenta' },
-              ]}
-            />
-          </div>
-          {paymentType === 'applied' ? (
-            <div className="md:col-span-3 space-y-3">
-              <span className="block text-sm font-medium text-slate-700">Imputación del pago</span>
-              <div className="flex flex-wrap gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={applyMode === 'single'} onChange={() => setApplyMode('single')} />
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 sm:gap-5">
+        {showComprobanteTukifac ? (
+          <section className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-3 py-4 sm:p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-3 gap-x-3 sm:gap-x-4 items-start">
+                <div className="min-w-0">
+                  <label htmlFor="tukifac_kind" className="block text-sm font-medium text-slate-700 mb-1">
+                    Tipo de comprobante
+                  </label>
+                  <select
+                    id="tukifac_kind"
+                    value={tukifacKind}
+                    onChange={(ev) => setTukifacKind(ev.target.value as 'boleta' | 'factura' | 'sale_note')}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                  >
+                    <option value="sale_note">Nota de venta</option>
+                    <option value="boleta">Boleta</option>
+                    <option value="factura">Factura</option>
+                  </select>
+                </div>
+                {tukifacKind === 'sale_note' ? (
+                  <div className="min-w-0">
+                    <label htmlFor="tukifac_nv_series" className="block text-sm font-medium text-slate-700 mb-1">
+                      Serie
+                    </label>
+                    <select
+                      id="tukifac_nv_series"
+                      value={tukifacSaleNoteSeriesId}
+                      onChange={(ev) => setTukifacSaleNoteSeriesId(ev.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    >
+                      <option value="">Seleccione…</option>
+                      {getCachedSaleNoteSeries().map((r) => (
+                        <option key={r.id} value={String(r.id)}>
+                          {r.number}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="min-w-0">
+                    <label htmlFor="tukifac_serie" className="block text-sm font-medium text-slate-700 mb-1">
+                      Serie
+                    </label>
+                    <select
+                      id="tukifac_serie"
+                      value={tukifacSerie}
+                      onChange={(ev) => setTukifacSerie(ev.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    >
+                      <option value="">
+                        {getCachedDocumentSeries().filter(
+                          (r) => (r.document_type_id ?? '').trim() === (tukifacKind === 'factura' ? '01' : '03'),
+                        ).length
+                          ? 'Seleccione…'
+                          : 'Sin series en caché (Tukifac)'}
+                      </option>
+                      {getCachedDocumentSeries()
+                        .filter((r) => (r.document_type_id ?? '').trim() === (tukifacKind === 'factura' ? '01' : '03'))
+                        .map((r) => (
+                          <option key={r.id} value={r.number}>
+                            {r.number}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">El correlativo lo asigna Tukifac.</p>
+                  </div>
+                )}
+                <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                  <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">
+                    Fecha
+                  </label>
+                  <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    value={date}
+                    onChange={(ev) => setDate(ev.target.value)}
+                    className="w-full max-w-full min-w-0 px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {!hideCompanyField ? (
+          <section className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-3 py-4 sm:p-5 max-w-xl">
+              <SearchableSelect
+                id="company_id"
+                name="company_id"
+                required
+                value={companyId}
+                onChange={setCompanyId}
+                placeholder="Selecciona una empresa…"
+                searchPlaceholder="Buscar empresa..."
+                options={companies.map((c) => ({ value: String(c.id), label: c.business_name }))}
+              />
+            </div>
+          </section>
+        ) : null}
+
+        <div className="flex flex-col gap-3 sm:gap-4 lg:grid lg:grid-cols-12 lg:gap-6 lg:items-stretch">
+          <section className="lg:col-span-6 rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-visible flex flex-col min-w-0">
+            <div className="px-3 py-4 sm:p-5 space-y-3 sm:space-y-4 flex-1 flex flex-col">
+              <div className="flex flex-wrap gap-x-3 gap-y-2 text-sm">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input type="radio" className="text-primary-600" checked={applyMode === 'single'} onChange={() => setApplyMode('single')} />
                   Una deuda
                 </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={applyMode === 'fifo'} onChange={() => setApplyMode('fifo')} />
-                  FIFO (más antiguo primero)
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input type="radio" className="text-primary-600" checked={applyMode === 'fifo'} onChange={() => setApplyMode('fifo')} />
+                  FIFO
                 </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={applyMode === 'manual'} onChange={() => setApplyMode('manual')} />
-                  Manual (varias deudas)
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input type="radio" className="text-primary-600" checked={applyMode === 'manual'} onChange={() => setApplyMode('manual')} />
+                  Manual
                 </label>
               </div>
+              {applyMode === 'fifo' ? (
+                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                  Se aplicará el monto pagado a las deudas más antiguas hasta agotar el importe.
+                </p>
+              ) : null}
               {applyMode === 'single' ? (
-                <div>
+                <div className="min-w-0">
                   <label htmlFor="document_id" className="block text-sm font-medium text-slate-700 mb-1">
                     Deuda
                   </label>
@@ -540,10 +747,8 @@ const PaymentForm = () => {
                       { value: '', label: 'Selecciona una deuda…' },
                       ...documents.map((d) => ({
                         value: String(d.id),
-                        label: `${d.number} (${Number.isFinite(d.total_amount) ? d.total_amount.toFixed(2) : '0.00'}) ${d.status}${
-                          d.due_date ? ` - vcto ${d.due_date.slice(0, 10)}` : ''
-                        }`,
-                        searchText: [d.number, d.status, d.due_date ? d.due_date.slice(0, 10) : ''].filter(Boolean).join(' '),
+                        label: debtSelectLabel(d),
+                        searchText: debtSelectSearchText(d),
                       })),
                     ]}
                   />
@@ -552,7 +757,11 @@ const PaymentForm = () => {
               {applyMode === 'manual' ? (
                 <div className="space-y-2">
                   {manualAlloc.map((row, idx) => (
-                    <div key={idx} className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div
+                      key={row.key}
+                      className="grid grid-cols-[1fr_2.75rem] gap-x-2 gap-y-2 items-end md:grid-cols-[minmax(0,1fr)_7.5rem_auto]"
+                    >
+                      <div className="col-span-2 min-w-0 md:col-span-1">
                       <SearchableSelect
                         value={row.doc}
                         onChange={(v) => {
@@ -565,10 +774,12 @@ const PaymentForm = () => {
                           { value: '', label: '—' },
                           ...documents.map((d) => ({
                             value: String(d.id),
-                            label: `${d.number} (${d.total_amount.toFixed(2)})`,
+                            label: debtSelectLabel(d),
+                            searchText: debtSelectSearchText(d),
                           })),
                         ]}
                       />
+                      </div>
                       <input
                         type="number"
                         step="0.01"
@@ -579,257 +790,218 @@ const PaymentForm = () => {
                           n[idx] = { ...n[idx], amt: ev.target.value };
                           setManualAlloc(n);
                         }}
-                        className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                        className="w-full min-w-0 px-2 py-2.5 md:py-2 rounded-lg border border-slate-300 text-sm text-right tabular-nums"
                       />
+                      <button
+                        type="button"
+                        title="Quitar línea"
+                        aria-label="Quitar línea de imputación"
+                        disabled={manualAlloc.length <= 1}
+                        onClick={() => {
+                          if (manualAlloc.length <= 1) return;
+                          setManualAlloc(manualAlloc.filter((_, i) => i !== idx));
+                        }}
+                        className="inline-flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
+                      >
+                        <i className="fas fa-times text-sm" aria-hidden />
+                      </button>
                     </div>
                   ))}
                   <button
                     type="button"
-                    className="text-xs text-primary-700"
-                    onClick={() => setManualAlloc([...manualAlloc, { doc: '', amt: '' }])}
+                    className="text-xs font-medium text-primary-700 hover:text-primary-800"
+                    onClick={() => setManualAlloc([...manualAlloc, { key: newManualAllocKey(), doc: '', amt: '' }])}
                   >
-                    + Línea
+                    + Añadir línea
                   </button>
                 </div>
               ) : null}
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Deuda</label>
-              <p className="text-sm text-slate-400 py-2">No aplica para pagos a cuenta</p>
-            </div>
-          )}
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">
-              Fecha
-            </label>
-            <input
-              type="date"
-              id="date"
-              name="date"
-              value={date}
-              onChange={(ev) => setDate(ev.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            />
-          </div>
-          <div>
-            <label htmlFor="amount" className="block text-sm font-medium text-slate-700 mb-1">
-              Monto
-            </label>
-            <div className="flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500">
-              <span className="px-3 text-slate-500 text-sm">$</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                id="amount"
-                name="amount"
-                required
-                value={amount}
-                onChange={(ev) => setAmount(ev.target.value)}
-                className="w-full px-2 py-2.5 rounded-r-lg outline-none text-sm"
-              />
-            </div>
-          </div>
-          <div>
-            <label htmlFor="method" className="block text-sm font-medium text-slate-700 mb-1">
-              Método
-            </label>
-            <SearchableSelect
-              id="method"
-              name="method"
-              value={method}
-              onChange={setMethod}
-              placeholder="Selecciona…"
-              options={methodOptions}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="reference" className="block text-sm font-medium text-slate-700 mb-1">
-              Referencia
-            </label>
-            <input
-              type="text"
-              id="reference"
-              name="reference"
-              value={reference}
-              onChange={(ev) => setReference(ev.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-              placeholder="N° operación bancaria, recibo, etc."
-            />
-          </div>
-          <div>
-            <label htmlFor="attachment" className="block text-sm font-medium text-slate-700 mb-1">
-              Comprobante (imagen o PDF)
-            </label>
-            <div className="space-y-2">
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                disabled={uploading || saving || !canUpsert}
-                onChange={(ev) => handleAttachmentFileChange(ev.target.files?.[0] ?? null)}
-                className="w-full text-sm text-slate-700 file:mr-4 file:rounded-full file:border-0 file:bg-primary-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
-              />
-              <input type="hidden" id="attachment" name="attachment" value={attachment} />
-              {uploading ? (
-                <div className="text-xs text-slate-500">
-                  <i className="fas fa-spinner fa-spin mr-2"></i> Subiendo comprobante...
+              {!isEdit && effectivePaymentType === 'applied' ? (
+                <div className="mt-auto pt-3 border-t border-slate-200">
+                  <dl className="space-y-2 text-sm">
+                    {applyMode === 'manual' ? (
+                      <>
+                        <div className="flex flex-wrap justify-between gap-2 py-1.5 border-b border-slate-100">
+                          <dt className="text-slate-600">Suma de líneas</dt>
+                          <dd className="font-semibold tabular-nums text-slate-900">S/ {manualImputationSum.toFixed(2)}</dd>
+                        </div>
+                        <div className="flex flex-wrap justify-between gap-2 py-1.5 border-b border-slate-100">
+                          <dt className="text-slate-600">Monto del pago</dt>
+                          <dd className="font-semibold tabular-nums text-slate-900">S/ {amountNumForSummary.toFixed(2)}</dd>
+                        </div>
+                        {Math.abs(manualImputationSum - amountNumForSummary) > 0.02 ? (
+                          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200/80 rounded-lg px-3 py-2">
+                            Ajuste las líneas o el monto del pago para que ambos importes coincidan antes de guardar.
+                          </p>
+                        ) : manualImputationSum > 0 ? (
+                          <p className="text-xs text-emerald-800">Importes alineados.</p>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {applyMode === 'single' && selectedDebtTotal != null ? (
+                      <div className="flex flex-wrap justify-between gap-2 py-1.5 border-b border-slate-100">
+                        <dt className="text-slate-600">Total deuda seleccionada</dt>
+                        <dd className="font-semibold tabular-nums text-slate-900">S/ {selectedDebtTotal.toFixed(2)}</dd>
+                      </div>
+                    ) : null}
+                    {applyMode === 'single' ? (
+                      <div className="flex flex-wrap justify-between gap-2 py-1.5 border-b border-slate-100">
+                        <dt className="text-slate-600">Este pago</dt>
+                        <dd className="font-semibold tabular-nums text-slate-900">S/ {amountNumForSummary.toFixed(2)}</dd>
+                      </div>
+                    ) : null}
+                    {applyMode === 'fifo' ? (
+                      <div className="flex flex-wrap justify-between gap-2 py-1.5">
+                        <dt className="text-slate-600">Monto a distribuir (FIFO)</dt>
+                        <dd className="font-semibold tabular-nums text-slate-900">S/ {amountNumForSummary.toFixed(2)}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
                 </div>
               ) : null}
-              {attachment ? (
-                <a
-                  href={resolveBackendUrl(attachment)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center text-xs font-medium text-primary-700 hover:text-primary-800"
-                >
-                  <i className="fas fa-paperclip mr-2"></i> Ver comprobante
-                </a>
+            </div>
+          </section>
+
+          <section className="lg:col-span-6 rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-visible flex flex-col min-w-0">
+            <div className="px-3 py-4 sm:p-5 space-y-3 sm:space-y-4 flex-1 flex flex-col">
+              {!showComprobanteTukifac ? (
+                <div>
+                  <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">
+                    Fecha del pago
+                  </label>
+                  <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    value={date}
+                    onChange={(ev) => setDate(ev.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                  />
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-3 gap-x-3 sm:gap-x-4">
+                <div className="min-w-0">
+                  <label htmlFor="amount" className="block text-sm font-medium text-slate-700 mb-1">
+                    Monto pagado
+                  </label>
+                  <div className="flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500">
+                    <span className="px-3 text-slate-500 text-sm shrink-0">S/</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      id="amount"
+                      name="amount"
+                      required
+                      value={amount}
+                      onChange={(ev) => setAmount(ev.target.value)}
+                      className="w-full min-w-0 px-2 py-2.5 rounded-r-lg outline-none text-sm tabular-nums"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
+                    En manual, la suma de líneas debe coincidir con este importe.
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor="method" className="block text-sm font-medium text-slate-700 mb-1">
+                    Método
+                  </label>
+                  <SearchableSelect
+                    id="method"
+                    name="method"
+                    value={method}
+                    onChange={setMethod}
+                    placeholder="Selecciona…"
+                    options={methodOptions}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor="reference" className="block text-sm font-medium text-slate-700 mb-1">
+                    Referencia
+                  </label>
+                  <input
+                    type="text"
+                    id="reference"
+                    name="reference"
+                    value={reference}
+                    onChange={(ev) => setReference(ev.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    placeholder="Operación, recibo…"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 mt-0.5 border-t border-slate-100">
+                <label htmlFor="attachment" className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Comprobante del pago (imagen o PDF)
+                </label>
+                <div className="space-y-2">
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    disabled={uploading || saving || !canUpsert}
+                    onChange={(ev) => handleAttachmentFileChange(ev.target.files?.[0] ?? null)}
+                    className="w-full min-w-0 text-sm text-slate-700 file:mr-2 sm:file:mr-4 file:rounded-full file:border-0 file:bg-primary-50 file:px-3 file:py-2.5 sm:file:px-4 sm:file:py-2 file:text-xs sm:file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
+                  />
+                  <input type="hidden" id="attachment" name="attachment" value={attachment} />
+                  {uploading ? (
+                    <div className="text-xs text-slate-500">
+                      <i className="fas fa-spinner fa-spin mr-2"></i> Subiendo…
+                    </div>
+                  ) : null}
+                  {attachment ? (
+                    <a
+                      href={resolveBackendUrl(attachment)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center text-xs font-medium text-primary-700 hover:text-primary-800"
+                    >
+                      <i className="fas fa-paperclip mr-2"></i> Ver adjunto
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+
+              {!isEdit && effectivePaymentType === 'on_account' ? (
+                <div className="mt-auto pt-3 border-t border-slate-200">
+                  <div className="flex justify-between gap-2 text-sm py-1.5 rounded-lg bg-slate-50 px-3 border border-slate-100">
+                    <span className="text-slate-600">Anticipo / a cuenta</span>
+                    <span className="font-semibold tabular-nums">S/ {amountNumForSummary.toFixed(2)}</span>
+                  </div>
+                </div>
               ) : null}
             </div>
-          </div>
+          </section>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="notes" className="block text-sm font-medium text-slate-700 mb-1">
+        <section className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-3 py-4 sm:p-5">
+            <label htmlFor="notes" className="sr-only">
               Notas
             </label>
             <textarea
               id="notes"
               name="notes"
-              rows={2}
+              rows={3}
               value={notes}
               onChange={(ev) => setNotes(ev.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none min-h-[5.5rem]"
+              placeholder="Notas sobre el pago…"
             />
           </div>
-        </div>
+        </section>
 
-        {!isEdit && settlementLink && paymentType === 'applied' && canIssueTukifac ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4 space-y-3 text-sm">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-1 rounded border-slate-300"
-                checked={issueTukifac}
-                onChange={(ev) => setIssueTukifac(ev.target.checked)}
-              />
-              <span>
-                <span className="font-semibold text-slate-800">Emitir comprobante en Tukifac</span>
-                <span className="block text-slate-600 mt-0.5">
-                  Los ítems salen de las imputaciones de este pago (deudas de la liquidación y líneas extra que agregue). No hace falta
-                  pegar JSON.
-                </span>
-              </span>
-            </label>
-            {issueTukifac ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 pl-0 md:pl-7">
-                <div>
-                  <label htmlFor="tukifac_kind" className="block text-xs font-medium text-slate-600 mb-1">
-                    Tipo de comprobante
-                  </label>
-                  <select
-                    id="tukifac_kind"
-                    value={tukifacKind}
-                    onChange={(ev) => setTukifacKind(ev.target.value as 'boleta' | 'factura' | 'sale_note')}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    <option value="boleta">Boleta (03)</option>
-                    <option value="factura">Factura (01)</option>
-                    <option value="sale_note">Nota de venta</option>
-                  </select>
-                </div>
-                {tukifacKind === 'sale_note' ? (
-                  <div>
-                    <label htmlFor="tukifac_nv_series" className="block text-xs font-medium text-slate-600 mb-1">
-                      ID de serie NV en Tukifac
-                    </label>
-                    <input
-                      id="tukifac_nv_series"
-                      type="number"
-                      min={1}
-                      placeholder="Ej. 1"
-                      value={tukifacSaleNoteSeriesId}
-                      onChange={(ev) => setTukifacSaleNoteSeriesId(ev.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label htmlFor="tukifac_serie" className="block text-xs font-medium text-slate-600 mb-1">
-                      Serie SUNAT (opcional)
-                    </label>
-                    <input
-                      id="tukifac_serie"
-                      type="text"
-                      placeholder={tukifacKind === 'factura' ? 'F001' : 'B001'}
-                      value={tukifacSerie}
-                      onChange={(ev) => setTukifacSerie(ev.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label htmlFor="tukifac_pay_method" className="block text-xs font-medium text-slate-600 mb-1">
-                    Método de pago (Tukifac)
-                  </label>
-                  <input
-                    id="tukifac_pay_method"
-                    type="text"
-                    value={tukifacPayMethodId}
-                    onChange={(ev) => setTukifacPayMethodId(ev.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    placeholder="01"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="tukifac_pay_dest" className="block text-xs font-medium text-slate-600 mb-1">
-                    Destino del pago
-                  </label>
-                  <input
-                    id="tukifac_pay_dest"
-                    type="text"
-                    value={tukifacPayDest}
-                    onChange={(ev) => setTukifacPayDest(ev.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    placeholder="cash"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label htmlFor="tukifac_pay_ref" className="block text-xs font-medium text-slate-600 mb-1">
-                    Referencia de pago (Tukifac)
-                  </label>
-                  <input
-                    id="tukifac_pay_ref"
-                    type="text"
-                    value={tukifacPayRef}
-                    onChange={(ev) => setTukifacPayRef(ev.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    placeholder="Caja"
-                  />
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="pt-2">
+        <footer className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 pt-4 border-t border-slate-200">
           <button
             type="submit"
             disabled={saving || uploading || !canUpsert}
-            className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 disabled:opacity-60"
+            className="inline-flex w-full sm:w-auto items-center justify-center px-6 py-3 sm:py-2.5 min-h-[48px] sm:min-h-0 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 disabled:opacity-60"
           >
             <i className="fas fa-save mr-2 text-xs"></i>
             {saving ? 'Guardando...' : uploading ? 'Subiendo...' : isEdit ? 'Guardar cambios' : 'Registrar pago'}
           </button>
-        </div>
+        </footer>
       </form>
       )}
     </div>

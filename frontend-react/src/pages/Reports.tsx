@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { reportsService, type FinancialCompanyRow, type FinancialReportQuery } from '../services/reports';
 import { companiesService } from '../services/companies';
@@ -62,6 +62,7 @@ const Reports = () => {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterMinOverdue, setFilterMinOverdue] = useState('');
   const [appliedQuery, setAppliedQuery] = useState<FinancialReportQuery>({});
+  const financialInvalidDateRangeWarned = useRef(false);
 
   const reportDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -75,14 +76,14 @@ const Reports = () => {
     [companyOptions],
   );
 
-  const buildQueryFromForm = (): FinancialReportQuery => {
+  const buildQueryFromForm = useCallback((): FinancialReportQuery => {
     const q: FinancialReportQuery = {};
     if (filterDateFrom.trim()) q.date_from = filterDateFrom.trim();
     if (filterDateTo.trim()) q.date_to = filterDateTo.trim();
     if (filterCompanyId.trim()) q.company_id = filterCompanyId.trim();
     if (filterMinOverdue.trim()) q.min_overdue_months = filterMinOverdue.trim();
     return q;
-  };
+  }, [filterCompanyId, filterDateFrom, filterDateTo, filterMinOverdue]);
 
   const fetchReport = useCallback(async (query: FinancialReportQuery) => {
     try {
@@ -115,25 +116,28 @@ const Reports = () => {
     void fetchReport(appliedQuery);
   }, [appliedQuery, fetchReport]);
 
-  const handleFilterSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  useEffect(() => {
     if (filterDateFrom && filterDateTo && filterDateFrom > filterDateTo) {
-      window.dispatchEvent(
-        new CustomEvent('miweb:toast', {
-          detail: { type: 'error', message: 'La fecha desde no puede ser mayor que la fecha hasta.' },
-        }),
-      );
+      if (!financialInvalidDateRangeWarned.current) {
+        financialInvalidDateRangeWarned.current = true;
+        window.dispatchEvent(
+          new CustomEvent('miweb:toast', {
+            detail: { type: 'error', message: 'La fecha desde no puede ser mayor que la fecha hasta.' },
+          }),
+        );
+      }
       return;
     }
-    setAppliedQuery(buildQueryFromForm());
-  };
+    financialInvalidDateRangeWarned.current = false;
+    const next = buildQueryFromForm();
+    setAppliedQuery((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+  }, [buildQueryFromForm]);
 
   const handleResetFilters = () => {
     setFilterCompanyId('');
     setFilterDateFrom('');
     setFilterDateTo('');
     setFilterMinOverdue('');
-    setAppliedQuery({});
   };
 
   const formatMoney = (value: number) => `$ ${Number(value ?? 0).toFixed(2)}`;
@@ -420,10 +424,7 @@ const Reports = () => {
         </div>
       </div>
 
-      <form
-        onSubmit={handleFilterSubmit}
-        className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-4"
-      >
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
           <div>
             <label htmlFor="fin-date-from" className="block text-xs font-medium text-slate-500 mb-1">
@@ -483,14 +484,6 @@ const Reports = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 disabled:opacity-60"
-          >
-            <i className="fas fa-filter text-xs"></i>
-            Aplicar filtros
-          </button>
-          <button
             type="button"
             onClick={handleResetFilters}
             disabled={loading}
@@ -499,7 +492,7 @@ const Reports = () => {
             Limpiar
           </button>
         </div>
-      </form>
+      </div>
 
       {error ? (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">

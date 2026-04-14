@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -19,6 +20,8 @@ type Config struct {
 	TukifacAPIToken          string
 	TukifacPostDocumentsPath string
 	TukifacPostSaleNotePath  string
+	// TukifacDefaultItemTypeID: FK a item_types al crear ítems desde líneas (nota de venta / documentos). Por defecto 1.
+	TukifacDefaultItemTypeID int
 }
 
 var AppConfig *Config
@@ -41,8 +44,18 @@ func Load() error {
 		TukifacAPIToken:          getEnv("TUKIFAC_API_TOKEN", ""),
 		TukifacPostDocumentsPath: getEnv("TUKIFAC_POST_DOCUMENTS_PATH", "/api/documents"),
 		TukifacPostSaleNotePath:  getEnv("TUKIFAC_POST_SALE_NOTE_PATH", "/api/sale-note"),
+		TukifacDefaultItemTypeID: getEnvInt("TUKIFAC_DEFAULT_ITEM_TYPE_ID", 1),
 	}
 	return nil
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultVal
 }
 
 func getEnv(key, defaultVal string) string {

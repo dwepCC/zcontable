@@ -70,7 +70,7 @@ const FiscalReceipts = () => {
       { value: 'Efectivo', label: 'Efectivo' },
       { value: 'Yape', label: 'Yape' },
       { value: 'Plin', label: 'Plin' },
-      { value: 'Tarjeta', label: 'Tarjeta' },
+      { value: 'Transferencia', label: 'Transferencia' },
       { value: 'Transferencia', label: 'Transferencia' },
     ];
     const hasCurrent = payMethod.trim() && base.some((o) => o.value === payMethod.trim());

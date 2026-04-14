@@ -564,6 +564,88 @@ func (s *TukifacService) DiscardFiscalReceipt(receiptID uint) error {
 	return database.DB.Save(&rec).Error
 }
 
+// TukifacSeriesItem refleja filas de series en Tukifac (document / sale-note).
+type TukifacSeriesItem struct {
+	ID                uint   `json:"id"`
+	DocumentTypeID    string `json:"document_type_id"`
+	Number            string `json:"number"`
+	IsDefault         bool   `json:"is_default"`
+	EstablishmentID   uint   `json:"establishment_id"`
+}
+
+func (s *TukifacService) fetchTukifacSimpleGET(apiPath string) ([]byte, error) {
+	baseURL, token, err := s.getAPIConfig()
+	if err != nil {
+		return nil, err
+	}
+	u := buildTukifacURL(baseURL, apiPath)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", normalizeBearerToken(token))
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("respuesta no exitosa de Tukifac: %s", resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+func decodeTukifacSeriesList(body []byte) ([]TukifacSeriesItem, error) {
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		return nil, errors.New("respuesta vacía de Tukifac (series)")
+	}
+	var arr []TukifacSeriesItem
+	if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+		return arr, nil
+	}
+	var wrap struct {
+		Data []TukifacSeriesItem `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrap); err != nil {
+		return nil, err
+	}
+	return wrap.Data, nil
+}
+
+// ListDocumentSeriesFacturaBoleta obtiene series SUNAT solo para factura (01) y boleta (03).
+func (s *TukifacService) ListDocumentSeriesFacturaBoleta() ([]TukifacSeriesItem, error) {
+	body, err := s.fetchTukifacSimpleGET("/api/document/series")
+	if err != nil {
+		return nil, err
+	}
+	items, err := decodeTukifacSeriesList(body)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TukifacSeriesItem, 0, len(items))
+	for _, it := range items {
+		t := strings.TrimSpace(it.DocumentTypeID)
+		if t == "01" || t == "03" {
+			out = append(out, it)
+		}
+	}
+	return out, nil
+}
+
+// ListSaleNoteSeriesRemote lista series de nota de venta desde Tukifac.
+func (s *TukifacService) ListSaleNoteSeriesRemote() ([]TukifacSeriesItem, error) {
+	body, err := s.fetchTukifacSimpleGET("/api/sale-note/series")
+	if err != nil {
+		return nil, err
+	}
+	return decodeTukifacSeriesList(body)
+}
+
 func (s *TukifacService) generateUniqueCompanyCode(base string) string {
 	code := strings.TrimSpace(base)
 	if code == "" {
