@@ -112,4 +112,45 @@ export const companiesService = {
     const res = await client.post<RucValidationResult>('/companies/validate-ruc', { ruc });
     return res.data;
   },
+
+  /** Descarga plantilla Excel (.xlsx) para importación masiva. */
+  async downloadImportTemplate(): Promise<void> {
+    const res = await client.get<Blob>('/companies/import/template', { responseType: 'blob' });
+    const blob = res.data as Blob;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla_importacion_empresas.xlsx';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  },
+
+  /** Valida un .xlsx sin guardar (dry_run). */
+  async importCompaniesValidate(file: File): Promise<{
+    ok: boolean;
+    row_count: number;
+    errors: Array<{ row: number; message: string }>;
+  }> {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await client.post<{
+      ok: boolean;
+      row_count: number;
+      errors: Array<{ row: number; message: string }>;
+    }>('/companies/import', form, {
+      params: { dry_run: 'true' },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+
+  /** Importa empresas desde .xlsx (misma validación que en dry_run). */
+  async importCompaniesCommit(file: File): Promise<{ ok: boolean; created: number }> {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await client.post<{ ok: boolean; created: number }>('/companies/import', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
 };

@@ -64,6 +64,15 @@ const Companies = () => {
   const [teamAccountantId, setTeamAccountantId] = useState('');
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
 
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importValidateLoading, setImportValidateLoading] = useState(false);
+  const [importCommitLoading, setImportCommitLoading] = useState(false);
+  const [importErrors, setImportErrors] = useState<Array<{ row: number; message: string }>>([]);
+  const [importRowCount, setImportRowCount] = useState(0);
+  const [importValidatedOk, setImportValidatedOk] = useState(false);
+  const [importBanner, setImportBanner] = useState('');
+
   useEffect(() => {
     setStatus(initialStatus);
   }, [initialStatus]);
@@ -284,6 +293,119 @@ const Companies = () => {
     });
   };
 
+  const openImportModal = () => {
+    setImportOpen(true);
+    setImportFile(null);
+    setImportErrors([]);
+    setImportRowCount(0);
+    setImportValidatedOk(false);
+    setImportBanner('');
+  };
+
+  const closeImportModal = () => {
+    setImportOpen(false);
+    setImportFile(null);
+    setImportErrors([]);
+    setImportRowCount(0);
+    setImportValidatedOk(false);
+    setImportBanner('');
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setImportBanner('');
+      await companiesService.downloadImportTemplate();
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Plantilla descargada.' } }),
+      );
+    } catch (e) {
+      console.error(e);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'error', message: 'No se pudo descargar la plantilla.' } }),
+      );
+    }
+  };
+
+  const handleValidateImport = async () => {
+    if (!importFile) {
+      setImportBanner('Seleccione un archivo Excel (.xlsx).');
+      return;
+    }
+    const name = importFile.name.toLowerCase();
+    if (!name.endsWith('.xlsx')) {
+      setImportBanner('El archivo debe ser Excel .xlsx (no CSV).');
+      return;
+    }
+    try {
+      setImportValidateLoading(true);
+      setImportBanner('');
+      setImportValidatedOk(false);
+      const res = await companiesService.importCompaniesValidate(importFile);
+      setImportRowCount(res.row_count ?? 0);
+      setImportErrors(res.errors ?? []);
+      if (res.ok) {
+        setImportValidatedOk(true);
+        window.dispatchEvent(
+          new CustomEvent('miweb:toast', {
+            detail: { type: 'success', message: `Validación correcta: ${res.row_count} fila(s) lista(s) para importar.` },
+          }),
+        );
+      } else {
+        setImportValidatedOk(false);
+        window.dispatchEvent(
+          new CustomEvent('miweb:toast', {
+            detail: { type: 'error', message: 'Hay errores en el archivo. Corrígelos y vuelve a validar.' },
+          }),
+        );
+      }
+    } catch (e: unknown) {
+      console.error(e);
+      setImportValidatedOk(false);
+      const ax = e as { response?: { data?: { error?: string; errors?: Array<{ row: number; message: string }> } } };
+      const data = ax.response?.data;
+      if (data?.errors?.length) {
+        setImportErrors(data.errors);
+        setImportRowCount(0);
+      }
+      setImportBanner(data?.error ?? 'No se pudo validar el archivo.');
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'error', message: data?.error ?? 'Error al validar' } }),
+      );
+    } finally {
+      setImportValidateLoading(false);
+    }
+  };
+
+  const handleCommitImport = async () => {
+    if (!importFile || !importValidatedOk) return;
+    try {
+      setImportCommitLoading(true);
+      setImportBanner('');
+      const res = await companiesService.importCompaniesCommit(importFile);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: { type: 'success', message: `Se importaron ${res.created} empresa(s).` },
+        }),
+      );
+      closeImportModal();
+      void fetchCompanies();
+    } catch (e: unknown) {
+      console.error(e);
+      const ax = e as { response?: { data?: { error?: string; errors?: Array<{ row: number; message: string }> } } };
+      const data = ax.response?.data;
+      if (data?.errors?.length) {
+        setImportErrors(data.errors);
+        setImportValidatedOk(false);
+      }
+      setImportBanner(data?.error ?? 'No se pudo completar la importación.');
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'error', message: data?.error ?? 'Error al importar' } }),
+      );
+    } finally {
+      setImportCommitLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -292,13 +414,23 @@ const Companies = () => {
           <p className="text-sm text-slate-500">Gestión de clientes del estudio contable.</p>
         </div>
         {canUpsert ? (
-          <Link
-            to="/companies/new"
-            className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 transition"
-          >
-            <i className="fas fa-plus text-xs"></i>
-            <span>Nueva empresa</span>
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={openImportModal}
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-full border border-emerald-300 bg-white text-emerald-800 text-sm font-medium shadow-sm hover:bg-emerald-50 transition"
+            >
+              <i className="fas fa-file-excel text-xs"></i>
+              <span>Importar Excel</span>
+            </button>
+            <Link
+              to="/companies/new"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 transition"
+            >
+              <i className="fas fa-plus text-xs"></i>
+              <span>Nueva empresa</span>
+            </Link>
+          </div>
         ) : null}
       </div>
 
@@ -472,6 +604,131 @@ const Companies = () => {
           />
         </div>
       </div>
+
+      {importOpen ? (
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            <button type="button" className="absolute inset-0 bg-slate-900/40" onClick={closeImportModal} aria-label="Cerrar" />
+
+            <div className="relative w-full max-w-lg bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Importación masiva</div>
+                  <div className="text-sm font-semibold text-slate-800">Empresas desde Excel (.xlsx)</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeImportModal}
+                  className="inline-flex items-center justify-center h-9 w-9 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
+                >
+                  <i className="fas fa-times text-sm"></i>
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto text-sm text-slate-700">
+                <p className="text-slate-600">
+                  Descargue la plantilla actualizada: columna plan_nombre con el nombre exacto de un plan activo (véase hoja
+                  Referencia); documento_contador, documento_supervisor y documento_asistente con el DNI del usuario. Si no hay
+                  usuario con ese documento, el puesto queda vacío. Opcionalmente hasta tres contactos por fila. Solo .xlsx.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-slate-300 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                >
+                  <i className="fas fa-download text-xs"></i>
+                  Descargar plantilla
+                </button>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Archivo .xlsx</label>
+                  <input
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-primary-50 file:text-primary-800"
+                    onChange={(ev) => {
+                      const f = ev.target.files?.[0] ?? null;
+                      setImportFile(f);
+                      setImportValidatedOk(false);
+                      setImportErrors([]);
+                      setImportRowCount(0);
+                      setImportBanner('');
+                    }}
+                  />
+                </div>
+
+                {importBanner ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {importBanner}
+                  </div>
+                ) : null}
+
+                {importErrors.length > 0 ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 max-h-40 overflow-y-auto">
+                    <div className="text-xs font-semibold text-red-800 mb-1">Errores por fila</div>
+                    <ul className="text-xs text-red-800 space-y-1 list-disc pl-4">
+                      {importErrors.map((er, idx) => (
+                        <li key={`${er.row}-${idx}`}>
+                          Fila {er.row}: {er.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {importValidatedOk ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                    Listo para importar: {importRowCount} fila(s). Pulse «Importar» para guardar en la base de datos.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="px-5 py-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 bg-slate-50 shrink-0">
+                <button
+                  type="button"
+                  onClick={closeImportModal}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-full border border-slate-300 text-sm font-medium text-slate-700 hover:bg-white"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  disabled={!importFile || importValidateLoading}
+                  onClick={() => void handleValidateImport()}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-full border border-emerald-400 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                >
+                  {importValidateLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2 text-xs"></i> Validando…
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-check-double mr-2 text-xs"></i> Validar sin guardar
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={!importFile || !importValidatedOk || importCommitLoading}
+                  onClick={() => void handleCommitImport()}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {importCommitLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2 text-xs"></i> Importando…
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-save mr-2 text-xs"></i> Importar
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      ) : null}
 
       {teamModalOpen ? (
         createPortal(

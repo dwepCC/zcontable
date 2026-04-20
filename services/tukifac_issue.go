@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -39,12 +40,23 @@ func (s *TukifacService) saleNotePostPath() string {
 	return p
 }
 
+// logTukifacRequestBody escribe en la consola del proceso (stdout del API) el POST exacto hacia Tukifac (sin cabecera Authorization).
+func logTukifacRequestBody(fullURL string, jsonBody []byte) {
+	body := string(jsonBody)
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, jsonBody, "", "  "); err == nil {
+		body = buf.String()
+	}
+	log.Printf("[Tukifac] envío POST %s cuerpo:\n%s", fullURL, body)
+}
+
 func (s *TukifacService) postTukifacJSON(path string, jsonBody []byte) (int, []byte, error) {
 	baseURL, token, err := s.getAPIConfig()
 	if err != nil {
 		return 0, nil, err
 	}
 	u := buildTukifacURL(baseURL, path)
+	logTukifacRequestBody(u, jsonBody)
 	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(jsonBody))
 	if err != nil {
 		return 0, nil, err

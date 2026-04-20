@@ -3,6 +3,14 @@ import { clearTukifacSeriesSessionCache } from '../constants/tukifacSeriesSessio
 
 const backendUrl = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/+$/, '');
 
+if (import.meta.env.PROD && !backendUrl) {
+  // Sin VITE_BACKEND_URL en `npm run build`, Axios usa `/api` relativo al host del front (SPA en CDN/subdominio distinto al API → login a dominio equivocado, 405, etc.).
+  console.error(
+    '[miweb] VITE_BACKEND_URL no estaba definido en el build. Las peticiones van a este mismo origen + /api. ' +
+      'Reconstruye el front con VITE_BACKEND_URL=https://tu-dominio-del-api (sin /api final).',
+  );
+}
+
 const client = axios.create({
   baseURL: backendUrl ? `${backendUrl}/api` : '/api',
 });

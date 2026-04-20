@@ -10,6 +10,7 @@ import (
 // TukifacSellnowItem refleja un ítem de GET /api/sellnow/items (campos SUNAT; sin restaurante/modificadores).
 type TukifacSellnowItem struct {
 	ID                       TukifacFlexInt    `json:"id"`
+	ItemTypeID               *TukifacFlexInt   `json:"item_type_id,omitempty"`
 	UnitTypeID               string            `json:"unit_type_id"`
 	CategoryID               TukifacFlexInt    `json:"category_id"`
 	Description              string            `json:"description"`

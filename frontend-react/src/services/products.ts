@@ -6,6 +6,8 @@ export type ProductKind = 'product' | 'service';
 export type Product = {
   id: number;
   tukifac_item_id?: number | null;
+  /** FK remota item_types en Tukifac (si viene del sync sellnow). */
+  tukifac_item_type_id?: number | null;
   product_kind: ProductKind;
   product_category_id?: number | null;
   product_category?: ProductCategory | null;
@@ -78,6 +80,7 @@ export type PaginationMeta = {
 
 export type TukifacSellnowItem = {
   id: number;
+  item_type_id?: number | null;
   unit_type_id?: string;
   category_id?: number;
   description?: string;

@@ -42,6 +42,8 @@ func Setup(app *fiber.App) {
 	// Companies
 	api.Post("/companies/validate-ruc", middleware.RequireRole("Administrador", "Supervisor"), companyCtrl.ValidateRUCAPI)
 	api.Get("/companies/next-internal-code", middleware.RequireRole("Administrador", "Supervisor"), companyCtrl.NextInternalCodeAPI)
+	api.Get("/companies/import/template", middleware.RequireRole("Administrador", "Supervisor"), companyCtrl.ImportTemplateAPI)
+	api.Post("/companies/import", middleware.RequireRole("Administrador", "Supervisor"), companyCtrl.ImportCompaniesAPI)
 	api.Get("/companies", companyCtrl.ListAPI)
 	api.Get("/companies/:id", companyCtrl.GetAPI)
 	api.Get("/companies/:id/statement", companyCtrl.StatementAPI)

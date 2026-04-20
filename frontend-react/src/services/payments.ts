@@ -38,6 +38,8 @@ export interface PaymentTukifacIssuePayload {
   kind: 'boleta' | 'factura' | 'sale_note';
   serie_documento?: string;
   sale_note_series_id?: number;
+  /** Nota de venta: ID establecimiento en Tukifac; si no se envía, usa TUKIFAC_ESTABLISHMENT_ID en el servidor (por defecto 1). */
+  establishment_id?: number;
   payment_method_type_id?: string;
   payment_destination_id?: string;
   payment_reference?: string;

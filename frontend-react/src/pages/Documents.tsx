@@ -14,6 +14,7 @@ import {
   pickDefaultSeries,
 } from '../services/tukifacSeriesCache';
 import { auth } from '../services/auth';
+import { dateInputToRFC3339MidnightPeru } from '../utils/peruDates';
 import SearchableSelect from '../components/SearchableSelect';
 import Pagination from '../components/Pagination';
 
@@ -22,11 +23,6 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 const formatDateInput = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 type DocumentWithPayments = Document & { payments?: Payment[] };
-
-function toRFC3339FromDateInput(value: string): string | undefined {
-  if (!value) return undefined;
-  return `${value}T00:00:00Z`;
-}
 
 function getTukifacErrorMessage(e: unknown): string {
   if (!e || typeof e !== 'object') return 'Error al enviar el comprobante a Tukifac';
@@ -560,7 +556,7 @@ const Documents = () => {
         company_id: payDoc.company_id,
         document_id: payDoc.id,
         type: 'applied',
-        date: toRFC3339FromDateInput(payDate),
+        date: dateInputToRFC3339MidnightPeru(payDate),
         amount,
         method: payMethod.trim(),
         reference: payReference.trim() || undefined,

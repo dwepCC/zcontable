@@ -289,6 +289,12 @@ func (s *ProductService) Delete(id uint) error {
 func mapSellnowItemOntoProduct(item TukifacSellnowItem, target *models.Product) {
 	rid := uint(item.ID.Int())
 	target.TukifacItemID = &rid
+	if item.ItemTypeID != nil {
+		if v := item.ItemTypeID.Int(); v > 0 {
+			u := uint(v)
+			target.TukifacItemTypeID = &u
+		}
+	}
 	target.UnitTypeID = strings.TrimSpace(item.UnitTypeID)
 	target.CategoryID = int64(item.CategoryID.Int())
 	target.Description = strings.TrimSpace(item.Description)

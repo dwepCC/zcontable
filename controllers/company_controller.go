@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -220,6 +223,71 @@ func (ctrl *CompanyController) NextInternalCodeAPI(c fiber.Ctx) error {
 }
 
 // ValidateRUCAPI consulta ApiPeru.dev (SUNAT) y devuelve datos para autocompletar el alta de empresa.
+// ImportTemplateAPI descarga la plantilla .xlsx para importación masiva de empresas.
+func (ctrl *CompanyController) ImportTemplateAPI(c fiber.Ctx) error {
+	buf, err := services.CompanyImportTemplateXLSX()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", `attachment; filename="plantilla_importacion_empresas.xlsx"`)
+	return c.Send(buf)
+}
+
+// ImportCompaniesAPI valida (dry_run) o importa un Excel .xlsx multipart campo "file".
+func (ctrl *CompanyController) ImportCompaniesAPI(c fiber.Ctx) error {
+	fh, err := c.FormFile("file")
+	if err != nil || fh == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Adjunte un archivo en el campo file"})
+	}
+	if fh.Size <= 0 || fh.Size > 8<<20 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Archivo vacío o demasiado grande (máx. 8 MB)"})
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	if ext != ".xlsx" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Solo se admite Excel .xlsx (no CSV)"})
+	}
+
+	src, err := fh.Open()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No se pudo leer el archivo"})
+	}
+	raw, err := io.ReadAll(src)
+	_ = src.Close()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No se pudo leer el archivo"})
+	}
+
+	reader := bytes.NewReader(raw)
+	size := int64(len(raw))
+
+	dry := c.Query("dry_run") == "1" || strings.EqualFold(strings.TrimSpace(c.Query("dry_run")), "true")
+	if dry {
+		rowErrs, n, vErr := services.CompanyImportValidate(reader, size)
+		if vErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": vErr.Error()})
+		}
+		ok := len(rowErrs) == 0
+		return c.JSON(fiber.Map{
+			"ok":        ok,
+			"row_count": n,
+			"errors":    rowErrs,
+		})
+	}
+
+	created, valErrs, err := services.CompanyImportCommit(bytes.NewReader(raw), size)
+	if len(valErrs) > 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"ok":     false,
+			"errors": valErrs,
+		})
+	}
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ok": true, "created": created})
+}
+
 func (ctrl *CompanyController) ValidateRUCAPI(c fiber.Ctx) error {
 	var body struct {
 		RUC string `json:"ruc"`

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
+import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../utils/peruDates';
 import { companiesService } from '../services/companies';
 import { documentsService } from '../services/documents';
 import { paymentsService, type PaymentTukifacIssuePayload, type PaymentUpsertInput } from '../services/payments';
@@ -15,17 +16,6 @@ import {
 import type { Company, Document } from '../types/dashboard';
 import SearchableSelect from '../components/SearchableSelect';
 import { resolveBackendUrl } from '../api/client';
-
-function toDateInput(value?: string): string {
-  if (!value) return '';
-  if (value.length >= 10) return value.slice(0, 10);
-  return value;
-}
-
-function toRFC3339FromDateInput(value: string): string | undefined {
-  if (!value) return undefined;
-  return `${value}T00:00:00Z`;
-}
 
 function getErrorMessage(e: unknown): string {
   if (!e || typeof e !== 'object') return 'Error al guardar el pago';
@@ -251,7 +241,7 @@ const PaymentForm = () => {
           setLoadedPaymentType(
             pay.type === 'applied' || pay.type === 'on_account' ? pay.type : pay.document_id ? 'applied' : 'on_account',
           );
-          setDate(toDateInput(pay.date));
+          setDate(peruDateInputFromApiDate(pay.date));
           setAmount(Number.isFinite(pay.amount) ? pay.amount.toFixed(2) : '');
           setMethod(pay.method ?? '');
           setReference(pay.reference ?? '');
@@ -485,7 +475,7 @@ const PaymentForm = () => {
       company_id: companyIdNum,
       amount: amountNum,
       type: effectivePaymentType,
-      date: toRFC3339FromDateInput(date),
+      date: dateInputToRFC3339MidnightPeru(date),
       method: method.trim() ? method.trim() : undefined,
       reference: reference.trim() ? reference.trim() : undefined,
       attachment: attachment.trim() ? attachment.trim() : undefined,

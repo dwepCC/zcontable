@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
+import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../utils/peruDates';
 import { companiesService } from '../services/companies';
 import { documentsService, type DocumentItemInput, type DocumentUpsertInput } from '../services/documents';
 import { auth } from '../services/auth';
@@ -15,21 +16,10 @@ const DEBT_TYPE_OPTIONS = [
   { value: 'liquidacion_impuestos', label: 'Liquidación de impuestos' },
 ];
 
-function toDateInput(value?: string): string {
-  if (!value) return '';
-  if (value.length >= 10) return value.slice(0, 10);
-  return value;
-}
-
 function toMonthInput(value?: string): string {
   if (!value) return '';
   if (value.length >= 7) return value.slice(0, 7);
   return value;
-}
-
-function toRFC3339FromDateInput(value: string): string | undefined {
-  if (!value) return undefined;
-  return `${value}T00:00:00Z`;
 }
 
 function getErrorMessage(e: unknown): string {
@@ -120,8 +110,8 @@ const DocumentForm = () => {
           setType(doc.type ?? 'nota_venta');
           setLoadedSource(String(doc.source ?? ''));
           setDisplayNumber(doc.number ?? '');
-          setIssueDate(toDateInput(doc.issue_date) || peruvianToday);
-          setDueDate(toDateInput(doc.due_date));
+          setIssueDate(peruDateInputFromApiDate(doc.issue_date) || peruvianToday);
+          setDueDate(peruDateInputFromApiDate(doc.due_date));
           setTotalAmount(Number.isFinite(doc.total_amount) ? doc.total_amount.toFixed(2) : '');
           setStatus(doc.status ?? 'pendiente');
           setDescription(doc.description ?? '');
@@ -190,8 +180,8 @@ const DocumentForm = () => {
       payload = {
         company_id: companyIdNum,
         type: type.trim(),
-        issue_date: toRFC3339FromDateInput(issueDate),
-        due_date: toRFC3339FromDateInput(dueDate),
+        issue_date: dateInputToRFC3339MidnightPeru(issueDate),
+        due_date: dateInputToRFC3339MidnightPeru(dueDate),
         total_amount: totalNum,
         status: isEdit ? status : 'pendiente',
         description: description.trim() ? description.trim() : undefined,
@@ -230,8 +220,8 @@ const DocumentForm = () => {
       payload = {
         company_id: companyIdNum,
         type: type.trim(),
-        issue_date: toRFC3339FromDateInput(issueDate),
-        due_date: toRFC3339FromDateInput(dueDate),
+        issue_date: dateInputToRFC3339MidnightPeru(issueDate),
+        due_date: dateInputToRFC3339MidnightPeru(dueDate),
         total_amount: Math.round(sum * 100) / 100,
         status: isEdit ? status : 'pendiente',
         description: description.trim() || joined.slice(0, 1900) || undefined,

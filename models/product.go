@@ -12,7 +12,9 @@ type Product struct {
 	ID uint `gorm:"primaryKey" json:"id"`
 
 	TukifacItemID *uint `gorm:"column:tukifac_item_id;uniqueIndex" json:"tukifac_item_id,omitempty"`
-	ProductKind   string `gorm:"size:20;not null;default:product;index" json:"product_kind"` // product | service
+	// TukifacItemTypeID: metadato remoto si sellnow devuelve item_type_id (referencia en Tukifac).
+	TukifacItemTypeID *uint `gorm:"column:tukifac_item_type_id;index" json:"tukifac_item_type_id,omitempty"`
+	ProductKind       string `gorm:"size:20;not null;default:product;index" json:"product_kind"` // product | service
 
 	ProductCategoryID *uint            `gorm:"column:product_category_id;index" json:"product_category_id,omitempty"`
 	ProductCategory   *ProductCategory `gorm:"foreignKey:ProductCategoryID" json:"product_category,omitempty"`

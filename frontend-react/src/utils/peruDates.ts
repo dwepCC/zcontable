@@ -17,3 +17,13 @@ export function dateInputToRFC3339MidnightPeru(dateInput: string): string | unde
   const d = fromZonedTime(`${dateInput}T00:00:00`, PERU_TIMEZONE);
   return d.toISOString();
 }
+
+/** Convierte una fecha ISO del API a `yyyy-MM-dd` según calendario en Perú (para `<input type="date">`). */
+export function peruDateInputFromApiDate(iso?: string): string {
+  if (!iso?.trim()) return '';
+  const d = new Date(iso.trim());
+  if (Number.isNaN(d.getTime())) {
+    return iso.length >= 10 ? iso.slice(0, 10) : '';
+  }
+  return formatInTimeZone(d, PERU_TIMEZONE, 'yyyy-MM-dd');
+}

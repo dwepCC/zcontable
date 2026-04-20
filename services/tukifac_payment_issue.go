@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"miappfiber/config"
@@ -14,18 +15,56 @@ import (
 	"miappfiber/models"
 )
 
-func tukifacItemTypeIDForNewItem() int {
-	if config.AppConfig == nil || config.AppConfig.TukifacDefaultItemTypeID <= 0 {
-		return 1
-	}
-	return config.AppConfig.TukifacDefaultItemTypeID
-}
+// SUNAT tipo de ítem en payloads Tukifac: 01 mercadería/bien, 02 servicio (líneas libres = siempre 02).
+const (
+	tukifacCodigoTipoItemProducto = "01"
+	tukifacCodigoTipoItemServicio = "02"
+	// tukifacSaleNotePrefix: Tukifac persiste `sale_notes.prefix` (NOT NULL); serie documental nota de venta.
+	tukifacSaleNotePrefix = "NV"
+)
 
-// Moneda para ítems creados en Tukifac (tabla `items` solo expone currency_type_id; no enviar currency_type_symbol: en algunas versiones se usa en WHERE y la columna no existe).
-func tukifacItemCurrencyPEN() map[string]interface{} {
-	return map[string]interface{}{
-		"currency_type_id": "PEN",
+// tukifacPeruTZ calendario y hora de emisión hacia Tukifac (SUNAT / negocio en Perú).
+var tukifacPeruTZ = sync.OnceValue(func() *time.Location {
+	loc, err := time.LoadLocation("America/Lima")
+	if err != nil {
+		return time.UTC
 	}
+	return loc
+})
+
+// tukifacCodigoTipoItemForDocumentDebt decide 01 vs 02 según líneas del documento.
+// products.product_kind en este sistema es siempre "product" o "service" (inglés).
+// - Sin ítems o solo líneas libres (sin product_id) → 02.
+// - Catálogo: unit_type_id ZZ o product_kind service → 02; product_kind product con unidad distinta de ZZ (p. ej. NIU) → 01.
+func tukifacCodigoTipoItemForDocumentDebt(doc *models.Document) string {
+	if doc == nil {
+		return tukifacCodigoTipoItemServicio
+	}
+	items := append([]models.DocumentItem(nil), doc.Items...)
+	sort.Slice(items, func(i, j int) bool { return items[i].SortOrder < items[j].SortOrder })
+	sawCatalog := false
+	for _, it := range items {
+		if it.ProductID == nil || it.Product == nil {
+			continue
+		}
+		sawCatalog = true
+		p := it.Product
+		ut := strings.ToUpper(strings.TrimSpace(p.UnitTypeID))
+		k := strings.TrimSpace(p.ProductKind)
+		if ut == "ZZ" || k == "service" {
+			continue
+		}
+		if k == "product" || ut == "NIU" {
+			return tukifacCodigoTipoItemProducto
+		}
+		if ut != "" {
+			return tukifacCodigoTipoItemProducto
+		}
+	}
+	if !sawCatalog {
+		return tukifacCodigoTipoItemServicio
+	}
+	return tukifacCodigoTipoItemServicio
 }
 
 // tukifacUnidadMedidaFromDocument devuelve código SUNAT de unidad (ZZ servicio, NIU unidad, etc.) para líneas Tukifac.
@@ -67,6 +106,7 @@ type PaymentTukifacIssueInput struct {
 	Kind                 string `json:"kind"` // boleta | factura | sale_note
 	SerieDocumento       string `json:"serie_documento"`
 	SaleNoteSeriesID     uint   `json:"sale_note_series_id"`
+	EstablishmentID      uint   `json:"establishment_id"` // nota de venta; si es 0 se usa TUKIFAC_ESTABLISHMENT_ID
 	PaymentMethodTypeID  string `json:"payment_method_type_id"`
 	PaymentDestinationID string `json:"payment_destination_id"`
 	PaymentReference     string `json:"payment_reference"`
@@ -118,20 +158,23 @@ func receptorMapFromCompany(c *models.Company) map[string]interface{} {
 	tel := strings.TrimSpace(c.Phone)
 	nombreCom := strings.TrimSpace(c.TradeName)
 	return map[string]interface{}{
-		"codigo_tipo_documento_identidad": peruDocIdentidadTipo(c.RUC),
-		"numero_documento":                strings.TrimSpace(c.RUC),
+		"codigo_tipo_documento_identidad":    peruDocIdentidadTipo(c.RUC),
+		"numero_documento":                   strings.TrimSpace(c.RUC),
 		"apellidos_y_nombres_o_razon_social": strings.TrimSpace(c.BusinessName),
-		"nombre_comercial":                nombreCom,
-		"codigo_pais":                     "PE",
-		"ubigeo":                          "150101",
-		"direccion":                       addr,
-		"correo_electronico":              email,
-		"telefono":                        tel,
-		"codigo_tipo_direccion":           "01",
+		"nombre_comercial":                   nombreCom,
+		"codigo_pais":                        "PE",
+		"ubigeo":                             "150101",
+		"direccion":                          addr,
+		"correo_electronico":                 email,
+		"telefono":                           tel,
+		"codigo_tipo_direccion":              nil,
 	}
 }
 
-func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64, totalConIGV float64, unidadMedida string) map[string]interface{} {
+func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64, totalConIGV float64, unidadMedida string, codigoTipoItem string) map[string]interface{} {
+	if codigoTipoItem != tukifacCodigoTipoItemProducto && codigoTipoItem != tukifacCodigoTipoItemServicio {
+		codigoTipoItem = tukifacCodigoTipoItemServicio
+	}
 	um := strings.TrimSpace(strings.ToUpper(unidadMedida))
 	if um == "" {
 		um = "ZZ"
@@ -145,69 +188,56 @@ func buildSUNATDocumentItem(codigoInterno, descripcion string, cantidad float64,
 	igv := roundMoney2(totalItem - base)
 	uv := roundMoney2(base / qty)
 	pu := roundMoney2(totalItem / qty)
+	// Estructura alineada a PAYLOADS_API_DOCUMENTS_Y_SALE_NOTE.md §1.2 (sin objeto anidado `item`).
 	return map[string]interface{}{
-		"codigo_interno":               codigoInterno,
-		"descripcion":                  descripcion,
-		"nombre":                       descripcion,
-		"unidad_de_medida":             um,
-		"codigo_tipo_item":             "01",
-		"codigo_producto_sunat":        "",
-		"codigo_producto_gsl":          "",
-		"cantidad":                     qty,
-		"valor_unitario":               uv,
-		"codigo_tipo_precio":           "01",
-		"precio_unitario":              pu,
-		"codigo_tipo_afectacion_igv":   "10",
-		"total_base_igv":               base,
-		"porcentaje_igv":               18,
-		"total_igv":                    igv,
-		"total_base_isc":               0,
-		"porcentaje_isc":               0,
-		"total_isc":                    0,
-		"total_base_otros_impuestos":   0,
-		"porcentaje_otros_impuestos":   0,
-		"total_otros_impuestos":        0,
+		"codigo_interno":                 codigoInterno,
+		"descripcion":                    descripcion,
+		"nombre":                         nil,
+		"nombre_secundario":              nil,
+		"codigo_tipo_item":               codigoTipoItem,
+		"codigo_producto_sunat":          "90",
+		"codigo_producto_gsl":            nil,
+		"unidad_de_medida":               um,
+		"cantidad":                       qty,
+		"valor_unitario":                 uv,
+		"codigo_tipo_precio":             "01",
+		"precio_unitario":                pu,
+		"codigo_tipo_afectacion_igv":     "10",
+		"total_base_igv":                 base,
+		"porcentaje_igv":                 18,
+		"total_igv":                      igv,
+		"codigo_tipo_sistema_isc":        nil,
+		"total_base_isc":                 0,
+		"porcentaje_isc":                 0,
+		"total_isc":                      0,
+		"total_base_otros_impuestos":     0,
+		"porcentaje_otros_impuestos":     0,
+		"total_otros_impuestos":          0,
 		"total_impuestos_bolsa_plastica": 0,
-		"total_impuestos":              igv,
-		"total_valor_item":             base,
-		"total_cargos":                 0,
-		"total_descuentos":             0,
-		"total_item":                   totalItem,
-		"informacion_adicional":        "",
-		"actualizar_descripcion":       true,
-		"nombre_producto_pdf":          descripcion,
-		"nombre_producto_xml":          descripcion,
-		"dato_adicional":               "",
-		"datos_adicionales":            []interface{}{},
-		"descuentos":                   []interface{}{},
-		"cargos":                       []interface{}{},
-		"lots":                         []interface{}{},
-		"IdLoteSelected":               nil,
-		"esFusionado":                  false,
-		"item": mergeMaps(map[string]interface{}{
-			"description":    descripcion,
-			"unit_type_id":   um,
-			"item_type_id":   tukifacItemTypeIDForNewItem(),
-			"has_igv":        true,
-			"presentation":   map[string]interface{}{"quantity_unit": 1},
-			"lots":           []interface{}{},
-			"IdLoteSelected": nil,
-		}, tukifacItemCurrencyPEN()),
+		"total_impuestos":                igv,
+		"total_valor_item":               base,
+		"total_cargos":                   0,
+		"total_descuentos":               0,
+		"total_item":                     totalItem,
+		"datos_adicionales":              []interface{}{},
+		"descuentos":                     []interface{}{},
+		"cargos":                         []interface{}{},
+		"informacion_adicional":          nil,
+		"lots":                           []interface{}{},
+		"actualizar_descripcion":         true,
+		"nombre_producto_pdf":            nil,
+		"nombre_producto_xml":            nil,
+		"dato_adicional":                 nil,
+		"esFusionado":                    false,
 	}
 }
 
-func mergeMaps(base map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(base)+len(extra))
-	for k, v := range base {
-		out[k] = v
+// buildSaleNoteItemForceCreate ítem para POST /api/sale-note con force_create_if_not_exist (ver doc §2.3).
+// codigoTipoItem: strings SUNAT "01" (bien) / "02" (servicio); Tukifac espera item_type_id como string en JSON.
+func buildSaleNoteItemForceCreate(internalID, desc string, totalConIGV float64, unidadMedida string, codigoTipoItem string) map[string]interface{} {
+	if codigoTipoItem != tukifacCodigoTipoItemProducto && codigoTipoItem != tukifacCodigoTipoItemServicio {
+		codigoTipoItem = tukifacCodigoTipoItemServicio
 	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
-}
-
-func buildSaleNoteItem(desc string, totalConIGV float64, unidadMedida string) map[string]interface{} {
 	um := strings.TrimSpace(strings.ToUpper(unidadMedida))
 	if um == "" {
 		um = "ZZ"
@@ -215,32 +245,47 @@ func buildSaleNoteItem(desc string, totalConIGV float64, unidadMedida string) ma
 	totalItem := roundMoney2(totalConIGV)
 	base := roundMoney2(totalItem / 1.18)
 	igv := roundMoney2(totalItem - base)
-	pu := totalItem
-	uv := base
 	return map[string]interface{}{
-		"full_item": mergeMaps(map[string]interface{}{
-			"description":                      desc,
-			"unit_type_id":                     um,
-			"item_type_id":                     tukifacItemTypeIDForNewItem(),
-			"sale_unit_price":                  pu,
-			"sale_affectation_igv_type_id":     "10",
-			"purchase_affectation_igv_type_id": "10",
-		}, tukifacItemCurrencyPEN()),
+		"id":                      nil,
+		"internal_id":             internalID,
+		"description":             desc,
+		"item_type_id":            codigoTipoItem,
+		"unit_type_id":            um,
+		"currency_type_id":        "PEN",
+		"unit_price":              totalItem,
+		"unit_value":              base,
 		"quantity":                1,
-		"unit_value":              uv,
-		"price_type_id":           "01",
-		"unit_price":              pu,
 		"affectation_igv_type_id": "10",
 		"total_base_igv":          base,
 		"percentage_igv":          18,
 		"total_igv":               igv,
+		"system_isc_type_id":      nil,
+		"total_base_isc":          0,
+		"percentage_isc":          0,
+		"total_isc":               0,
+		"total_base_other_taxes":  0,
+		"percentage_other_taxes":  0,
+		"total_other_taxes":       0,
+		"total_plastic_bag_taxes": 0,
 		"total_taxes":             igv,
+		"price_type_id":           "01",
 		"total_value":             base,
 		"total_charge":            0,
 		"total_discount":          0,
 		"total":                   totalItem,
-		// No enviar objeto anidado `item` si ya va `full_item`: en Tukifac el merge con el modelo Item
-		// puede añadir `currency_type_symbol` al WHERE aunque la tabla `items` no tenga esa columna.
+		"attributes":              []interface{}{},
+		"charges":                 []interface{}{},
+		"discounts":               []interface{}{},
+		"warehouse_id":            nil,
+		"additional_information":  nil,
+		"name_product_pdf":        nil,
+		"item": map[string]interface{}{
+			"description":      desc,
+			"unit_type_id":     um,
+			"has_igv":          true,
+			"item_type_id":     codigoTipoItem,
+			"currency_type_id": "PEN",
+		},
 	}
 }
 
@@ -322,58 +367,105 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 	if issueDate.IsZero() {
 		issueDate = time.Now()
 	}
-	dateStr := issueDate.Format("2006-01-02")
-	timeStr := issueDate.Format("15:04:05")
+	lima := tukifacPeruTZ()
+	dateStr := issueDate.In(lima).Format("2006-01-02")
+	timeStr := issueDate.In(lima).Format("15:04:05")
 
 	if kind == "sale_note" {
 		if in.SaleNoteSeriesID == 0 {
 			return nil, nil, errors.New("indique sale_note_series_id (serie numérica en Tukifac)")
 		}
+		estID := int(in.EstablishmentID)
+		if estID <= 0 && config.AppConfig != nil {
+			estID = config.AppConfig.TukifacEstablishmentID
+		}
+		if estID <= 0 {
+			estID = 1
+		}
+
 		items := make([]interface{}, 0, len(pay.Allocations))
-		var totalVenta float64
+		var totalVenta, totalTaxed, totalIGV, totalTaxes, totalValue float64
 		for _, a := range pay.Allocations {
 			desc := documentLineDescription(a.Document)
 			um := tukifacUnidadMedidaFromDocument(a.Document)
-			items = append(items, buildSaleNoteItem(desc, a.Amount, um))
-			totalVenta += roundMoney2(a.Amount)
+			cod := fmt.Sprintf("DEU-%d", a.DocumentID)
+			t := roundMoney2(a.Amount)
+			b := roundMoney2(t / 1.18)
+			g := roundMoney2(t - b)
+			items = append(items, buildSaleNoteItemForceCreate(cod, desc, a.Amount, um, tukifacCodigoTipoItemForDocumentDebt(a.Document)))
+			totalVenta += t
+			totalTaxed += b
+			totalIGV += g
+			totalTaxes += g
+			totalValue += b
 		}
 		totalVenta = roundMoney2(totalVenta)
+		totalTaxed = roundMoney2(totalTaxed)
+		totalIGV = roundMoney2(totalIGV)
+		totalTaxes = roundMoney2(totalTaxes)
+		totalValue = roundMoney2(totalValue)
 		if math.Abs(totalVenta-pay.Amount) > 0.03 {
 			return nil, nil, errors.New("inconsistencia en montos del comprobante")
 		}
-		payload := map[string]interface{}{
-			"series_id":                 in.SaleNoteSeriesID,
-			"date_of_issue":             dateStr,
-			"time_of_issue":             timeStr,
-			"codigo_tipo_moneda":        "PEN",
-			"exchange_rate_sale":        1,
-			"force_create_if_not_exist": true,
-			"datos_del_cliente_o_receptor": map[string]interface{}{
-				"codigo_tipo_documento_identidad": peruDocIdentidadTipo(co.RUC),
-				"numero_documento":                strings.TrimSpace(co.RUC),
-				"apellidos_y_nombres_o_razon_social": strings.TrimSpace(co.BusinessName),
-				"codigo_pais":                     "PE",
-				"ubigeo":                          "150101",
-				"direccion":                       strings.TrimSpace(co.Address),
-				"correo_electronico":              strings.TrimSpace(co.Email),
-				"telefono":                        strings.TrimSpace(co.Phone),
-			},
-			"type_period":     nil,
-			"quantity_period": 0,
-			"items":           items,
-			"payments": []interface{}{
-				map[string]interface{}{
-					"date_of_payment":         dateStr,
-					"payment_method_type_id":  method,
-					"payment_destination_id":  dest,
-					"reference":               ref,
-					"payment":                 totalVenta,
-					"payment_received":        totalVenta,
-				},
-			},
+
+		recMap := map[string]interface{}{
+			"codigo_tipo_documento_identidad":    peruDocIdentidadTipo(co.RUC),
+			"numero_documento":                   strings.TrimSpace(co.RUC),
+			"apellidos_y_nombres_o_razon_social": strings.TrimSpace(co.BusinessName),
+			"codigo_pais":                        "PE",
+			"ubigeo":                             "150101",
+			"direccion":                          strings.TrimSpace(co.Address),
+			"correo_electronico":                 strings.TrimSpace(co.Email),
+			"telefono":                           strings.TrimSpace(co.Phone),
 		}
 		if strings.TrimSpace(co.Address) == "" {
-			payload["datos_del_cliente_o_receptor"].(map[string]interface{})["direccion"] = "-"
+			recMap["direccion"] = "-"
+		}
+
+		// Formato PAYLOADS_API_DOCUMENTS_Y_SALE_NOTE.md §2.2 / §2.3 (currency_type_id, totales, customer_id 0 + receptor).
+		payload := map[string]interface{}{
+			"id":                           nil,
+			"number":                       nil,
+			"prefix":                       tukifacSaleNotePrefix,
+			"series_id":                    in.SaleNoteSeriesID,
+			"establishment_id":             estID,
+			"customer_id":                  0,
+			"date_of_issue":                dateStr,
+			"time_of_issue":                timeStr,
+			"currency_type_id":             "PEN",
+			"exchange_rate_sale":           1,
+			"force_create_if_not_exist":    true,
+			"datos_del_cliente_o_receptor": recMap,
+			"type_period":                  nil,
+			"quantity_period":              0,
+			"total_prepayment":             0,
+			"total_discount":               0,
+			"total_charge":                 0,
+			"total_exportation":            0,
+			"total_free":                   0,
+			"total_taxed":                  totalTaxed,
+			"total_unaffected":             0,
+			"total_exonerated":             0,
+			"total_igv":                    totalIGV,
+			"total_base_isc":               0,
+			"total_isc":                    0,
+			"total_base_other_taxes":       0,
+			"total_other_taxes":            0,
+			"total_plastic_bag_taxes":      0,
+			"total_taxes":                  totalTaxes,
+			"total_value":                  totalValue,
+			"total":                        totalVenta,
+			"items":                        items,
+			"payments": []interface{}{
+				map[string]interface{}{
+					"date_of_payment":        dateStr,
+					"payment_method_type_id": method,
+					"payment_destination_id": dest,
+					"reference":              ref,
+					"payment":                totalVenta,
+					"payment_received":       totalVenta,
+				},
+			},
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -411,7 +503,7 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 		desc := documentLineDescription(a.Document)
 		cod := fmt.Sprintf("DEU-%d", a.DocumentID)
 		um := tukifacUnidadMedidaFromDocument(a.Document)
-		it := buildSUNATDocumentItem(cod, desc, 1, a.Amount, um)
+		it := buildSUNATDocumentItem(cod, desc, 1, a.Amount, um, tukifacCodigoTipoItemForDocumentDebt(a.Document))
 		items = append(items, it)
 		t := roundMoney2(a.Amount)
 		b := roundMoney2(t / 1.18)
@@ -466,48 +558,27 @@ func (s *TukifacService) IssueComprobanteFromPayment(paymentID uint, in PaymentT
 		"codigo_tipo_operacion":        "0101",
 		"fecha_de_vencimiento":         dateStr,
 		"numero_orden_de_compra":       fmt.Sprintf("Pago %d · %s", pay.ID, settleRef),
-		"numero_de_placa":              "",
-		"folio":                        "",
-		"codigo_consignado":            nil,
-		"codigo_direccion_consignado":  nil,
-		"consignado_ubigeo":            nil,
-		"consignado_direccion":         nil,
 		"datos_del_cliente_o_receptor": receptorMapFromCompany(&co),
 		"codigo_condicion_de_pago":     "01",
-		"codigo_nota_venta":            nil,
-		"codigo_vendedor":              "ZContable",
-		"pago_anticipado":              0,
-		"es_itinerante":                false,
 		"totales":                      totales,
+		"items":                        items,
 		"pagos": []interface{}{
 			map[string]interface{}{
-				"codigo_metodo_pago":    method,
-				"codigo_destino_pago":   dest,
-				"referencia":            ref,
-				"monto":                 totVenta,
-				"pago_recibido":         totVenta,
+				"codigo_metodo_pago":  method,
+				"codigo_destino_pago": dest,
+				"referencia":          ref,
+				"monto":               totVenta,
+				"pago_recibido":       totVenta,
 			},
 		},
-		"cuotas": []interface{}{},
 		"leyendas": []interface{}{
 			map[string]interface{}{"codigo": "1000", "valor": leyendaMontoSoles(totVenta)},
 		},
 		"acciones": map[string]interface{}{
-			"enviar_email":       true,
+			"enviar_email":       false,
 			"enviar_xml_firmado": true,
 			"formato_pdf":        "a4",
 		},
-		"items":                items,
-		"descuentos":           []interface{}{map[string]interface{}{"codigo": "00", "descripcion": "Descuento global", "factor": 0, "monto": 0, "base": 0}},
-		"cargos":               []interface{}{map[string]interface{}{"codigo": "50", "descripcion": "Cargo global", "factor": 0, "monto": 0, "base": 0}},
-		"detraccion":           nil,
-		"retencion":            nil,
-		"percepcion":           nil,
-		"anticipos":            []interface{}{},
-		"guias":                []interface{}{},
-		"relacionados":         []interface{}{},
-		"hotel":                []interface{}{},
-		"transport":            []interface{}{},
 		"terminos_condiciones": terminos,
 	}
 

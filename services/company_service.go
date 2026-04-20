@@ -57,7 +57,8 @@ type CompanyListItem struct {
 	Balance float64 `json:"balance"`
 }
 
-func (s *CompanyService) Create(input *models.Company) error {
+// ValidateNewCompanyForCreate valida los mismos reglas que Create, usando db para consultas (p. ej. transacción de importación).
+func (s *CompanyService) ValidateNewCompanyForCreate(db *gorm.DB, input *models.Company) error {
 	input.RUC = strings.TrimSpace(input.RUC)
 	input.BusinessName = strings.TrimSpace(input.BusinessName)
 	input.InternalCode = strings.TrimSpace(input.InternalCode)
@@ -72,9 +73,8 @@ func (s *CompanyService) Create(input *models.Company) error {
 		return errors.New("el código interno es requerido")
 	}
 
-	// Validar unicidad de código interno
 	var count int64
-	database.DB.Model(&models.Company{}).
+	db.Model(&models.Company{}).
 		Where("internal_code = ?", input.InternalCode).
 		Count(&count)
 	if count > 0 {
@@ -86,7 +86,7 @@ func (s *CompanyService) Create(input *models.Company) error {
 			input.AccountantUserID = nil
 		} else {
 			var u models.User
-			if err := database.DB.First(&u, *input.AccountantUserID).Error; err != nil {
+			if err := db.First(&u, *input.AccountantUserID).Error; err != nil {
 				return errors.New("contador general inválido")
 			}
 			if !u.Active {
@@ -102,7 +102,7 @@ func (s *CompanyService) Create(input *models.Company) error {
 			input.SupervisorUserID = nil
 		} else {
 			var u models.User
-			if err := database.DB.First(&u, *input.SupervisorUserID).Error; err != nil {
+			if err := db.First(&u, *input.SupervisorUserID).Error; err != nil {
 				return errors.New("supervisor inválido")
 			}
 			if !u.Active {
@@ -118,7 +118,7 @@ func (s *CompanyService) Create(input *models.Company) error {
 			input.AssistantUserID = nil
 		} else {
 			var u models.User
-			if err := database.DB.First(&u, *input.AssistantUserID).Error; err != nil {
+			if err := db.First(&u, *input.AssistantUserID).Error; err != nil {
 				return errors.New("asistente inválido")
 			}
 			if !u.Active {
@@ -154,14 +154,34 @@ func (s *CompanyService) Create(input *models.Company) error {
 	}
 	if input.SubscriptionPlanID != nil && *input.SubscriptionPlanID > 0 {
 		var cnt int64
-		database.DB.Model(&models.SubscriptionPlan{}).Where("id = ? AND active = ?", *input.SubscriptionPlanID, true).Count(&cnt)
+		db.Model(&models.SubscriptionPlan{}).Where("id = ? AND active = ?", *input.SubscriptionPlanID, true).Count(&cnt)
 		if cnt == 0 {
 			return errors.New("plan de suscripción inválido o inactivo")
 		}
-		input.SubscriptionActive = true
 	}
 
+	return nil
+}
+
+func (s *CompanyService) Create(input *models.Company) error {
+	if err := s.ValidateNewCompanyForCreate(database.DB, input); err != nil {
+		return err
+	}
+	if input.SubscriptionPlanID != nil && *input.SubscriptionPlanID > 0 {
+		input.SubscriptionActive = true
+	}
 	return database.DB.Create(input).Error
+}
+
+// CreateWithTx crea empresa dentro de una transacción GORM (p. ej. importación masiva).
+func (s *CompanyService) CreateWithTx(tx *gorm.DB, input *models.Company) error {
+	if err := s.ValidateNewCompanyForCreate(tx, input); err != nil {
+		return err
+	}
+	if input.SubscriptionPlanID != nil && *input.SubscriptionPlanID > 0 {
+		input.SubscriptionActive = true
+	}
+	return tx.Create(input).Error
 }
 
 func (s *CompanyService) Update(id uint, input *models.Company) error {
