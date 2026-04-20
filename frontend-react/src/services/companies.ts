@@ -4,6 +4,8 @@ import type { Company, CompanyStatement } from '../types/dashboard';
 export interface CompaniesListParams {
   q?: string;
   status?: string;
+  /** Orden del listado por código interno: asc (defecto) o desc. */
+  code_order?: 'asc' | 'desc';
 }
 
 export interface PaginationMeta {

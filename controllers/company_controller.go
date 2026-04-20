@@ -54,10 +54,16 @@ func (ctrl *CompanyController) ListAPI(c fiber.Ctx) error {
 		allowedIDs = ids
 	}
 
+	codeOrder := strings.ToLower(strings.TrimSpace(c.Query("code_order", "")))
+	if codeOrder != "asc" && codeOrder != "desc" {
+		codeOrder = "asc"
+	}
+
 	params := services.CompanyListParams{
 		Query:             q,
 		Status:            status,
 		AllowedCompanyIDs: allowedIDs,
+		CodeOrder:         codeOrder,
 	}
 
 	if pageStr != "" || perPageStr != "" {

@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"miappfiber/database"
@@ -50,6 +51,37 @@ type CompanyListParams struct {
 	Query             string
 	Status            string
 	AllowedCompanyIDs []uint
+	// CodeOrder: "asc" | "desc" — orden por internal_code (código de empresa).
+	CodeOrder string
+}
+
+// companyListOrderByCode ordena por código como número (internal_code es VARCHAR en BD).
+// En MySQL/MariaDB: (0 + TRIM(...)) fuerza orden numérico p. ej. 001, 112, 211 frente al orden lexicográfico.
+func companyListOrderByCode(codeOrder string) string {
+	if strings.EqualFold(strings.TrimSpace(codeOrder), "desc") {
+		return "(0 + TRIM(internal_code)) DESC, id DESC"
+	}
+	return "(0 + TRIM(internal_code)) ASC, id ASC"
+}
+
+// loadCompanyListItemsByIDs carga filas con balance y respeta el orden de ids (GORM + Select con subconsultas
+// puede ignorar ORDER BY en algunos drivers; el orden se fija aquí).
+func (s *CompanyService) loadCompanyListItemsByIDs(ids []uint) ([]CompanyListItem, error) {
+	if len(ids) == 0 {
+		return []CompanyListItem{}, nil
+	}
+	var list []CompanyListItem
+	if err := database.DB.Model(&models.Company{}).Select(companyListBalanceSelect).Where("id IN ?", ids).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	pos := make(map[uint]int, len(ids))
+	for i, id := range ids {
+		pos[id] = i
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		return pos[list[i].ID] < pos[list[j].ID]
+	})
+	return list, nil
 }
 
 type CompanyListItem struct {
@@ -337,7 +369,8 @@ func (s *CompanyService) SetStatus(id uint, status string) error {
 // companyListBaseQuery construye el FROM/WHERE común para listados de empresas.
 // No reutilices el *gorm.DB devuelto tras un .Count(): vuelve a llamar a esta función.
 func (s *CompanyService) companyListBaseQuery(params CompanyListParams) *gorm.DB {
-	q := database.DB.Table("companies")
+	// Model (no Table) para que GORM aplique soft delete y Order+Pluck generen SQL coherente.
+	q := database.DB.Model(&models.Company{})
 	if params.AllowedCompanyIDs != nil {
 		if len(params.AllowedCompanyIDs) == 0 {
 			return q.Where("1 = 0")
@@ -383,19 +416,17 @@ func (s *CompanyService) List(params CompanyListParams) ([]CompanyListItem, erro
 	if params.AllowedCompanyIDs != nil && len(params.AllowedCompanyIDs) == 0 {
 		return []CompanyListItem{}, nil
 	}
-	var list []CompanyListItem
-	q := s.companyListBaseQuery(params).Select(companyListBalanceSelect).Order("business_name ASC")
-	if err := q.Find(&list).Error; err != nil {
+	var ids []uint
+	if err := s.companyListBaseQuery(params).Order(companyListOrderByCode(params.CodeOrder)).Pluck("id", &ids).Error; err != nil {
 		return nil, err
 	}
-	return list, nil
+	return s.loadCompanyListItemsByIDs(ids)
 }
 
 func (s *CompanyService) ListPaged(params CompanyListParams, page int, perPage int) ([]CompanyListItem, int64, error) {
 	if params.AllowedCompanyIDs != nil && len(params.AllowedCompanyIDs) == 0 {
 		return []CompanyListItem{}, 0, nil
 	}
-	var list []CompanyListItem
 	if page <= 0 {
 		page = 1
 	}
@@ -408,12 +439,16 @@ func (s *CompanyService) ListPaged(params CompanyListParams, page int, perPage i
 		return nil, 0, err
 	}
 
+	var ids []uint
 	if err := s.companyListBaseQuery(params).
-		Select(companyListBalanceSelect).
-		Order("business_name ASC").
+		Order(companyListOrderByCode(params.CodeOrder)).
 		Limit(perPage).
 		Offset((page - 1) * perPage).
-		Find(&list).Error; err != nil {
+		Pluck("id", &ids).Error; err != nil {
+		return nil, 0, err
+	}
+	list, err := s.loadCompanyListItemsByIDs(ids)
+	if err != nil {
 		return nil, 0, err
 	}
 	return list, total, nil

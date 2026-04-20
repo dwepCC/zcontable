@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { companiesService, type CompanyUpsertInput } from '../services/companies';
@@ -34,6 +34,10 @@ const Companies = () => {
   const initialStatus = searchParams.get('status') ?? '';
   const initialPage = parsePositiveInt(searchParams.get('page'), 1);
   const initialPerPage = parsePositiveInt(searchParams.get('per_page'), 20);
+  /** Orden por código (URL). */
+  const codeOrderSort: 'asc' | 'desc' = searchParams.get('code_order') === 'desc' ? 'desc' : 'asc';
+  /** Cadena estable: al mutar URLSearchParams a veces no cambia la referencia; así el listado se refresca siempre. */
+  const searchKey = searchParams.toString();
   const success = searchParams.get('success') ?? '';
 
   const [query, setQuery] = useState(() => initialQuery);
@@ -98,10 +102,6 @@ const Companies = () => {
   }, [debouncedQuery, initialPerPage, setSearchParams]);
 
   useEffect(() => {
-    fetchCompanies();
-  }, [initialPage, initialPerPage, initialQuery, initialStatus]);
-
-  useEffect(() => {
     if (!success) return;
     const message =
       success === 'created'
@@ -135,20 +135,24 @@ const Companies = () => {
       const ax = e as { response?: { data?: { error?: string } } };
       const msg = ax.response?.data?.error ?? 'No se pudo actualizar el estado';
       window.dispatchEvent(new CustomEvent('miweb:toast', { detail: { type: 'error', message: msg } }));
-      void fetchCompanies();
+      void reloadCompanies();
     } finally {
       setStatusUpdatingId(null);
     }
   };
 
-  const fetchCompanies = async () => {
+  const reloadCompanies = useCallback(async () => {
+    const sp = new URLSearchParams(searchKey);
+    const qRaw = (sp.get('q') ?? '').trim();
+    const stRaw = (sp.get('status') ?? '').trim();
     try {
       setLoading(true);
       const res = await companiesService.listPaged({
-        q: initialQuery || undefined,
-        status: initialStatus || undefined,
-        page: initialPage,
-        per_page: initialPerPage,
+        q: qRaw || undefined,
+        status: stRaw || undefined,
+        code_order: sp.get('code_order') === 'desc' ? 'desc' : 'asc',
+        page: parsePositiveInt(sp.get('page'), 1),
+        per_page: parsePositiveInt(sp.get('per_page'), 20),
       });
       setCompanies(res.items);
       setPagination(res.pagination);
@@ -157,7 +161,11 @@ const Companies = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchKey]);
+
+  useEffect(() => {
+    void reloadCompanies();
+  }, [reloadCompanies]);
 
   const openTeamModal = async (company: Company) => {
     setTeamModalOpen(true);
@@ -252,7 +260,7 @@ const Companies = () => {
         window.dispatchEvent(
           new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Empresa eliminada correctamente.' } }),
         );
-        fetchCompanies();
+        void reloadCompanies();
       } catch (error) {
         console.error('Error deleting company:', error);
         window.dispatchEvent(
@@ -290,6 +298,21 @@ const Companies = () => {
       next.set('per_page', String(nextPerPage));
       next.set('page', '1');
       return next;
+    });
+  };
+
+  const toggleCodeOrder = () => {
+    const next = codeOrderSort === 'asc' ? 'desc' : 'asc';
+    setSearchParams((prev) => {
+      const sp = new URLSearchParams(prev);
+      if (next === 'asc') {
+        sp.delete('code_order');
+      } else {
+        sp.set('code_order', 'desc');
+      }
+      sp.set('page', '1');
+      sp.delete('success');
+      return sp;
     });
   };
 
@@ -388,7 +411,7 @@ const Companies = () => {
         }),
       );
       closeImportModal();
-      void fetchCompanies();
+      void reloadCompanies();
     } catch (e: unknown) {
       console.error(e);
       const ax = e as { response?: { data?: { error?: string; errors?: Array<{ row: number; message: string }> } } };
@@ -466,7 +489,25 @@ const Companies = () => {
           <table className="min-w-full text-sm text-left">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3">Código</th>
+                <th className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleCodeOrder()}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-1 py-0.5 -mx-1 -my-0.5 text-left font-semibold uppercase tracking-wide text-slate-500 hover:text-primary-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                    title={
+                      codeOrderSort === 'asc'
+                        ? 'Código: menor a mayor. Clic para ordenar mayor a menor.'
+                        : 'Código: mayor a menor. Clic para ordenar menor a mayor.'
+                    }
+                    aria-sort={codeOrderSort === 'asc' ? 'ascending' : 'descending'}
+                  >
+                    Código
+                    <i
+                      className={`fas text-[0.65rem] opacity-80 ${codeOrderSort === 'asc' ? 'fa-sort-amount-up' : 'fa-sort-amount-down'}`}
+                      aria-hidden
+                    />
+                  </button>
+                </th>
                 <th className="px-4 py-3">RUC</th>
                 <th className="px-4 py-3">Razón social</th>
                 <th className="px-4 py-3">Estado</th>
