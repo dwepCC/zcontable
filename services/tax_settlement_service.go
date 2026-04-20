@@ -80,12 +80,13 @@ func (s *TaxSettlementService) PreviewOpenDocuments(companyID uint, asOf *time.T
 }
 
 type TaxSettlementLineInput struct {
-	LineType   string   `json:"line_type"`
-	DocumentID *uint    `json:"document_id"`
-	ProductID  *uint    `json:"product_id"`
-	Concept    string   `json:"concept"`
-	Amount     float64  `json:"amount"`
-	SortOrder  int      `json:"sort_order"`
+	LineType    string   `json:"line_type"`
+	DocumentID  *uint    `json:"document_id"`
+	ProductID   *uint    `json:"product_id"`
+	Concept     string   `json:"concept"`
+	Amount      float64  `json:"amount"`
+	SortOrder   int      `json:"sort_order"`
+	PeriodDate  string   `json:"period_date"` // YYYY-MM-DD opcional (líneas sin documento)
 }
 
 type TaxSettlementCreateInput struct {
@@ -97,6 +98,18 @@ type TaxSettlementCreateInput struct {
 	Notes       string                 `json:"notes"`
 	Pdt621JSON  string                 `json:"pdt621_json"`
 	Lines       []TaxSettlementLineInput `json:"lines"`
+}
+
+func parseTaxLinePeriodDate(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", s, time.Local)
+	if err != nil {
+		return nil
+	}
+	return &t
 }
 
 func (s *TaxSettlementService) validateLine(in TaxSettlementLineInput) error {
@@ -163,6 +176,7 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 			Concept:    strings.TrimSpace(li.Concept),
 			Amount:     li.Amount,
 			SortOrder:  order,
+			PeriodDate: parseTaxLinePeriodDate(li.PeriodDate),
 		})
 	}
 	if err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -238,6 +252,7 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 			Concept:         strings.TrimSpace(li.Concept),
 			Amount:          li.Amount,
 			SortOrder:       order,
+			PeriodDate:      parseTaxLinePeriodDate(li.PeriodDate),
 		})
 	}
 
@@ -317,6 +332,56 @@ func (s *TaxSettlementService) ListPaged(params TaxSettlementListParams) ([]mode
 	return list, total, nil
 }
 
+// createDebtDocumentsForManualLines crea documentos de deuda pendientes por líneas adjustment/tax_manual sin document_id.
+// Se usa al emitir y al pedir sugerencias de pago, para reparar liquidaciones emitidas antes del backfill o fallos parciales.
+func createDebtDocumentsForManualLines(tx *gorm.DB, ts *models.TaxSettlement, lines []models.TaxSettlementLine) error {
+	for i := range lines {
+		ln := &lines[i]
+		if ln.DocumentID != nil && *ln.DocumentID > 0 {
+			continue
+		}
+		if ln.LineType != models.TaxSettlementLineAdjust && ln.LineType != models.TaxSettlementLineTaxManual {
+			continue
+		}
+		if ln.Amount < 0.005 {
+			continue
+		}
+		issue := ts.IssueDate
+		if ln.PeriodDate != nil && !ln.PeriodDate.IsZero() {
+			issue = *ln.PeriodDate
+		}
+		y, mo, d := issue.Date()
+		issue = time.Date(y, mo, d, 0, 0, 0, 0, issue.Location())
+		desc := strings.TrimSpace(ln.Concept)
+		if desc == "" {
+			desc = "Cargo liquidación"
+		}
+		if len(desc) > 900 {
+			desc = desc[:900] + "…"
+		}
+		doc := models.Document{
+			CompanyID:    ts.CompanyID,
+			Type:         "Otro",
+			Number:       fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID),
+			IssueDate:    issue,
+			TotalAmount:  math.Round(ln.Amount*100) / 100,
+			Description:  desc,
+			ServiceMonth: issue.Format("2006-01"),
+			Status:       "pendiente",
+			Source:       "liquidacion",
+		}
+		if err := tx.Omit("Company", "Payments", "Allocations", "Items").Create(&doc).Error; err != nil {
+			return err
+		}
+		did := doc.ID
+		if err := tx.Model(&models.TaxSettlementLine{}).Where("id = ?", ln.ID).Update("document_id", did).Error; err != nil {
+			return err
+		}
+		ln.DocumentID = &did
+	}
+	return nil
+}
+
 func (s *TaxSettlementService) Emit(id uint) (*models.TaxSettlement, error) {
 	var ts models.TaxSettlement
 	if err := database.DB.Preload("Lines").First(&ts, id).Error; err != nil {
@@ -340,7 +405,16 @@ func (s *TaxSettlementService) Emit(id uint) (*models.TaxSettlement, error) {
 	ts.TotalHonorarios = math.Round(th*100) / 100
 	ts.TotalImpuestos = math.Round(tm*100) / 100
 	ts.TotalGeneral = math.Round(tg*100) / 100
-	if err := database.DB.Save(&ts).Error; err != nil {
+
+	if err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := createDebtDocumentsForManualLines(tx, &ts, ts.Lines); err != nil {
+			return err
+		}
+		if err := tx.Save(&ts).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return s.GetByID(id)
@@ -370,6 +444,21 @@ func (s *TaxSettlementService) PaymentSuggestions(settlementID uint) (*PaymentSu
 	if err != nil {
 		return nil, err
 	}
+	if ts.Status == models.TaxSettlementStatusIssued {
+		if err := database.DB.Transaction(func(tx *gorm.DB) error {
+			var lines []models.TaxSettlementLine
+			if err := tx.Where("tax_settlement_id = ?", ts.ID).Order("sort_order ASC, id ASC").Find(&lines).Error; err != nil {
+				return err
+			}
+			return createDebtDocumentsForManualLines(tx, ts, lines)
+		}); err != nil {
+			return nil, err
+		}
+		ts, err = s.GetByID(settlementID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	out := &PaymentSuggestionsResult{
 		TaxSettlementID: ts.ID,
 		SettlementNumber: strings.TrimSpace(ts.Number),
@@ -378,7 +467,7 @@ func (s *TaxSettlementService) PaymentSuggestions(settlementID uint) (*PaymentSu
 		Lines:           []PaymentSuggestionLine{},
 	}
 	for _, ln := range ts.Lines {
-		if ln.LineType != models.TaxSettlementLineDocRef || ln.DocumentID == nil {
+		if ln.DocumentID == nil || *ln.DocumentID == 0 {
 			continue
 		}
 		var d models.Document
@@ -414,4 +503,94 @@ func (s *TaxSettlementService) PaymentSuggestions(settlementID uint) (*PaymentSu
 	}
 	out.SuggestedTotal = math.Round(out.SuggestedTotal*100) / 100
 	return out, nil
+}
+
+// CanRegisterPayment indica si aún hay imputaciones sugeridas con saldo (equivale a len(PaymentSuggestions.Lines) > 0).
+func (s *TaxSettlementService) CanRegisterPayment(settlementID uint) (bool, error) {
+	res, err := s.PaymentSuggestions(settlementID)
+	if err != nil {
+		return false, err
+	}
+	return len(res.Lines) > 0, nil
+}
+
+// Delete elimina la liquidación y revierte lo vinculado: pagos con tax_settlement_id (imputaciones y estados de deuda),
+// referencia a liquidación en comprobantes fiscales, y deudas internas DEU-LIQ-* creadas al emitir.
+// No elimina documentos de deudas externas (líneas document_ref).
+func (s *TaxSettlementService) Delete(id uint) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var ts models.TaxSettlement
+		if err := tx.Preload("Lines", func(db *gorm.DB) *gorm.DB {
+			return db.Order("sort_order ASC, id ASC")
+		}).First(&ts, id).Error; err != nil {
+			return err
+		}
+
+		paySvc := NewPaymentService()
+
+		if ts.Status == models.TaxSettlementStatusIssued {
+			var payIDs []uint
+			if err := tx.Model(&models.Payment{}).Where("tax_settlement_id = ?", id).Pluck("id", &payIDs).Error; err != nil {
+				return err
+			}
+			for _, pid := range payIDs {
+				if err := paySvc.DeletePaymentTx(tx, pid); err != nil {
+					return fmt.Errorf("no se pudo revertir el pago %d: %w", pid, err)
+				}
+			}
+			if err := tx.Model(&models.TukifacFiscalReceipt{}).
+				Where("tax_settlement_id = ?", id).
+				Updates(map[string]interface{}{"tax_settlement_id": nil}).Error; err != nil {
+				return err
+			}
+			for _, ln := range ts.Lines {
+				if ln.DocumentID == nil || *ln.DocumentID == 0 {
+					continue
+				}
+				if ln.LineType != models.TaxSettlementLineAdjust && ln.LineType != models.TaxSettlementLineTaxManual {
+					continue
+				}
+				var d models.Document
+				if err := tx.First(&d, *ln.DocumentID).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue
+					}
+					return err
+				}
+				wantNum := fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID)
+				if strings.TrimSpace(d.Source) != "liquidacion" || strings.TrimSpace(d.Number) != wantNum {
+					continue
+				}
+				paid := DocumentPaidTotal(tx, d.ID)
+				if paid >= 0.005 {
+					return fmt.Errorf("la deuda %s aún tiene saldo abonado; no se puede eliminar la liquidación", wantNum)
+				}
+				var payCnt int64
+				if err := tx.Model(&models.Payment{}).Where("document_id = ?", d.ID).Count(&payCnt).Error; err != nil {
+					return err
+				}
+				if payCnt > 0 {
+					return fmt.Errorf("existe un pago registrado sobre la deuda %s; elimínelo antes de borrar la liquidación", wantNum)
+				}
+				if err := tx.Where("document_id = ?", d.ID).Delete(&models.DocumentItem{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Delete(&models.Document{}, d.ID).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := tx.Where("tax_settlement_id = ?", id).Delete(&models.TaxSettlementLine{}).Error; err != nil {
+			return err
+		}
+		res := tx.Delete(&models.TaxSettlement{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }

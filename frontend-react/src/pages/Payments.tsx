@@ -8,6 +8,7 @@ import { companiesService } from '../services/companies';
 import { auth } from '../services/auth';
 import SearchableSelect from '../components/SearchableSelect';
 import Pagination from '../components/Pagination';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { resolveBackendUrl } from '../api/client';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -57,6 +58,8 @@ const Payments = () => {
     total_pages: 0,
   });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Payment | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     if (!initialDateFrom || !initialDateTo) {
@@ -133,20 +136,41 @@ const Payments = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm('¿Eliminar este pago?')) {
-      try {
-        await paymentsService.delete(id);
-        window.dispatchEvent(
-          new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Pago eliminado correctamente.' } }),
-        );
-        fetchPayments();
-      } catch (e) {
-        console.error(e);
-        window.dispatchEvent(
-          new CustomEvent('miweb:toast', { detail: { type: 'error', message: 'Error al eliminar el pago' } }),
-        );
-      }
+  const deletePaymentMessage = (p: Payment) => {
+    const empresa = p.company?.business_name?.trim() || 'empresa';
+    const fecha = p.date ? p.date.slice(0, 10) : '—';
+    const monto = Number.isFinite(p.amount)
+      ? p.amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '—';
+    return `Se eliminará el pago del ${fecha} por S/ ${monto} (${empresa}). Se quitarán las imputaciones a deudas, se actualizarán los estados de los documentos y, si aplica, se desvinculará el comprobante Tukifac. Esta acción no se puede deshacer.`;
+  };
+
+  const confirmDeletePayment = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await paymentsService.delete(deleteTarget.id);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Pago eliminado correctamente.' } }),
+      );
+      setDeleteTarget(null);
+      fetchPayments();
+    } catch (e) {
+      console.error(e);
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'error',
+            message: typeof msg === 'string' && msg.trim() ? msg : 'Error al eliminar el pago',
+          },
+        }),
+      );
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -212,7 +236,7 @@ const Payments = () => {
   const role = auth.getRole() ?? '';
   const canCreate = role === 'Administrador' || role === 'Supervisor' || role === 'Contador' || role === 'Asistente';
   const canEdit = role === 'Administrador' || role === 'Supervisor' || role === 'Contador';
-  const canDelete = role === 'Administrador' || role === 'Supervisor';
+  const canDeletePayment = role === 'Administrador';
 
   const closePreview = () => setPreviewUrl(null);
   const isPdf = (url: string) => url.toLowerCase().split('?')[0].endsWith('.pdf');
@@ -375,7 +399,9 @@ const Payments = () => {
                       {payment.document ? payment.document.number : '—'}
                     </td>
                     <td className="px-4 py-3 text-slate-700">{payment.method}</td>
-                    <td className="px-4 py-3 text-right text-slate-800 font-semibold">$ {payment.amount.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right text-slate-800 font-semibold">
+                      S/ {payment.amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">
                       {payment.attachment ? (
                         <button
@@ -400,10 +426,10 @@ const Payments = () => {
                             <i className="fas fa-pen mr-1"></i> Editar
                           </Link>
                         ) : null}
-                        {canDelete ? (
+                        {canDeletePayment ? (
                           <button
                             type="button"
-                            onClick={() => handleDelete(payment.id)}
+                            onClick={() => setDeleteTarget(payment)}
                             className="inline-flex items-center px-3 py-1.5 rounded-full border border-red-200 text-xs font-medium text-red-700 hover:bg-red-50"
                           >
                             <i className="fas fa-trash mr-1"></i> Eliminar
@@ -433,6 +459,20 @@ const Payments = () => {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Eliminar pago"
+        message={deleteTarget ? deletePaymentMessage(deleteTarget) : ''}
+        confirmLabel="Eliminar pago"
+        cancelLabel="Cancelar"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeletePayment()}
+      />
     </div>
   );
 };

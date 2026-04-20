@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import SearchableSelect from '../components/SearchableSelect';
 import { companiesService } from '../services/companies';
@@ -10,6 +10,17 @@ import type { Product } from '../services/products';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const formatDateInput = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+/** YYYY-MM del mes calendario **anterior** a la fecha de emisión (YYYY-MM-DD). Ej. 2026-04-20 → 2026-03 */
+function periodLabelFromIssueDate(ymd: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return '';
+  const y = Number(ymd.slice(0, 4));
+  const m = Number(ymd.slice(5, 7)) - 1;
+  if (!Number.isFinite(y) || m < 0 || m > 11) return '';
+  const ref = new Date(y, m, 1);
+  ref.setMonth(ref.getMonth() - 1);
+  return `${ref.getFullYear()}-${pad2(ref.getMonth() + 1)}`;
+}
 
 function formatPEN(n: number): string {
   return n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,6 +38,8 @@ type LineRow = {
   product_id?: number;
   concept: string;
   amount: string;
+  /** Periodo contable de la deuda (YYYY-MM-DD); por defecto fecha de emisión de la liquidación. */
+  period_date: string;
 };
 
 const TaxSettlementNew = () => {
@@ -37,18 +50,35 @@ const TaxSettlementNew = () => {
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [issueDate, setIssueDate] = useState(formatDateInput(new Date()));
-  const [periodLabel, setPeriodLabel] = useState('');
+  const [issueDate, setIssueDate] = useState(() => formatDateInput(new Date()));
+  const [periodLabel, setPeriodLabel] = useState(() => periodLabelFromIssueDate(formatDateInput(new Date())));
+  const periodLabelManualRef = useRef(false);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineRow[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const prevIssueDateRef = useRef(issueDate);
 
   useEffect(() => {
     void companiesService.list().then(setCompanies).catch(() => setCompanies([]));
   }, []);
+
+  /** Si la fecha de emisión cambia, actualizar el periodo de línea solo donde seguía igual a la emisión anterior. */
+  useEffect(() => {
+    const prev = prevIssueDateRef.current;
+    if (prev === issueDate) {
+      prevIssueDateRef.current = issueDate;
+      return;
+    }
+    setLines((rows) =>
+      rows.map((l) =>
+        !l.period_date || l.period_date === prev ? { ...l, period_date: issueDate } : l,
+      ),
+    );
+    prevIssueDateRef.current = issueDate;
+  }, [issueDate]);
 
   useEffect(() => {
     const cid = searchParams.get('company_id')?.trim() ?? '';
@@ -68,19 +98,19 @@ const TaxSettlementNew = () => {
           document_id: row.document_id,
           concept: row.concept || `Cargo #${row.document_id}`,
           amount: String(row.amount),
+          period_date: issueDate,
         })),
       );
       setPeriodLabel((pl) => {
         if (pl.trim()) return pl;
-        const now = new Date();
-        return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+        return periodLabelFromIssueDate(issueDate);
       });
     } catch {
       if (!opts?.silent) setError('No se pudo cargar el saldo de deudas');
     } finally {
       setLoadingPreview(false);
     }
-  }, []);
+  }, [issueDate]);
 
   useEffect(() => {
     const id = Number(companyId);
@@ -112,6 +142,7 @@ const TaxSettlementNew = () => {
         line_type: 'adjustment',
         concept: '',
         amount: '',
+        period_date: issueDate,
       },
     ]);
   };
@@ -157,6 +188,7 @@ const TaxSettlementNew = () => {
       concept: string;
       amount: number;
       sort_order: number;
+      period_date: string;
     }[] = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
@@ -173,6 +205,11 @@ const TaxSettlementNew = () => {
         setError('Línea de deuda sin documento');
         return;
       }
+      const periodDate = (l.period_date || issueDate).trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDate)) {
+        setError('Cada línea requiere una fecha de periodo válida (AAAA-MM-DD)');
+        return;
+      }
       payloadLines.push({
         line_type: l.line_type,
         document_id: l.line_type === 'document_ref' ? l.document_id : undefined,
@@ -180,6 +217,7 @@ const TaxSettlementNew = () => {
         concept: l.concept.trim(),
         amount: amt,
         sort_order: i,
+        period_date: periodDate,
       });
     }
     setError('');
@@ -251,16 +289,29 @@ const TaxSettlementNew = () => {
               <input
                 type="date"
                 value={issueDate}
-                onChange={(e) => setIssueDate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setIssueDate(v);
+                  if (!periodLabelManualRef.current) {
+                    setPeriodLabel(periodLabelFromIssueDate(v));
+                  }
+                }}
                 className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
               />
             </div>
             <div className="sm:col-span-2">
               <label className="block text-xs font-medium text-slate-600 mb-1">Etiqueta de periodo</label>
+              <p className="text-[11px] text-slate-500 mb-1.5">
+                Se sugiere el mes inmediatamente anterior al de la fecha de emisión (p. ej. emisión 20/04/2026 → <span className="font-mono">2026-03</span>).
+                Puede editar el valor manualmente en cualquier momento.
+              </p>
               <input
                 type="text"
                 value={periodLabel}
-                onChange={(e) => setPeriodLabel(e.target.value)}
+                onChange={(e) => {
+                  periodLabelManualRef.current = true;
+                  setPeriodLabel(e.target.value);
+                }}
                 className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
                 placeholder="Ej. 2026-03"
               />
@@ -300,6 +351,9 @@ const TaxSettlementNew = () => {
             </div>
           </div>
 
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Cada fila incluye la <strong>fecha de periodo</strong> de la deuda (por defecto la misma que la emisión de la liquidación). Al <strong>emitir</strong> la liquidación, las líneas de concepto o catálogo generan una deuda registrada con esa fecha para poder imputarlas en el pago.
+          </p>
           <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm min-w-0">
             <div className="overflow-x-auto">
               <table className="min-w-full w-full text-sm">
@@ -308,6 +362,7 @@ const TaxSettlementNew = () => {
                     <th className="px-3 py-3 w-10 text-center">#</th>
                     <th className="px-3 py-3 whitespace-nowrap">Tipo</th>
                     <th className="px-3 py-3 min-w-[200px]">Descripción</th>
+                    <th className="px-3 py-3 whitespace-nowrap w-[9.5rem]">Periodo deuda</th>
                     <th className="px-3 py-3 text-right whitespace-nowrap w-36">Monto (S/)</th>
                     <th className="px-3 py-3 w-14 text-center" aria-label="Acciones" />
                   </tr>
@@ -315,7 +370,7 @@ const TaxSettlementNew = () => {
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {lines.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center text-slate-500 text-sm leading-relaxed">
+                      <td colSpan={6} className="px-4 py-10 text-center text-slate-500 text-sm leading-relaxed">
                         Elija una empresa para cargar deudas con saldo, o pulse <strong>Agregar línea</strong> para escribir descripción
                         y monto.
                       </td>
@@ -341,6 +396,15 @@ const TaxSettlementNew = () => {
                             value={l.concept}
                             onChange={(e) => updateLine(l.key, { concept: e.target.value })}
                             className="w-full px-2.5 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-primary-500/25 focus:border-primary-400 outline-none"
+                          />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input
+                            type="date"
+                            value={l.period_date || issueDate}
+                            onChange={(e) => updateLine(l.key, { period_date: e.target.value })}
+                            className="w-full min-w-[8.5rem] px-2 py-2 rounded-lg border border-slate-200 text-xs tabular-nums focus:ring-2 focus:ring-primary-500/25 focus:border-primary-400 outline-none"
+                            title="Periodo contable / fecha de la deuda"
                           />
                         </td>
                         <td className="px-3 py-2.5">
@@ -445,6 +509,7 @@ const TaxSettlementNew = () => {
               product_id: p.id,
               concept: productLabel(p),
               amount: price > 0 ? price.toFixed(2) : '',
+              period_date: issueDate,
             },
           ]);
           setPickerOpen(false);

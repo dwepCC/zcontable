@@ -32,11 +32,12 @@ const Login = () => {
         <div className="shadow-sm p-1">
           <div className="bg-white rounded-[1.75rem] shadow-xl px-8 py-10 border border-slate-100">
             <div className="text-center mb-8">
-              <div className="mx-auto mb-4 w-12 h-12 rounded-full bg-emerald-800 flex items-center justify-center text-white text-lg font-bold shadow-md shadow-emerald-800/20">
-                Z
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-emerald-900">ZCONTABLE</h1>
-              <p className="text-slate-500 mt-1 text-sm">Inicia sesión para continuar</p>
+              <img
+                src="/logo_login.png"
+                alt="ZContable"
+                className="mx-auto mb-5 h-8 w-auto max-w-full object-contain"
+              />
+              <p className="text-slate-500 text-sm">Inicia sesión para continuar</p>
             </div>
 
             {error && (

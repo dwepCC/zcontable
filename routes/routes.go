@@ -38,6 +38,8 @@ func Setup(app *fiber.App) {
 	api.Get("/firm-config/branding", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), configCtrl.FirmBrandingAPI)
 	api.Put("/firm-config", middleware.RequireRole("Administrador"), configCtrl.UpdateFirmConfigAPI)
 	api.Post("/firm-config/logo", middleware.RequireRole("Administrador"), configCtrl.UploadFirmLogoAPI)
+	api.Post("/firm-config/statement-bank-logo", middleware.RequireRole("Administrador"), configCtrl.UploadStatementBankLogoAPI)
+	api.Post("/firm-config/statement-payment-qr", middleware.RequireRole("Administrador"), configCtrl.UploadStatementPaymentQrAPI)
 
 	// Companies
 	api.Post("/companies/validate-ruc", middleware.RequireRole("Administrador", "Supervisor"), companyCtrl.ValidateRUCAPI)
@@ -72,7 +74,7 @@ func Setup(app *fiber.App) {
 	api.Post("/payments", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), paymentCtrl.CreateAPI)
 	api.Post("/payments/:id/issue-tukifac", middleware.RequireRole("Administrador", "Supervisor", "Contador"), paymentCtrl.IssueTukifacAPI)
 	api.Put("/payments/:id", middleware.RequireRole("Administrador", "Supervisor", "Contador"), paymentCtrl.UpdateAPI)
-	api.Delete("/payments/:id", middleware.RequireRole("Administrador", "Supervisor"), paymentCtrl.DeleteAPI)
+	api.Delete("/payments/:id", middleware.RequireRole("Administrador"), paymentCtrl.DeleteAPI)
 	api.Post("/payments/upload-attachment", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), paymentCtrl.UploadAttachmentAPI)
 
 	// Users API (solo administradores)
@@ -134,4 +136,5 @@ func Setup(app *fiber.App) {
 	api.Get("/tax-settlements/:id", middleware.RequireRole("Administrador", "Supervisor", "Contador", "Asistente"), taxSettleCtrl.GetAPI)
 	api.Put("/tax-settlements/:id", middleware.RequireRole("Administrador", "Supervisor", "Contador"), taxSettleCtrl.UpdateAPI)
 	api.Post("/tax-settlements/:id/emit", middleware.RequireRole("Administrador", "Supervisor", "Contador"), taxSettleCtrl.EmitAPI)
+	api.Delete("/tax-settlements/:id", middleware.RequireRole("Administrador", "Supervisor", "Contador"), taxSettleCtrl.DeleteAPI)
 }

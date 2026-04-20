@@ -550,40 +550,55 @@ func (s *PaymentService) GetByID(id uint) (*models.Payment, error) {
 	return &p, nil
 }
 
+// DeletePaymentTx elimina el pago y sus imputaciones dentro de una transacción ya abierta (p. ej. cascada al borrar liquidación).
+func (s *PaymentService) DeletePaymentTx(tx *gorm.DB, id uint) error {
+	var p models.Payment
+	if err := tx.First(&p, id).Error; err != nil {
+		return err
+	}
+
+	// Comprobantes fiscales Tukifac vinculados: revertir conciliación antes de borrar el pago.
+	if err := tx.Model(&models.TukifacFiscalReceipt{}).
+		Where("linked_payment_id = ?", id).
+		Updates(map[string]interface{}{
+			"linked_payment_id":     nil,
+			"reconciliation_status": models.TukifacReceiptPending,
+		}).Error; err != nil {
+		return err
+	}
+
+	docIDs := map[uint]struct{}{}
+	var allocs []models.PaymentAllocation
+	tx.Where("payment_id = ?", id).Find(&allocs)
+	for _, a := range allocs {
+		docIDs[a.DocumentID] = struct{}{}
+	}
+	if p.DocumentID != nil {
+		docIDs[*p.DocumentID] = struct{}{}
+	}
+
+	if err := tx.Where("payment_id = ?", id).Delete(&models.PaymentAllocation{}).Error; err != nil {
+		return err
+	}
+
+	result := tx.Delete(&models.Payment{}, id)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+
+	for did := range docIDs {
+		if err := recalculateDocumentStatusTx(tx, did); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *PaymentService) Delete(id uint) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
-		var p models.Payment
-		if err := tx.First(&p, id).Error; err != nil {
-			return err
-		}
-
-		docIDs := map[uint]struct{}{}
-		var allocs []models.PaymentAllocation
-		tx.Where("payment_id = ?", id).Find(&allocs)
-		for _, a := range allocs {
-			docIDs[a.DocumentID] = struct{}{}
-		}
-		if p.DocumentID != nil {
-			docIDs[*p.DocumentID] = struct{}{}
-		}
-
-		if err := tx.Where("payment_id = ?", id).Delete(&models.PaymentAllocation{}).Error; err != nil {
-			return err
-		}
-
-		result := tx.Delete(&models.Payment{}, id)
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		if result.Error != nil {
-			return result.Error
-		}
-
-		for did := range docIDs {
-			if err := recalculateDocumentStatusTx(tx, did); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.DeletePaymentTx(tx, id)
 	})
 }

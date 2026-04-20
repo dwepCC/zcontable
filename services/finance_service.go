@@ -1,6 +1,8 @@
 package services
 
 import (
+	"time"
+
 	"miappfiber/database"
 	"miappfiber/models"
 
@@ -63,8 +65,9 @@ func (s *FinanceService) GetCompanyBalance(companyID uint) (*CompanyBalance, err
 	}, nil
 }
 
-// GetCompanyStatement devuelve el detalle de documentos, pagos y saldo por empresa, y el libro del mes pedido (zona Lima).
-func (s *FinanceService) GetCompanyStatement(companyID uint, ledgerYear int, ledgerMonth int) (*CompanyStatement, error) {
+// GetCompanyStatement devuelve el detalle de documentos, pagos y saldo por empresa, y el libro contable.
+// Si rangeFrom y rangeTo no son nil, el libro es por rango de fechas inclusivo (día en Lima); si no, por mes calendario (ledgerYear, ledgerMonth).
+func (s *FinanceService) GetCompanyStatement(companyID uint, ledgerYear int, ledgerMonth int, rangeFrom, rangeTo *time.Time) (*CompanyStatement, error) {
 	var company models.Company
 	if err := database.DB.First(&company, companyID).Error; err != nil {
 		return nil, err
@@ -117,7 +120,12 @@ func (s *FinanceService) GetCompanyStatement(companyID uint, ledgerYear int, led
 		totalPays += p.Amount
 	}
 
-	ledger := buildAccountLedger(docs, pays, ledgerYear, ledgerMonth)
+	var ledger *AccountLedger
+	if rangeFrom != nil && rangeTo != nil {
+		ledger = buildAccountLedgerDateRange(docs, pays, *rangeFrom, *rangeTo)
+	} else {
+		ledger = buildAccountLedger(docs, pays, ledgerYear, ledgerMonth)
+	}
 
 	return &CompanyStatement{
 		Company:        &company,

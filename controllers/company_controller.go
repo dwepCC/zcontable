@@ -360,14 +360,28 @@ func (ctrl *CompanyController) StatementAPI(c fiber.Ctx) error {
 		lima = time.Local
 	}
 	now := time.Now().In(lima)
-	y, mo := now.Year(), int(now.Month())
-	if pq := strings.TrimSpace(c.Query("period", "")); pq != "" {
-		if t, err := time.ParseInLocation("2006-01", pq, lima); err == nil {
-			y, mo = t.Year(), int(t.Month())
+	var rangeFromPtr, rangeToPtr *time.Time
+	if df := strings.TrimSpace(c.Query("date_from", "")); df != "" {
+		if dt := strings.TrimSpace(c.Query("date_to", "")); dt != "" {
+			t1, e1 := time.ParseInLocation("2006-01-02", df, lima)
+			t2, e2 := time.ParseInLocation("2006-01-02", dt, lima)
+			if e1 == nil && e2 == nil && !t1.After(t2) {
+				rangeFromPtr = &t1
+				rangeToPtr = &t2
+			}
 		}
 	}
 
-	stmt, err := ctrl.financeService.GetCompanyStatement(uint(id), y, mo)
+	y, mo := now.Year(), int(now.Month())
+	if rangeFromPtr == nil || rangeToPtr == nil {
+		if pq := strings.TrimSpace(c.Query("period", "")); pq != "" {
+			if t, err := time.ParseInLocation("2006-01", pq, lima); err == nil {
+				y, mo = t.Year(), int(t.Month())
+			}
+		}
+	}
+
+	stmt, err := ctrl.financeService.GetCompanyStatement(uint(id), y, mo, rangeFromPtr, rangeToPtr)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Empresa no encontrada"})
 	}

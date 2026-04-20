@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"miappfiber/models"
 	"miappfiber/services"
 
 	"github.com/gofiber/fiber/v3"
@@ -20,6 +21,22 @@ func NewTaxSettlementController() *TaxSettlementController {
 		svc:    services.NewTaxSettlementService(),
 		access: services.NewAccessService(),
 	}
+}
+
+func (ctrl *TaxSettlementController) attachCanRegisterPayment(ts *models.TaxSettlement) {
+	if ts == nil {
+		return
+	}
+	if ts.Status != models.TaxSettlementStatusIssued {
+		ts.CanRegisterPayment = false
+		return
+	}
+	can, err := ctrl.svc.CanRegisterPayment(ts.ID)
+	if err != nil {
+		ts.CanRegisterPayment = false
+		return
+	}
+	ts.CanRegisterPayment = can
 }
 
 func (ctrl *TaxSettlementController) ensureCompanyAccess(c fiber.Ctx, companyID uint) error {
@@ -118,6 +135,9 @@ func (ctrl *TaxSettlementController) ListAPI(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	for i := range list {
+		ctrl.attachCanRegisterPayment(&list[i])
+	}
 	perPage := params.PerPage
 	if perPage <= 0 {
 		perPage = 20
@@ -152,6 +172,7 @@ func (ctrl *TaxSettlementController) CreateAPI(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	ctrl.attachCanRegisterPayment(ts)
 	return c.Status(fiber.StatusCreated).JSON(ts)
 }
 
@@ -193,6 +214,7 @@ func (ctrl *TaxSettlementController) GetAPI(c fiber.Ctx) error {
 		}
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 	}
+	ctrl.attachCanRegisterPayment(ts)
 	return c.JSON(ts)
 }
 
@@ -219,6 +241,7 @@ func (ctrl *TaxSettlementController) UpdateAPI(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	ctrl.attachCanRegisterPayment(ts)
 	return c.JSON(ts)
 }
 
@@ -241,5 +264,28 @@ func (ctrl *TaxSettlementController) EmitAPI(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	ctrl.attachCanRegisterPayment(ts)
 	return c.JSON(ts)
+}
+
+// DeleteAPI DELETE /api/tax-settlements/:id — elimina la liquidación y revierte pagos y vínculos asociados.
+func (ctrl *TaxSettlementController) DeleteAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil || id == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	ts0, err := ctrl.svc.GetByID(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No encontrado"})
+	}
+	if err := ctrl.ensureCompanyAccess(c, ts0.CompanyID); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+	if err := ctrl.svc.Delete(uint(id)); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"message": "Liquidación eliminada"})
 }

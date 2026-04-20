@@ -36,6 +36,8 @@ type TaxSettlement struct {
 
 	Company *Company            `gorm:"foreignKey:CompanyID" json:"company,omitempty"`
 	Lines   []TaxSettlementLine `gorm:"foreignKey:TaxSettlementID" json:"lines,omitempty"`
+	// Solo API: hay saldo pendiente en las deudas vinculadas (misma lógica que payment-suggestions).
+	CanRegisterPayment bool `json:"can_register_payment" gorm:"-"`
 }
 
 func (TaxSettlement) TableName() string {
@@ -43,14 +45,15 @@ func (TaxSettlement) TableName() string {
 }
 
 type TaxSettlementLine struct {
-	ID              uint    `gorm:"primaryKey" json:"id"`
-	TaxSettlementID uint    `gorm:"not null;index" json:"tax_settlement_id"`
-	LineType        string  `gorm:"size:30;not null" json:"line_type"`
-	DocumentID      *uint   `gorm:"index" json:"document_id,omitempty"`
-	ProductID       *uint   `gorm:"index" json:"product_id,omitempty"`
-	Concept         string  `gorm:"size:512;not null" json:"concept"`
-	Amount          float64 `gorm:"type:decimal(15,2);not null" json:"amount"`
-	SortOrder       int     `gorm:"not null;default:0" json:"sort_order"`
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	TaxSettlementID uint       `gorm:"not null;index" json:"tax_settlement_id"`
+	LineType        string     `gorm:"size:30;not null" json:"line_type"`
+	DocumentID      *uint      `gorm:"index" json:"document_id,omitempty"`
+	ProductID       *uint      `gorm:"index" json:"product_id,omitempty"`
+	Concept         string     `gorm:"size:512;not null" json:"concept"`
+	Amount          float64    `gorm:"type:decimal(15,2);not null" json:"amount"`
+	SortOrder       int        `gorm:"not null;default:0" json:"sort_order"`
+	PeriodDate      *time.Time `gorm:"type:date" json:"period_date,omitempty"` // periodo contable de la deuda (línea manual/catálogo); si null → emisión de la liquidación
 }
 
 func (TaxSettlementLine) TableName() string {

@@ -41,11 +41,14 @@ type AccountLedgerMovement struct {
 	Balance        float64 `json:"balance"`
 }
 
-// AccountLedger resumen y movimientos de un mes calendario (zona America/Lima).
+// AccountLedger resumen y movimientos de un mes calendario o de un rango de fechas (zona America/Lima).
 type AccountLedger struct {
 	PeriodYear    int                     `json:"period_year"`
 	PeriodMonth   int                     `json:"period_month"`
 	PeriodLabel   string                  `json:"period_label"`
+	LedgerKind    string                  `json:"ledger_kind,omitempty"`     // "month" | "date_range"
+	RangeDateFrom string                  `json:"range_date_from,omitempty"` // yyyy-MM-dd (Lima), solo en date_range
+	RangeDateTo   string                  `json:"range_date_to,omitempty"`   // yyyy-MM-dd (Lima), inclusivo
 	SaldoAnterior float64                 `json:"saldo_anterior"`
 	TotalAbonos   float64                 `json:"total_abonos"`
 	TotalCargos   float64                 `json:"total_cargos"`
@@ -115,20 +118,7 @@ func paymentLedgerDetail(p models.Payment) string {
 	return "Abono / pago registrado"
 }
 
-func buildAccountLedger(docs []models.Document, pays []models.Payment, year, month int) *AccountLedger {
-	if month < 1 || month > 12 {
-		now := time.Now().In(limaLoc)
-		year, month = now.Year(), int(now.Month())
-	}
-	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, limaLoc)
-	monthEnd := monthStart.AddDate(0, 1, 0)
-
-	meses := []string{
-		"", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
-		"JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
-	}
-	periodLabel := fmt.Sprintf("%s %d", meses[month], year)
-
+func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) []ledgerEntry {
 	entries := make([]ledgerEntry, 0, len(docs)+len(pays))
 
 	for _, d := range docs {
@@ -206,9 +196,18 @@ func buildAccountLedger(docs []models.Document, pays []models.Payment, year, mon
 		return a.uid < b.uid
 	})
 
+	return entries
+}
+
+func ledgerFromSortedEntries(
+	entries []ledgerEntry,
+	windowStart, windowEndExclusive time.Time,
+	periodYear, periodMonth int,
+	periodLabel, ledgerKind, rangeDateFrom, rangeDateTo string,
+) *AccountLedger {
 	opening := 0.0
 	for _, e := range entries {
-		if e.opDate.Before(monthStart) {
+		if e.opDate.Before(windowStart) {
 			opening += e.cargo - e.abono
 		}
 	}
@@ -219,10 +218,10 @@ func buildAccountLedger(docs []models.Document, pays []models.Payment, year, mon
 	var sumCargos, sumAbonos float64
 
 	for _, e := range entries {
-		if e.opDate.Before(monthStart) {
+		if e.opDate.Before(windowStart) {
 			continue
 		}
-		if !e.opDate.Before(monthEnd) {
+		if !e.opDate.Before(windowEndExclusive) {
 			continue
 		}
 		running = math.Round((running+e.cargo-e.abono)*100) / 100
@@ -262,13 +261,56 @@ func buildAccountLedger(docs []models.Document, pays []models.Payment, year, mon
 	}
 
 	return &AccountLedger{
-		PeriodYear:    year,
-		PeriodMonth:   month,
+		PeriodYear:    periodYear,
+		PeriodMonth:   periodMonth,
 		PeriodLabel:   periodLabel,
+		LedgerKind:    ledgerKind,
+		RangeDateFrom: rangeDateFrom,
+		RangeDateTo:   rangeDateTo,
 		SaldoAnterior: opening,
 		TotalAbonos:   sumAbonos,
 		TotalCargos:   sumCargos,
 		SaldoFinal:    saldoFinal,
 		Movements:     movements,
 	}
+}
+
+func buildAccountLedger(docs []models.Document, pays []models.Payment, year, month int) *AccountLedger {
+	if month < 1 || month > 12 {
+		now := time.Now().In(limaLoc)
+		year, month = now.Year(), int(now.Month())
+	}
+	monthStart := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, limaLoc)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+
+	meses := []string{
+		"", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+		"JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+	}
+	periodLabel := fmt.Sprintf("%s %d", meses[month], year)
+
+	entries := collectSortedLedgerEntries(docs, pays)
+	return ledgerFromSortedEntries(entries, monthStart, monthEnd, year, month, periodLabel, "month", "", "")
+}
+
+const maxStatementRangeDays = 800
+
+// buildAccountLedgerDateRange construye el libro para fechas inclusivas from–to (día calendario en Lima).
+func buildAccountLedgerDateRange(docs []models.Document, pays []models.Payment, fromDate, toDate time.Time) *AccountLedger {
+	ws := time.Date(fromDate.Year(), fromDate.Month(), fromDate.Day(), 0, 0, 0, 0, limaLoc)
+	te := time.Date(toDate.Year(), toDate.Month(), toDate.Day(), 0, 0, 0, 0, limaLoc)
+	if te.Before(ws) {
+		te = ws
+	}
+	days := int(te.Sub(ws).Hours()/24) + 1
+	if days > maxStatementRangeDays {
+		te = ws.AddDate(0, 0, maxStatementRangeDays-1)
+	}
+	endExclusive := te.AddDate(0, 0, 1)
+	label := fmt.Sprintf("Del %s al %s", ws.Format("02/01/2006"), te.Format("02/01/2006"))
+	fromStr := ws.Format("2006-01-02")
+	toStr := te.Format("2006-01-02")
+
+	entries := collectSortedLedgerEntries(docs, pays)
+	return ledgerFromSortedEntries(entries, ws, endExclusive, 0, 0, label, "date_range", fromStr, toStr)
 }

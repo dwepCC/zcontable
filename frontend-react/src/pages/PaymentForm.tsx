@@ -5,7 +5,7 @@ import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../uti
 import { companiesService } from '../services/companies';
 import { documentsService } from '../services/documents';
 import { paymentsService, type PaymentTukifacIssuePayload, type PaymentUpsertInput } from '../services/payments';
-import { taxSettlementsService } from '../services/taxSettlements';
+import { taxSettlementsService, type SettlementPaymentSuggestion } from '../services/taxSettlements';
 import { auth } from '../services/auth';
 import {
   ensureTukifacSeriesCached,
@@ -71,6 +71,18 @@ function debtSelectSearchText(d: Document): string {
   return [d.number, d.external_id, d.description, d.type, d.status, d.due_date].filter(Boolean).join(' ');
 }
 
+/** Misma idea que `debtSelectLabel`, para filas sugeridas antes de que el documento aparezca en `documents`. */
+function debtSelectLabelFromSuggestion(l: Pick<SettlementPaymentSuggestion, 'concept' | 'amount'>): string {
+  const descRaw = (l.concept ?? '').trim();
+  const desc = descRaw ? truncateText(descRaw, 80) : 'Sin descripción';
+  const amt = Number.isFinite(l.amount) ? l.amount.toFixed(2) : '0.00';
+  return [desc, `S/ ${amt}`, 'pendiente'].join(' · ');
+}
+
+function debtSelectSearchTextFromSuggestion(l: SettlementPaymentSuggestion): string {
+  return [l.document_number, l.concept, String(l.document_id)].filter(Boolean).join(' ');
+}
+
 type ManualAllocRow = { key: string; doc: string; amt: string };
 
 /** Tipo de pago inferido en altas: según FIFO, deuda única o líneas manuales con monto. */
@@ -133,6 +145,8 @@ const PaymentForm = () => {
   /** Pago vinculado a liquidación emitida (precarga imputaciones; se anula si cambia la empresa). */
   const [settlementLink, setSettlementLink] = useState<{ id: number; companyId: number; number: string } | null>(null);
   const [settlementLoadError, setSettlementLoadError] = useState('');
+  /** Opciones extra para selects de deuda (id → etiqueta) cuando el listado aún no incluye ese document_id. */
+  const [allocDocHints, setAllocDocHints] = useState<Array<{ id: number; label: string; searchText: string }>>([]);
   const settlementLoadedRef = useRef(false);
   const lastSettlementParamRef = useRef<string | null>(null);
 
@@ -158,6 +172,40 @@ const PaymentForm = () => {
     const c = companies.find((x) => x.id === id);
     return c?.business_name?.trim() || `ID ${id}`;
   }, [companies, companyId]);
+
+  const singleDebtSelectOptions = useMemo(() => {
+    const fromDocs = documents.map((d) => ({
+      value: String(d.id),
+      label: debtSelectLabel(d),
+      searchText: debtSelectSearchText(d),
+    }));
+    const seen = new Set(fromDocs.map((o) => o.value));
+    const fromHints = allocDocHints
+      .filter((h) => !seen.has(String(h.id)))
+      .map((h) => ({
+        value: String(h.id),
+        label: h.label,
+        searchText: h.searchText,
+      }));
+    return [{ value: '', label: 'Selecciona una deuda…' }, ...fromDocs, ...fromHints];
+  }, [documents, allocDocHints]);
+
+  const manualDebtSelectOptions = useMemo(() => {
+    const fromDocs = documents.map((d) => ({
+      value: String(d.id),
+      label: debtSelectLabel(d),
+      searchText: debtSelectSearchText(d),
+    }));
+    const seen = new Set(fromDocs.map((o) => o.value));
+    const fromHints = allocDocHints
+      .filter((h) => !seen.has(String(h.id)))
+      .map((h) => ({
+        value: String(h.id),
+        label: h.label,
+        searchText: h.searchText,
+      }));
+    return [{ value: '', label: '—' }, ...fromDocs, ...fromHints];
+  }, [documents, allocDocHints]);
 
   const methodOptions = useMemo(() => {
     const base = [
@@ -290,7 +338,11 @@ const PaymentForm = () => {
       settlementLoadedRef.current = false;
       lastSettlementParamRef.current = param || null;
     }
-    if (!param || settlementLoadedRef.current) return;
+    if (!param) {
+      setAllocDocHints([]);
+      return;
+    }
+    if (settlementLoadedRef.current) return;
     const sid = Number(param);
     if (!Number.isFinite(sid) || sid <= 0) return;
     let cancelled = false;
@@ -312,6 +364,15 @@ const PaymentForm = () => {
           setSettlementLink(null);
         }
         if (sug.lines.length > 0) {
+          const hintMap = new Map<number, { id: number; label: string; searchText: string }>();
+          for (const l of sug.lines) {
+            hintMap.set(l.document_id, {
+              id: l.document_id,
+              label: debtSelectLabelFromSuggestion(l),
+              searchText: debtSelectSearchTextFromSuggestion(l),
+            });
+          }
+          setAllocDocHints([...hintMap.values()]);
           setManualAlloc(
             sug.lines.map((l) => ({
               key: newManualAllocKey(),
@@ -326,6 +387,7 @@ const PaymentForm = () => {
               : '',
           );
         } else {
+          setAllocDocHints([]);
           setManualAlloc([{ key: newManualAllocKey(), doc: '', amt: '' }]);
           setAmount('');
           setSettlementLoadError(
@@ -338,6 +400,7 @@ const PaymentForm = () => {
         setNotes((n) => (n.trim() ? n : refLabel));
       } catch {
         if (!cancelled) {
+          setAllocDocHints([]);
           setSettlementLoadError('No se pudieron cargar las imputaciones desde la liquidación.');
           settlementLoadedRef.current = true;
         }
@@ -351,8 +414,11 @@ const PaymentForm = () => {
   useEffect(() => {
     if (!settlementLink) return;
     const cid = Number(companyId);
-    if (!cid || cid !== settlementLink.companyId) {
+    // No limpiar si aún no hay empresa en el formulario (evita carrera tras precarga desde liquidación).
+    if (!Number.isFinite(cid) || cid <= 0) return;
+    if (cid !== settlementLink.companyId) {
       setSettlementLink(null);
+      setAllocDocHints([]);
     }
   }, [companyId, settlementLink]);
 
@@ -733,14 +799,7 @@ const PaymentForm = () => {
                     onChange={setDocumentId}
                     placeholder="Selecciona una deuda…"
                     searchPlaceholder="Buscar deuda..."
-                    options={[
-                      { value: '', label: 'Selecciona una deuda…' },
-                      ...documents.map((d) => ({
-                        value: String(d.id),
-                        label: debtSelectLabel(d),
-                        searchText: debtSelectSearchText(d),
-                      })),
-                    ]}
+                    options={singleDebtSelectOptions}
                   />
                 </div>
               ) : null}
@@ -760,14 +819,7 @@ const PaymentForm = () => {
                           setManualAlloc(n);
                         }}
                         placeholder="Deuda"
-                        options={[
-                          { value: '', label: '—' },
-                          ...documents.map((d) => ({
-                            value: String(d.id),
-                            label: debtSelectLabel(d),
-                            searchText: debtSelectSearchText(d),
-                          })),
-                        ]}
+                        options={manualDebtSelectOptions}
                       />
                       </div>
                       <input

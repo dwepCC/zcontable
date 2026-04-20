@@ -195,6 +195,8 @@ export interface TaxSettlementLine {
   concept: string;
   amount: number;
   sort_order: number;
+  /** Periodo contable de la deuda (YYYY-MM-DD); al emitir, líneas manual/catálogo generan documento con esta fecha. */
+  period_date?: string | null;
 }
 
 export interface TaxSettlement {
@@ -211,6 +213,8 @@ export interface TaxSettlement {
   total_honorarios: number;
   total_impuestos: number;
   total_general: number;
+  /** Indica si aún hay saldo pendiente en deudas vinculadas (API; misma lógica que payment-suggestions). */
+  can_register_payment?: boolean;
   company?: Company;
   lines?: TaxSettlementLine[];
 }
@@ -228,6 +232,16 @@ export interface FirmConfig {
   /** Base ApiPeru.dev, p. ej. https://apiperu.dev (POST /api/ruc) */
   apiperu_base_url?: string;
   apiperu_token?: string;
+  /** Línea superior del pie (WhatsApp / contacto) en estado de cuenta */
+  statement_whatsapp_notice?: string;
+  /** Datos bancarios (cuenta, CCI, titular, Yape, etc.) */
+  statement_bank_info?: string;
+  /** Observaciones para constancias / recibo (pie de página) */
+  statement_payment_observations?: string;
+  statement_bank_logo_url?: string;
+  statement_payment_qr_url?: string;
+  /** Texto bajo el QR; por defecto en PDF «Paga aquí con Yape» */
+  statement_payment_qr_caption?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -269,6 +283,11 @@ export interface AccountLedger {
   period_year: number;
   period_month: number;
   period_label: string;
+  /** "month" | "date_range"; ausente se trata como mes (compatibilidad). */
+  ledger_kind?: 'month' | 'date_range';
+  /** yyyy-MM-dd (Lima), solo rango. */
+  range_date_from?: string;
+  range_date_to?: string;
   saldo_anterior: number;
   total_abonos: number;
   total_cargos: number;

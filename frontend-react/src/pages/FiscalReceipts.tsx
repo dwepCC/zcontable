@@ -521,7 +521,7 @@ const FiscalReceipts = () => {
                       <li key={d.id} className="flex justify-between gap-2 border-b border-slate-200/60 last:border-0 pb-1.5 last:pb-0">
                         <span className="font-mono text-xs truncate">{d.number}</span>
                         <span className="text-xs text-slate-500 shrink-0">{d.issue_date?.slice(0, 10)}</span>
-                        <span className="tabular-nums shrink-0">{d.total_amount.toFixed(2)}</span>
+                        <span className="tabular-nums shrink-0">S/ {d.total_amount.toFixed(2)}</span>
                       </li>
                     ))}
                   </ul>
@@ -546,7 +546,7 @@ const FiscalReceipts = () => {
                         { value: '', label: '—' },
                         ...openCompanyDocs.map((d) => ({
                           value: String(d.id),
-                          label: `${d.number} (${d.total_amount.toFixed(2)})`,
+                          label: `${d.number} (S/ ${d.total_amount.toFixed(2)})`,
                         })),
                       ]}
                     />

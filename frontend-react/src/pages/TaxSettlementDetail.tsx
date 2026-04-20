@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { saveAs } from 'file-saver';
 import { taxSettlementsService } from '../services/taxSettlements';
 import { configService } from '../services/config';
@@ -7,12 +7,14 @@ import type { TaxSettlement } from '../types/dashboard';
 import { auth } from '../services/auth';
 import {
   generateTaxSettlementPdfBlob,
-  getLogoDataUrlForPdf,
+  getLogoPngBlobForPdf,
   taxSettlementPdfFilename,
 } from '../pdf/taxSettlementDocument';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const TaxSettlementDetail = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const settlementId = Number(id);
   const role = auth.getRole() ?? '';
   const canEmit = ['Administrador', 'Supervisor', 'Contador'].includes(role);
@@ -22,6 +24,8 @@ const TaxSettlementDetail = () => {
   const [error, setError] = useState('');
   const [emitting, setEmitting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     if (!settlementId) return;
@@ -75,8 +79,8 @@ const TaxSettlementDetail = () => {
         configService.getFirmBranding().catch(() => null),
         taxSettlementsService.get(settlementId),
       ]);
-      const logoDataUrl = firm?.logo_url ? await getLogoDataUrlForPdf(firm.logo_url) : null;
-      const blob = await generateTaxSettlementPdfBlob(fresh, firm, logoDataUrl);
+      const logoPng = firm?.logo_url ? await getLogoPngBlobForPdf(firm.logo_url) : null;
+      const blob = await generateTaxSettlementPdfBlob(fresh, firm, logoPng);
       saveAs(blob, taxSettlementPdfFilename(fresh));
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'PDF listo para entregar al cliente.' } }),
@@ -88,6 +92,45 @@ const TaxSettlementDetail = () => {
       );
     } finally {
       setExportingPdf(false);
+    }
+  };
+
+  const settlementDeleteWarningMessage = () => {
+    if (!row) return '';
+    const ref = row.number?.trim() ? `«${row.number.trim()}»` : `#${row.id}`;
+    const st = row.status === 'emitida' ? 'emitida' : row.status === 'borrador' ? 'borrador' : row.status;
+    return `Va a eliminar permanentemente la liquidación ${ref} (estado: ${st}).\n\nEsta acción no se puede deshacer. Se borrarán las líneas de la liquidación en el sistema.\n\n${
+      row.status === 'emitida'
+        ? 'Si la liquidación estaba emitida, además se revertirán: los pagos registrados «desde esta liquidación» (imputaciones y estados de deuda), la referencia a la liquidación en comprobantes fiscales locales, y las deudas internas generadas solo por esta liquidación (códigos DEU-LIQ…). Las deudas externas que solo se referenciaron en la liquidación (líneas tipo deuda) no se eliminan.\n\nSi alguna deuda interna tiene otros abonos o pagos no vinculados a esta liquidación, el sistema rechazará la operación hasta que los regularice.'
+        : 'En borrador no hay pagos ni comprobantes vinculados a liquidación emitida; solo se elimina el borrador y sus líneas.'
+    }`;
+  };
+
+  const confirmDeleteSettlement = async () => {
+    if (!settlementId) return;
+    setDeleteLoading(true);
+    try {
+      await taxSettlementsService.delete(settlementId);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Liquidación eliminada.' } }),
+      );
+      setDeleteDialogOpen(false);
+      navigate('/tax-settlements');
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'error',
+            message: typeof msg === 'string' && msg.trim() ? msg : 'No se pudo eliminar la liquidación.',
+          },
+        }),
+      );
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -168,7 +211,7 @@ const TaxSettlementDetail = () => {
               Emitir liquidación
             </button>
           ) : null}
-          {row.status === 'emitida' ? (
+          {row.status === 'emitida' && row.can_register_payment ? (
             <Link
               to={`/payments/new?company_id=${row.company_id}&tax_settlement_id=${row.id}`}
               className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 shadow-sm max-sm:max-w-[min(100%,14rem)]`}
@@ -176,6 +219,15 @@ const TaxSettlementDetail = () => {
               <span className="sm:hidden">Pago desde liquidación</span>
               <span className="hidden sm:inline">Registrar pago (desde liquidación)</span>
             </Link>
+          ) : null}
+          {row.status === 'emitida' && !row.can_register_payment ? (
+            <span
+              className={`${btnBase} border-emerald-200 bg-emerald-50 text-emerald-900 cursor-default max-sm:max-w-[min(100%,14rem)]`}
+              title="No queda saldo pendiente en las deudas vinculadas a esta liquidación"
+            >
+              <span className="sm:hidden">Saldada</span>
+              <span className="hidden sm:inline">Liquidación saldada</span>
+            </span>
           ) : null}
           <Link
             to={`/payments/new?company_id=${row.company_id}`}
@@ -206,6 +258,16 @@ const TaxSettlementDetail = () => {
             <i className={`fas ${exportingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'} text-xs shrink-0`} aria-hidden />
             {exportingPdf ? 'Generando PDF…' : 'PDF cliente'}
           </button>
+          {canEmit ? (
+            <button
+              type="button"
+              onClick={() => setDeleteDialogOpen(true)}
+              className={`${btnBase} border-red-300 bg-white text-red-700 hover:bg-red-50`}
+            >
+              <i className="fas fa-trash-alt text-xs shrink-0" aria-hidden />
+              Eliminar liquidación
+            </button>
+          ) : null}
         </nav>
       </header>
 
@@ -251,6 +313,7 @@ const TaxSettlementDetail = () => {
             <tr>
               <th className="px-4 py-3 text-left">Tipo</th>
               <th className="px-4 py-3 text-left">Concepto</th>
+              <th className="px-4 py-3 text-left whitespace-nowrap">Periodo deuda</th>
               <th className="px-4 py-3 text-right">Monto</th>
             </tr>
           </thead>
@@ -259,13 +322,30 @@ const TaxSettlementDetail = () => {
               <tr key={ln.id ?? `${ln.concept}-${ln.sort_order}`}>
                 <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
                 <td className="px-4 py-3 text-slate-800">{ln.concept}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium">{ln.amount.toFixed(2)}</td>
+                <td className="px-4 py-3 text-slate-600 tabular-nums text-xs">
+                  {(ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : row.issue_date?.slice(0, 10)) || '—'}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums font-medium">S/ {ln.amount.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Advertencia: eliminar liquidación"
+        message={row ? settlementDeleteWarningMessage() : ''}
+        confirmLabel="Sí, eliminar"
+        cancelLabel="Cancelar"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteDialogOpen(false);
+        }}
+        onConfirm={() => void confirmDeleteSettlement()}
+      />
     </div>
   );
 };

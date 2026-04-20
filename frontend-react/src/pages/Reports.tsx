@@ -140,7 +140,10 @@ const Reports = () => {
     setFilterMinOverdue('');
   };
 
-  const formatMoney = (value: number) => `$ ${Number(value ?? 0).toFixed(2)}`;
+  const formatMoney = (value: number) => {
+    const n = Number(value ?? 0);
+    return `S/ ${n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   const getLogoDataUrl = async (logoUrl: string): Promise<string | null> => {
     const url = (logoUrl ?? '').trim();
@@ -205,9 +208,9 @@ const Reports = () => {
       sheet.getCell('F4').value = '';
 
       sheet.getCell('A5').value = '';
-      sheet.getCell('B4').numFmt = '"$" #,##0.00';
-      sheet.getCell('D4').numFmt = '"$" #,##0.00';
-      sheet.getCell('E4').numFmt = '"$" #,##0.00';
+      sheet.getCell('B4').numFmt = '"S/" #,##0.00';
+      sheet.getCell('D4').numFmt = '"S/" #,##0.00';
+      sheet.getCell('E4').numFmt = '"S/" #,##0.00';
 
       const headerRowNumber = 6;
       const headerRow = sheet.getRow(headerRowNumber);
@@ -226,9 +229,9 @@ const Reports = () => {
           balance: r.balance,
           mora,
         });
-        row.getCell('C').numFmt = '"$" #,##0.00';
-        row.getCell('D').numFmt = '"$" #,##0.00';
-        row.getCell('E').numFmt = '"$" #,##0.00';
+        row.getCell('C').numFmt = '"S/" #,##0.00';
+        row.getCell('D').numFmt = '"S/" #,##0.00';
+        row.getCell('E').numFmt = '"S/" #,##0.00';
       });
 
       sheet.getColumn('C').alignment = { horizontal: 'right' };

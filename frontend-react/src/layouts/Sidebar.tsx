@@ -82,12 +82,22 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
           isCollapsed ? 'w-[92px]' : 'w-[280px]'
         }`}
       >
-        <div className={`flex items-center gap-3 ${isCollapsed ? 'px-5 py-7 justify-center' : 'px-8 py-8'}`}>
-          <div className="w-8 h-8 rounded-full bg-emerald-500/15 ring-1 ring-white/10 flex items-center justify-center text-white text-sm font-bold shadow-md shadow-black/20">
-            Z
-          </div>
-          <NavLink to="/dashboard" className={`text-xl font-bold tracking-tight text-white ${isCollapsed ? 'hidden' : ''}`}>
-            ZCONTABLE
+        <div
+          className={`flex w-full items-center justify-center ${
+            isCollapsed ? 'px-3 py-7' : 'px-6 py-8'
+          }`}
+        >
+          <NavLink
+            to="/dashboard"
+            className="flex w-full max-w-[150px] justify-center"
+            title="ZContable"
+            aria-label="Inicio"
+          >
+            <img
+              src="/logo_side.png"
+              alt="ZContable"
+              className="h-auto w-full max-w-[150px] object-contain"
+            />
           </NavLink>
         </div>
         
@@ -125,10 +135,25 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
       
       {/* Mobile Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-[80] w-72 shadow-2xl transform transition-transform duration-300 lg:hidden flex flex-col h-full text-white bg-[url('/sidebar.png'),radial-gradient(80%_55%_at_20%_78%,rgba(16,185,129,0.30)_0%,rgba(16,185,129,0)_60%),radial-gradient(70%_60%_at_70%_92%,rgba(250,204,21,0.22)_0%,rgba(250,204,21,0)_55%),linear-gradient(180deg,#0A3C45_0%,#06343C_45%,#042B33_100%)] bg-[size:cover,auto,auto,auto] bg-[position:center,center,center,center] bg-[repeat:no-repeat,no-repeat,no-repeat,no-repeat] ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="px-6 py-6 flex items-center gap-3 border-b border-white/10">
-          <div className="w-8 h-8 rounded-full bg-emerald-500/15 ring-1 ring-white/10 flex items-center justify-center text-white text-sm font-bold">Z</div>
-          <span className="text-xl font-bold tracking-tight text-white">ZCONTABLE</span>
-          <button onClick={onClose} className="ml-auto text-white/60 hover:text-white">
+        <div className="relative px-6 py-6 flex items-center justify-center border-b border-white/10 min-h-[4.5rem]">
+          <NavLink
+            to="/dashboard"
+            onClick={onClose}
+            className="flex justify-center max-w-[150px] w-full"
+            aria-label="Inicio"
+          >
+            <img
+              src="/logo_side.png"
+              alt="ZContable"
+              className="h-auto w-full max-w-[150px] object-contain"
+            />
+          </NavLink>
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-4 top-1/2 -translate-y-1/2 shrink-0 text-white/60 hover:text-white p-1"
+            aria-label="Cerrar menú"
+          >
             <i className="fas fa-times"></i>
           </button>
         </div>

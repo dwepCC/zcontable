@@ -4,6 +4,7 @@ import { taxSettlementsService } from '../services/taxSettlements';
 import type { TaxSettlement } from '../types/dashboard';
 import Pagination from '../components/Pagination';
 import SearchableSelect from '../components/SearchableSelect';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { companiesService } from '../services/companies';
 import type { Company } from '../types/dashboard';
 import { auth } from '../services/auth';
@@ -17,6 +18,16 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   return i;
 }
 
+function settlementDeleteWarningFromRow(row: TaxSettlement): string {
+  const ref = row.number?.trim() ? `«${row.number.trim()}»` : `#${row.id}`;
+  const st = row.status === 'emitida' ? 'emitida' : row.status === 'borrador' ? 'borrador' : row.status;
+  return `Va a eliminar permanentemente la liquidación ${ref} (estado: ${st}).\n\nEsta acción no se puede deshacer. Se borrarán las líneas de la liquidación en el sistema.\n\n${
+    row.status === 'emitida'
+      ? 'Si la liquidación estaba emitida, además se revertirán: los pagos registrados «desde esta liquidación» (imputaciones y estados de deuda), la referencia a la liquidación en comprobantes fiscales locales, y las deudas internas generadas solo por esta liquidación (códigos DEU-LIQ…). Las deudas externas que solo se referenciaron en la liquidación no se eliminan.\n\nSi alguna deuda interna tiene otros abonos o pagos no vinculados a esta liquidación, el sistema rechazará la operación hasta que los regularice.'
+      : 'En borrador no hay pagos ni comprobantes vinculados a liquidación emitida; solo se elimina el borrador y sus líneas.'
+  }`;
+}
+
 const TaxSettlements = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCompanyId = searchParams.get('company_id') ?? '';
@@ -25,11 +36,14 @@ const TaxSettlements = () => {
 
   const role = auth.getRole() ?? '';
   const canCreate = ['Administrador', 'Supervisor', 'Contador'].includes(role);
+  const canRegisterPayment = ['Administrador', 'Supervisor', 'Contador', 'Asistente'].includes(role);
 
   const [list, setList] = useState<TaxSettlement[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<TaxSettlement | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [filterCompanyId, setFilterCompanyId] = useState(initialCompanyId);
   const [pagination, setPagination] = useState({
     page,
@@ -101,6 +115,34 @@ const TaxSettlements = () => {
     if (s === 'emitida') return 'Emitida';
     if (s === 'anulada') return 'Anulada';
     return s;
+  };
+
+  const confirmDeleteFromList = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await taxSettlementsService.delete(deleteTarget.id);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Liquidación eliminada.' } }),
+      );
+      setDeleteTarget(null);
+      void fetchList();
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'error',
+            message: typeof msg === 'string' && msg.trim() ? msg : 'No se pudo eliminar la liquidación.',
+          },
+        }),
+      );
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   return (
@@ -181,9 +223,30 @@ const TaxSettlements = () => {
                     {row.status === 'emitida' ? row.total_general.toFixed(2) : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/tax-settlements/${row.id}`} className="text-primary-700 hover:text-primary-800 text-xs font-medium">
-                      Ver
-                    </Link>
+                    <div className="flex flex-wrap justify-end gap-x-3 gap-y-1.5">
+                      {row.status === 'emitida' && canRegisterPayment && row.can_register_payment ? (
+                        <Link
+                          to={`/payments/new?company_id=${row.company_id}&tax_settlement_id=${row.id}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700 shadow-sm"
+                          title="Precargar imputaciones de esta liquidación"
+                        >
+                          <i className="fas fa-coins text-[10px]" aria-hidden />
+                          Registrar pago
+                        </Link>
+                      ) : null}
+                      <Link to={`/tax-settlements/${row.id}`} className="text-primary-700 hover:text-primary-800 text-xs font-medium self-center">
+                        Ver
+                      </Link>
+                      {canCreate ? (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(row)}
+                          className="text-xs font-medium text-red-700 hover:text-red-800 self-center"
+                        >
+                          Eliminar
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -206,6 +269,20 @@ const TaxSettlements = () => {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Advertencia: eliminar liquidación"
+        message={deleteTarget ? settlementDeleteWarningFromRow(deleteTarget) : ''}
+        confirmLabel="Sí, eliminar"
+        cancelLabel="Cancelar"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteFromList()}
+      />
     </div>
   );
 };

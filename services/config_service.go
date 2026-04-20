@@ -63,6 +63,37 @@ func (s *ConfigService) UpdateFirmConfig(input *models.FirmConfig) (*models.Firm
 	if input.ApiPeruToken != "" {
 		cfg.ApiPeruToken = input.ApiPeruToken
 	}
+	// Pie de estado de cuenta (textos; el formulario de ajustes envía siempre estos campos)
+	cfg.StatementWhatsappNotice = input.StatementWhatsappNotice
+	cfg.StatementBankInfo = input.StatementBankInfo
+	cfg.StatementPaymentObservations = input.StatementPaymentObservations
+	cfg.StatementPaymentQrCaption = input.StatementPaymentQrCaption
+	if err := database.DB.Save(cfg).Error; err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// SetStatementBankLogoURL guarda la URL del logo del banco en el pie del estado de cuenta.
+func (s *ConfigService) SetStatementBankLogoURL(url string) (*models.FirmConfig, error) {
+	cfg, err := s.GetFirmConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.StatementBankLogoURL = url
+	if err := database.DB.Save(cfg).Error; err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// SetStatementPaymentQrURL guarda la URL del QR de pagos (Yape, Plin, etc.).
+func (s *ConfigService) SetStatementPaymentQrURL(url string) (*models.FirmConfig, error) {
+	cfg, err := s.GetFirmConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.StatementPaymentQrURL = url
 	if err := database.DB.Save(cfg).Error; err != nil {
 		return nil, err
 	}

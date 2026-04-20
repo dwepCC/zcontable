@@ -305,21 +305,7 @@ func (ctrl *PaymentController) DeleteAPI(c fiber.Ctx) error {
 	}
 
 	if !isAdmin(c) {
-		userID, err := getUserID(c)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
-		}
-		p, err := ctrl.paymentService.GetByID(uint(id))
-		if err != nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Pago no encontrado"})
-		}
-		ok, err := ctrl.accessService.CanAccessCompany(userID, p.CompanyID)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error de acceso"})
-		}
-		if !ok {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Pago no encontrado"})
-		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Solo el administrador puede eliminar pagos"})
 	}
 
 	if err := ctrl.paymentService.Delete(uint(id)); err != nil {

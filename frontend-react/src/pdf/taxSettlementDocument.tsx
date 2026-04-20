@@ -1,6 +1,6 @@
 import { Document, Image, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer';
 import type { FirmConfig, TaxSettlement, TaxSettlementLine } from '../types/dashboard';
-import { loadLogoDataUrlForPdf } from '../utils/pdfLogo';
+import { loadLogoPngBlobForPdf } from '../utils/pdfLogo';
 
 export function lineTypeLabelForPdf(t: string): string {
   if (t === 'document_ref') return 'Deuda';
@@ -32,8 +32,8 @@ export function settlementTotalsForPdf(row: TaxSettlement) {
   return { ...s, emitted: false };
 }
 
-export async function getLogoDataUrlForPdf(logoUrl: string): Promise<string | null> {
-  return loadLogoDataUrlForPdf(logoUrl);
+export async function getLogoPngBlobForPdf(logoUrl: string): Promise<Blob | null> {
+  return loadLogoPngBlobForPdf(logoUrl);
 }
 
 const formatMoney = (value: number) => `S/ ${Number(value ?? 0).toFixed(2)}`;
@@ -41,10 +41,10 @@ const formatMoney = (value: number) => `S/ ${Number(value ?? 0).toFixed(2)}`;
 type TaxSettlementPdfDocumentProps = {
   settlement: TaxSettlement;
   firm: FirmConfig | null;
-  logoDataUrl: string | null;
+  logoPng: Blob | null;
 };
 
-export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxSettlementPdfDocumentProps) {
+export function TaxSettlementPdfDocument({ settlement, firm, logoPng }: TaxSettlementPdfDocumentProps) {
   const firmName = firm?.name?.trim() || 'Estudio contable';
   const firmRuc = firm?.ruc?.trim() || '';
   const firmAddr = firm?.address?.trim() || '';
@@ -79,8 +79,9 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxS
     rowHead: { flexDirection: 'row', backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
     row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
     cell: { paddingVertical: 7, paddingHorizontal: 8 },
-    colTipo: { width: '18%' },
-    colConcepto: { width: '52%' },
+    colTipo: { width: '14%' },
+    colPeriodo: { width: '14%' },
+    colConcepto: { width: '42%' },
     colMonto: { width: '30%', textAlign: 'right' },
     headText: { fontSize: 8, fontWeight: 700, color: '#475569' },
     rowText: { fontSize: 8, color: '#0f172a' },
@@ -104,7 +105,7 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxS
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            {logoDataUrl ? <Image style={styles.logo} src={logoDataUrl} /> : null}
+            {logoPng ? <Image style={styles.logo} src={logoPng} /> : null}
             <View>
               <Text style={styles.firmName}>{firmName}</Text>
               {firmRuc ? <Text style={styles.firmMeta}>RUC {firmRuc}</Text> : null}
@@ -137,6 +138,9 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxS
             <View style={[styles.cell, styles.colTipo]}>
               <Text style={styles.headText}>Tipo</Text>
             </View>
+            <View style={[styles.cell, styles.colPeriodo]}>
+              <Text style={styles.headText}>Periodo</Text>
+            </View>
             <View style={[styles.cell, styles.colConcepto]}>
               <Text style={styles.headText}>Concepto</Text>
             </View>
@@ -149,6 +153,11 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxS
               <View key={ln.id ?? idx} style={styles.row} wrap={false}>
                 <View style={[styles.cell, styles.colTipo]}>
                   <Text style={styles.rowText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
+                </View>
+                <View style={[styles.cell, styles.colPeriodo]}>
+                  <Text style={styles.rowText}>
+                    {(ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : issueStr) || '—'}
+                  </Text>
                 </View>
                 <View style={[styles.cell, styles.colConcepto]}>
                   <Text style={styles.rowText}>{ln.concept}</Text>
@@ -209,9 +218,9 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoDataUrl }: TaxS
 export async function generateTaxSettlementPdfBlob(
   settlement: TaxSettlement,
   firm: FirmConfig | null,
-  logoDataUrl: string | null,
+  logoPng: Blob | null,
 ): Promise<Blob> {
-  const el = <TaxSettlementPdfDocument settlement={settlement} firm={firm} logoDataUrl={logoDataUrl} />;
+  const el = <TaxSettlementPdfDocument settlement={settlement} firm={firm} logoPng={logoPng} />;
   return pdf(el).toBlob();
 }
 

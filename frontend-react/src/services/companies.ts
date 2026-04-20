@@ -98,10 +98,24 @@ export const companiesService = {
     await client.delete(`/companies/${id}`);
   },
 
-  async getStatement(id: number, period?: string): Promise<CompanyStatement> {
-    const res = await client.get<CompanyStatement>(`/companies/${id}/statement`, {
-      params: period?.trim() ? { period: period.trim() } : {},
-    });
+  /**
+   * Estado de cuenta. Use `dateFrom`+`dateTo` (yyyy-MM-dd) para rango inclusivo en Lima, o `period` (yyyy-MM) para un mes.
+   * Si se envían ambos, prevalece el rango.
+   */
+  async getStatement(
+    id: number,
+    opts?: { period?: string; dateFrom?: string; dateTo?: string },
+  ): Promise<CompanyStatement> {
+    const params: Record<string, string> = {};
+    const from = opts?.dateFrom?.trim();
+    const to = opts?.dateTo?.trim();
+    if (from && to) {
+      params.date_from = from;
+      params.date_to = to;
+    } else if (opts?.period?.trim()) {
+      params.period = opts.period.trim();
+    }
+    const res = await client.get<CompanyStatement>(`/companies/${id}/statement`, { params });
     return res.data;
   },
 

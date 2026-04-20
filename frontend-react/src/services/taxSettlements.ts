@@ -8,6 +8,8 @@ export interface TaxSettlementLineInput {
   concept: string;
   amount: number;
   sort_order?: number;
+  /** YYYY-MM-DD; opcional en deudas cargadas, recomendado en manual/catálogo (por defecto = emisión liquidación). */
+  period_date?: string;
 }
 
 export interface TaxSettlementCreateInput {
@@ -112,5 +114,9 @@ export const taxSettlementsService = {
   async paymentSuggestions(id: number): Promise<PaymentSuggestionsResponse> {
     const res = await client.get<PaymentSuggestionsResponse>(`/tax-settlements/${id}/payment-suggestions`);
     return res.data;
+  },
+
+  async delete(id: number): Promise<void> {
+    await client.delete(`/tax-settlements/${id}`);
   },
 };

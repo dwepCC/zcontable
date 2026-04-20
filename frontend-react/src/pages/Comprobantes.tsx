@@ -161,9 +161,15 @@ const Comprobantes = () => {
     });
   };
 
+  /** Comprobantes emitidos desde pago de liquidación ya quedan vinculados; solo manual si falta liquidación efectiva. */
+  const canManualLinkSettlement = (r: TukifacFiscalReceipt) =>
+    canLinkSettlement &&
+    r.reconciliation_status !== 'descartado' &&
+    r.reconciliation_status !== 'vinculado' &&
+    (r.settlement_link_status ?? 'pendiente') !== 'vinculado';
+
   const openLinkModal = async (r: TukifacFiscalReceipt) => {
-    if (!canLinkSettlement) return;
-    if (r.reconciliation_status === 'descartado') return;
+    if (!canManualLinkSettlement(r)) return;
     setLinkModal(r);
     setLinkSelect(
       r.effective_tax_settlement_id != null
@@ -388,7 +394,7 @@ const Comprobantes = () => {
                         </span>
                       </td>
                       <td className="px-3 py-3 text-right">
-                        {canLinkSettlement && r.reconciliation_status !== 'descartado' ? (
+                        {canManualLinkSettlement(r) ? (
                           <button
                             type="button"
                             onClick={() => void openLinkModal(r)}

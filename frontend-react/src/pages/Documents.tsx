@@ -17,6 +17,7 @@ import { auth } from '../services/auth';
 import { dateInputToRFC3339MidnightPeru } from '../utils/peruDates';
 import SearchableSelect from '../components/SearchableSelect';
 import Pagination from '../components/Pagination';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -113,6 +114,9 @@ const Documents = () => {
     total_pages: 0,
   });
   const peruvianToday = useMemo(() => formatInTimeZone(new Date(), 'America/Lima', 'yyyy-MM-dd'), []);
+
+  const [deleteTarget, setDeleteTarget] = useState<Document | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [payDoc, setPayDoc] = useState<Document | null>(null);
@@ -272,22 +276,30 @@ const Documents = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm('¿Eliminar esta deuda?')) {
-      try {
-        await documentsService.delete(id);
-        window.dispatchEvent(
-          new CustomEvent('miweb:toast', {
-            detail: { type: 'success', message: 'Deuda eliminada correctamente.' },
-          }),
-        );
-        fetchDocuments();
-      } catch (e) {
-        console.error(e);
-        window.dispatchEvent(
-          new CustomEvent('miweb:toast', { detail: { type: 'error', message: 'Error al eliminar la deuda' } }),
-        );
-      }
+  const deleteConfirmMessage = (doc: Document) => {
+    const hint = (doc.description?.trim() || doc.number?.trim() || `Deuda #${doc.id}`).slice(0, 120);
+    return `¿Eliminar «${hint}»? Esta acción no se puede deshacer.`;
+  };
+
+  const confirmDeleteDebt = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await documentsService.delete(deleteTarget.id);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: { type: 'success', message: 'Deuda eliminada correctamente.' },
+        }),
+      );
+      setDeleteTarget(null);
+      fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'error', message: 'Error al eliminar la deuda' } }),
+      );
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -800,7 +812,7 @@ const Documents = () => {
                         {canDelete ? (
                           <button
                             type="button"
-                            onClick={() => handleDelete(doc.id)}
+                            onClick={() => setDeleteTarget(doc)}
                             className="inline-flex items-center px-3 py-1.5 rounded-full border border-red-200 text-xs font-medium text-red-700 hover:bg-red-50"
                           >
                             <i className="fas fa-trash mr-1"></i> Eliminar
@@ -1179,6 +1191,20 @@ const Documents = () => {
             document.body,
           )
         : null}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Eliminar deuda"
+        message={deleteTarget ? deleteConfirmMessage(deleteTarget) : ''}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteDebt()}
+      />
     </div>
   );
 };

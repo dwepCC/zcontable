@@ -117,12 +117,12 @@ const Dashboard = () => {
     {
       id: 3,
       title: 'Saldo por cobrar',
-      value: `$ ${data.GlobalBalance.toFixed(2)}`,
+      value: `S/ ${data.GlobalBalance.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: 'fas fa-circle-dollar-to-slot',
       badgeDotColor: 'bg-emerald-500',
-      badgeText: `Deudas $ ${data.TotalDocs.toFixed(2)} · Pagos $ ${data.TotalPays.toFixed(2)}`,
+      badgeText: `Deudas S/ ${data.TotalDocs.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Pagos S/ ${data.TotalPays.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       activeBadgeDotColor: 'bg-emerald-200',
-      description: `Deudas $ ${data.TotalDocs.toFixed(2)} · Pagos $ ${data.TotalPays.toFixed(2)}`
+      description: `Deudas S/ ${data.TotalDocs.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Pagos S/ ${data.TotalPays.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     }
   ];
 
