@@ -702,7 +702,6 @@ export async function buildAccountStatementPdfBlob(
       const cgo = row.cargo > 0 ? money(row.cargo) : '-';
       const abo = row.abono > 0 ? money(row.abono) : '-';
       const bal = money(row.balance);
-      const balColor = row.balance > 0.005 ? C.red : row.balance < -0.005 ? C.green : C.black;
       const tc = C.textBody;
 
       page.drawText(opD,  { x: xs[0]! + 2, y: byTop(page, y1), size: 6,   font, color: tc });
@@ -716,9 +715,10 @@ export async function buildAccountStatementPdfBlob(
       const abW  = fontB.widthOfTextAtSize(abo, TABLE_SIZE);
       const balW = fontB.widthOfTextAtSize(bal, TABLE_SIZE);
 
-      page.drawText(cgo, { x: xs[8]!  - 2 - cgoW, y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: row.cargo > 0 ? C.red   : C.midGray });
-      page.drawText(abo, { x: xs[9]!  - 2 - abW,  y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: row.abono > 0 ? C.green : C.midGray });
-      page.drawText(bal, { x: xs[10]! - 2 - balW, y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: balColor });
+      // Cargo, abono y saldo: mismo color de cuerpo que el resto de columnas (sin semáforo rojo/verde en PDF).
+      page.drawText(cgo, { x: xs[8]!  - 2 - cgoW, y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: tc });
+      page.drawText(abo, { x: xs[9]!  - 2 - abW,  y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: tc });
+      page.drawText(bal, { x: xs[10]! - 2 - balW, y: byTop(page, y1), size: TABLE_SIZE, font: fontB, color: tc });
 
       d += hRow;
     }
