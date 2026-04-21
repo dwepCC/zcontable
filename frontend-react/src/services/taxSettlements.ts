@@ -8,13 +8,17 @@ export interface TaxSettlementLineInput {
   concept: string;
   amount: number;
   sort_order?: number;
-  /** YYYY-MM-DD; opcional en deudas cargadas, recomendado en manual/catálogo (por defecto = emisión liquidación). */
+  /** YYYY-MM periodo de la línea. */
+  period_ym?: string;
+  /** YYYY-MM-DD legado; si no hay period_ym se puede derivar el mes. */
   period_date?: string;
 }
 
 export interface TaxSettlementCreateInput {
   company_id: number;
   issue_date?: string;
+  /** YYYY-MM periodo de la liquidación (obligatorio salvo compat. API). */
+  liquidation_period?: string;
   period_label?: string;
   period_from?: string | null;
   period_to?: string | null;
@@ -25,6 +29,7 @@ export interface TaxSettlementCreateInput {
 
 export interface TaxSettlementUpdateInput {
   issue_date?: string;
+  liquidation_period?: string;
   period_label?: string;
   period_from?: string | null;
   period_to?: string | null;

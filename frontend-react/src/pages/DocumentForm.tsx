@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
 import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../utils/peruDates';
@@ -80,6 +80,8 @@ const DocumentForm = () => {
   const [status, setStatus] = useState('pendiente');
   const [description, setDescription] = useState('');
   const [serviceMonth, setServiceMonth] = useState('');
+  const [accountingPeriod, setAccountingPeriod] = useState(() => peruvianToday.slice(0, 7));
+  const accountingPeriodTouchedRef = useRef(false);
   const [loadedSource, setLoadedSource] = useState('');
   const [lines, setLines] = useState<DebtLine[]>([{ key: newDebtLineKey(), description: '', amount: '' }]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -92,6 +94,13 @@ const DocumentForm = () => {
       }, 0),
     [lines],
   );
+
+  useEffect(() => {
+    if (loadedSource === 'recurrente_plan') return;
+    if (accountingPeriodTouchedRef.current) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) return;
+    setAccountingPeriod(issueDate.slice(0, 7));
+  }, [issueDate, loadedSource]);
 
   useEffect(() => {
     const run = async () => {
@@ -116,6 +125,11 @@ const DocumentForm = () => {
           setStatus(doc.status ?? 'pendiente');
           setDescription(doc.description ?? '');
           setServiceMonth(toMonthInput(doc.service_month));
+          setAccountingPeriod(
+            toMonthInput(doc.accounting_period || doc.service_month) ||
+              (peruDateInputFromApiDate(doc.issue_date)?.slice(0, 7) ?? peruvianToday.slice(0, 7)),
+          );
+          accountingPeriodTouchedRef.current = false;
           const src = String(doc.source ?? '');
           if (src !== 'recurrente_plan') {
             if (doc.items && doc.items.length > 0) {
@@ -188,6 +202,11 @@ const DocumentForm = () => {
         service_month: serviceMonth.trim() ? serviceMonth.trim() : undefined,
       };
     } else {
+      const ap = accountingPeriod.trim();
+      if (!/^\d{4}-\d{2}$/.test(ap)) {
+        setError('Indique el periodo contable (año-mes) con el selector o formato AAAA-MM');
+        return;
+      }
       const items: DocumentItemInput[] = [];
       let sum = 0;
       for (let i = 0; i < lines.length; i++) {
@@ -225,7 +244,7 @@ const DocumentForm = () => {
         total_amount: Math.round(sum * 100) / 100,
         status: isEdit ? status : 'pendiente',
         description: description.trim() || joined.slice(0, 1900) || undefined,
-        service_month: serviceMonth.trim() ? serviceMonth.trim() : undefined,
+        accounting_period: ap,
         items,
       };
     }
@@ -550,17 +569,42 @@ const DocumentForm = () => {
             </div>
           )}
           <div>
-            <label htmlFor="service_month" className="block text-sm font-medium text-slate-700 mb-1">
-              Mes de servicio (opcional)
-            </label>
-            <input
-              type="month"
-              id="service_month"
-              name="service_month"
-              value={serviceMonth}
-              onChange={(ev) => setServiceMonth(ev.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            />
+            {isPlanDebt ? (
+              <>
+                <label htmlFor="service_month" className="block text-sm font-medium text-slate-700 mb-1">
+                  Mes de servicio (plan)
+                </label>
+                <input
+                  type="month"
+                  id="service_month"
+                  name="service_month"
+                  value={serviceMonth}
+                  onChange={(ev) => setServiceMonth(ev.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                />
+              </>
+            ) : (
+              <>
+                <label htmlFor="accounting_period" className="block text-sm font-medium text-slate-700 mb-1">
+                  Periodo contable (año-mes)
+                </label>
+                <p className="text-xs text-slate-500 mb-1.5">
+                  Independiente de la fecha de registro; identifica el mes al que corresponde el cargo.
+                </p>
+                <input
+                  type="month"
+                  id="accounting_period"
+                  name="accounting_period"
+                  required
+                  value={accountingPeriod}
+                  onChange={(ev) => {
+                    accountingPeriodTouchedRef.current = true;
+                    setAccountingPeriod(ev.target.value);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                />
+              </>
+            )}
           </div>
           {isEdit ? (
             <div>

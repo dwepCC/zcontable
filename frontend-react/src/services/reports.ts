@@ -8,6 +8,7 @@ export interface FinancialCompanyRow {
   balance: number;
   max_overdue_months: number;
   has_overdue: boolean;
+  oldest_open_debt_period?: string;
 }
 
 export interface FinancialReportResponse {
@@ -21,7 +22,7 @@ export interface FinancialReportQuery {
   date_from?: string;
   date_to?: string;
   company_id?: string;
-  /** 1–4: solo empresas con al menos N meses de mora en deudas vencidas con saldo. */
+  /** 1–24: solo empresas con al menos N meses de atraso respecto al periodo contable del cargo con saldo. */
   min_overdue_months?: string;
 }
 
@@ -42,6 +43,7 @@ export const reportsService = {
         ...r,
         max_overdue_months: Number(r.max_overdue_months) || 0,
         has_overdue: Boolean(r.has_overdue),
+        oldest_open_debt_period: String(r.oldest_open_debt_period ?? '').trim(),
       })),
     };
   },

@@ -78,9 +78,11 @@ export interface CompanyDebtCard {
   TotalDocuments: number;
   TotalPayments: number;
   Balance: number;
-  /** Meses máximos de retraso en documentos vencidos con saldo (misma regla que reporte financiero). */
+  /** Meses de atraso respecto al periodo contable del cargo con saldo (misma regla que reporte financiero). */
   MaxOverdueMonths?: number;
   HasOverdue?: boolean;
+  /** Periodo YYYY-MM más antiguo entre documentos pendiente/parcial con saldo. */
+  OldestOpenDebtPeriod?: string;
 }
 
 export interface DocumentItem {
@@ -108,6 +110,8 @@ export interface Document {
   source?: string;
   description?: string;
   service_month?: string;
+  /** Periodo contable YYYY-MM (independiente de issue_date). */
+  accounting_period?: string;
   items?: DocumentItem[];
 }
 
@@ -184,6 +188,8 @@ export interface SettlementPreviewLine {
   amount: number;
   issue_date: string;
   status: string;
+  /** YYYY-MM sugerido para líneas de liquidación. */
+  accounting_period?: string;
 }
 
 export interface TaxSettlementLine {
@@ -195,7 +201,9 @@ export interface TaxSettlementLine {
   concept: string;
   amount: number;
   sort_order: number;
-  /** Periodo contable de la deuda (YYYY-MM-DD); al emitir, líneas manual/catálogo generan documento con esta fecha. */
+  /** Periodo contable YYYY-MM (preferido). */
+  period_ym?: string | null;
+  /** Primer día del mes de period_ym (API legado). */
   period_date?: string | null;
 }
 
@@ -204,6 +212,8 @@ export interface TaxSettlement {
   company_id: number;
   number: string;
   issue_date: string;
+  /** Periodo de la liquidación YYYY-MM (una por empresa y periodo). */
+  liquidation_period?: string;
   period_label?: string;
   period_from?: string | null;
   period_to?: string | null;

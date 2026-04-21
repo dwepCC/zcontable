@@ -139,15 +139,16 @@ func (s *SubscriptionLiquidationService) ensureMonthlyCharge(co *models.Company,
 	number := "REC-" + strconv.FormatUint(uint64(co.ID), 10) + "-" + serviceMonth
 
 	doc := models.Document{
-		CompanyID:    co.ID,
-		Type:         "PLAN",
-		Number:       number,
-		IssueDate:    asOf,
-		TotalAmount:  price,
-		Description:  desc,
-		ServiceMonth: serviceMonth,
-		Status:       "pendiente",
-		Source:       "recurrente_plan",
+		CompanyID:          co.ID,
+		Type:               "PLAN",
+		Number:             number,
+		IssueDate:          asOf,
+		TotalAmount:        price,
+		Description:        desc,
+		ServiceMonth:       serviceMonth,
+		AccountingPeriod:   serviceMonth,
+		Status:             "pendiente",
+		Source:             "recurrente_plan",
 	}
 
 	return database.DB.Transaction(func(tx *gorm.DB) error {

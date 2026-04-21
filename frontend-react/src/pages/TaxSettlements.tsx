@@ -184,18 +184,54 @@ const TaxSettlements = () => {
         <table className="min-w-full text-sm text-left">
           <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3">Número</th>
-              <th className="px-4 py-3">Empresa</th>
-              <th className="px-4 py-3">Periodo</th>
-              <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3 text-right">Total</th>
-              <th className="px-4 py-3 text-right">Acciones</th>
+              <th className="px-4 py-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <i className="fas fa-hashtag text-slate-400 opacity-80" aria-hidden />
+                  Número
+                </span>
+              </th>
+              <th className="px-4 py-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <i className="fas fa-building text-slate-400 opacity-80" aria-hidden />
+                  Empresa
+                </span>
+              </th>
+              <th className="px-4 py-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <i className="fas fa-calendar-alt text-slate-400 opacity-80" aria-hidden />
+                  Periodo
+                </span>
+              </th>
+              <th className="px-4 py-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <i className="fas fa-flag text-slate-400 opacity-80" aria-hidden />
+                  Estado
+                </span>
+              </th>
+              <th className="px-4 py-3 text-right">
+                <span className="inline-flex items-center justify-end gap-1.5 w-full">
+                  <i className="fas fa-coins text-slate-400 opacity-80" aria-hidden />
+                  Total
+                </span>
+              </th>
+              <th className="px-4 py-3 text-center whitespace-nowrap">
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <i className="fas fa-list-ul text-slate-400 opacity-80" aria-hidden />
+                  Ítems
+                </span>
+              </th>
+              <th className="px-4 py-3 text-right">
+                <span className="inline-flex items-center justify-end gap-1.5 w-full">
+                  <i className="fas fa-bars text-slate-400 opacity-80" aria-hidden />
+                  Acciones
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                   <i className="fas fa-spinner fa-spin mr-2" />
                   Cargando…
                 </td>
@@ -203,12 +239,22 @@ const TaxSettlements = () => {
             ) : list.length ? (
               list.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.number || '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    <span className="inline-flex items-center gap-1.5">
+                      <i className="fas fa-file-invoice-dollar text-slate-400 text-[11px]" aria-hidden />
+                      {row.number || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 font-medium text-slate-800">{row.company?.business_name ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{row.period_label || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 tabular-nums">
+                    <span className="inline-flex items-center gap-1.5">
+                      <i className="fas fa-calendar-day text-slate-400 text-[11px]" aria-hidden />
+                      {row.liquidation_period || row.period_label || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                         row.status === 'emitida'
                           ? 'bg-emerald-50 text-emerald-800'
                           : row.status === 'borrador'
@@ -216,11 +262,35 @@ const TaxSettlements = () => {
                             : 'bg-slate-100 text-slate-600'
                       }`}
                     >
+                      {row.status === 'emitida' ? (
+                        <i className="fas fa-check-circle text-[10px] opacity-90" aria-hidden />
+                      ) : row.status === 'borrador' ? (
+                        <i className="fas fa-edit text-[10px] opacity-90" aria-hidden />
+                      ) : (
+                        <i className="fas fa-ban text-[10px] opacity-90" aria-hidden />
+                      )}
                       {statusLabel(row.status)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.status === 'emitida' ? row.total_general.toFixed(2) : '—'}
+                    {row.status === 'emitida' ? (
+                      <span className="inline-flex items-center justify-end gap-1">
+                        <i className="fas fa-coins text-slate-400 text-[11px]" aria-hidden />
+                        {row.total_general.toFixed(2)}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Link
+                      to={`/tax-settlements/${row.id}#liquidacion-lineas`}
+                      className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-50 hover:border-primary-200"
+                      title="Ver líneas de la liquidación"
+                    >
+                      <i className="fas fa-list-ul text-[11px]" aria-hidden />
+                      Ver ítems
+                    </Link>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-wrap justify-end gap-x-3 gap-y-1.5">
@@ -234,15 +304,20 @@ const TaxSettlements = () => {
                           Registrar pago
                         </Link>
                       ) : null}
-                      <Link to={`/tax-settlements/${row.id}`} className="text-primary-700 hover:text-primary-800 text-xs font-medium self-center">
+                      <Link
+                        to={`/tax-settlements/${row.id}`}
+                        className="inline-flex items-center gap-1 text-primary-700 hover:text-primary-800 text-xs font-medium self-center"
+                      >
+                        <i className="fas fa-eye text-[10px]" aria-hidden />
                         Ver
                       </Link>
                       {canCreate ? (
                         <button
                           type="button"
                           onClick={() => setDeleteTarget(row)}
-                          className="text-xs font-medium text-red-700 hover:text-red-800 self-center"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800 self-center"
                         >
+                          <i className="fas fa-trash-alt text-[10px]" aria-hidden />
                           Eliminar
                         </button>
                       ) : null}
@@ -252,7 +327,7 @@ const TaxSettlements = () => {
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                   No hay liquidaciones. {canCreate ? 'Cree una desde «Nueva liquidación».' : ''}
                 </td>
               </tr>

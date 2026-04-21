@@ -38,6 +38,8 @@ export interface DocumentUpsertInput {
   source?: string;
   description?: string;
   service_month?: string;
+  /** Periodo contable YYYY-MM (obligatorio en deudas manuales). */
+  accounting_period?: string;
   /** Si se envía, el backend recalcula total_amount como la suma de los ítems. */
   items?: DocumentItemInput[];
 }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import client from '../api/client';
 import { companiesService } from '../services/companies';
 import type { Company, DashboardData } from '../types/dashboard';
+import { PeriodScoreMini, periodDebtMoraBadge } from '../utils/periodDebtScore';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -276,24 +277,41 @@ const Header = ({
 
                     {(dashboardData?.TopDebtors ?? []).length > 0 ? (
                       <div className="space-y-1">
-                        {(dashboardData?.TopDebtors ?? []).slice(0, 5).map((debtor, idx) => (
-                          <Link
-                            key={debtor.Company?.id ?? `debtor-${idx}`}
-                            to={debtor.Company?.id ? `/companies/${debtor.Company.id}/statement` : '/reports/financial'}
-                            className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors"
-                            onClick={() => setIsNotificationsOpen(false)}
-                          >
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-slate-800 truncate">
-                                {debtor.Company?.business_name || 'Sin nombre'}
-                              </p>
-                              <p className="text-[11px] text-slate-500 truncate">{debtor.Company?.ruc || ''}</p>
-                            </div>
-                            <span className="text-[11px] font-bold text-red-700 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full flex-shrink-0">
-                              S/ {Number(debtor.Balance ?? 0).toFixed(2)}
-                            </span>
-                          </Link>
-                        ))}
+                        {(dashboardData?.TopDebtors ?? []).slice(0, 5).map((debtor, idx) => {
+                          const mora = periodDebtMoraBadge(
+                            Number(debtor.MaxOverdueMonths ?? 0),
+                            Boolean(debtor.HasOverdue),
+                          );
+                          return (
+                            <Link
+                              key={debtor.Company?.id ?? `debtor-${idx}`}
+                              to={debtor.Company?.id ? `/companies/${debtor.Company.id}/statement` : '/reports/financial'}
+                              className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors"
+                              onClick={() => setIsNotificationsOpen(false)}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-slate-800 truncate">
+                                  {debtor.Company?.business_name || 'Sin nombre'}
+                                </p>
+                                <p className="text-[11px] text-slate-500 truncate">
+                                  {debtor.Company?.ruc || ''}
+                                  {debtor.OldestOpenDebtPeriod ? ` · Per. ${debtor.OldestOpenDebtPeriod}` : ''}
+                                </p>
+                                <span
+                                  className={`mt-1 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${mora.cls}`}
+                                >
+                                  {mora.label}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                <PeriodScoreMini compact maxLag={Number(debtor.MaxOverdueMonths ?? 0)} />
+                                <span className="text-[11px] font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                  S/ {Number(debtor.Balance ?? 0).toFixed(2)}
+                                </span>
+                              </div>
+                            </Link>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="px-3 py-2 rounded-xl bg-slate-50 text-xs text-slate-600 border border-slate-100">

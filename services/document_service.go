@@ -101,6 +101,26 @@ func (s *DocumentService) Create(input *models.Document) error {
 	}
 	input.ExternalID = strings.TrimSpace(input.ExternalID)
 
+	src := strings.TrimSpace(input.Source)
+	needsDebtPeriod := (src == "" || src == "manual") && len(items) > 0
+	ap := strings.TrimSpace(input.AccountingPeriod)
+	if ap == "" {
+		ap = strings.TrimSpace(input.ServiceMonth)
+	}
+	if needsDebtPeriod {
+		if _, err := time.Parse("2006-01", ap); err != nil {
+			return errors.New("el periodo contable (AAAA-MM) es obligatorio para deudas manuales y es independiente de la fecha de registro")
+		}
+		input.AccountingPeriod = ap
+		if strings.TrimSpace(input.ServiceMonth) == "" {
+			input.ServiceMonth = ap
+		}
+	} else if ap != "" {
+		if _, err := time.Parse("2006-01", ap); err == nil {
+			input.AccountingPeriod = ap
+		}
+	}
+
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Omit("Items", "Company", "Payments", "Allocations").Create(input).Error; err != nil {
 			return err
@@ -146,7 +166,21 @@ func (s *DocumentService) Update(id uint, input *models.Document) error {
 			d.Status = input.Status
 		}
 		d.Description = input.Description
-		d.ServiceMonth = input.ServiceMonth
+		ap := strings.TrimSpace(input.AccountingPeriod)
+		if ap == "" {
+			ap = strings.TrimSpace(input.ServiceMonth)
+		}
+		if ap != "" {
+			if _, err := time.Parse("2006-01", ap); err != nil {
+				return errors.New("periodo contable inválido (AAAA-MM)")
+			}
+			d.AccountingPeriod = ap
+		}
+		if strings.TrimSpace(input.ServiceMonth) != "" {
+			d.ServiceMonth = strings.TrimSpace(input.ServiceMonth)
+		} else if d.AccountingPeriod != "" && strings.TrimSpace(d.ServiceMonth) == "" {
+			d.ServiceMonth = d.AccountingPeriod
+		}
 
 		if input.Items != nil {
 			if err := tx.Where("document_id = ?", id).Delete(&models.DocumentItem{}).Error; err != nil {

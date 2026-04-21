@@ -21,6 +21,8 @@ type TaxSettlement struct {
 	CompanyID        uint           `gorm:"not null;index" json:"company_id"`
 	Number           string         `gorm:"size:50" json:"number"`
 	IssueDate        time.Time      `gorm:"not null" json:"issue_date"`
+	// LiquidationPeriod: periodo de la liquidación YYYY-MM (máx. una borrador/emitida por empresa y periodo).
+	LiquidationPeriod string        `gorm:"size:7;index" json:"liquidation_period"`
 	PeriodLabel      string         `gorm:"size:255" json:"period_label"`
 	PeriodFrom       *time.Time     `json:"period_from,omitempty"`
 	PeriodTo         *time.Time     `json:"period_to,omitempty"`
@@ -53,7 +55,9 @@ type TaxSettlementLine struct {
 	Concept         string     `gorm:"size:512;not null" json:"concept"`
 	Amount          float64    `gorm:"type:decimal(15,2);not null" json:"amount"`
 	SortOrder       int        `gorm:"not null;default:0" json:"sort_order"`
-	PeriodDate      *time.Time `gorm:"type:date" json:"period_date,omitempty"` // periodo contable de la deuda (línea manual/catálogo); si null → emisión de la liquidación
+	// PeriodYM: periodo contable de la línea YYYY-MM.
+	PeriodYM        string     `gorm:"size:7" json:"period_ym"`
+	PeriodDate      *time.Time `gorm:"type:date" json:"period_date,omitempty"` // primer día del mes de period_ym (compatibilidad / informes)
 }
 
 func (TaxSettlementLine) TableName() string {

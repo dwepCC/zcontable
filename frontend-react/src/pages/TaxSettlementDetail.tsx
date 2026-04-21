@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { saveAs } from 'file-saver';
 import { taxSettlementsService } from '../services/taxSettlements';
 import { configService } from '../services/config';
@@ -15,6 +15,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 const TaxSettlementDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const settlementId = Number(id);
   const role = auth.getRole() ?? '';
   const canEmit = ['Administrador', 'Supervisor', 'Contador'].includes(role);
@@ -51,6 +52,17 @@ const TaxSettlementDetail = () => {
       cancelled = true;
     };
   }, [settlementId]);
+
+  useEffect(() => {
+    if (loading || !row) return;
+    if (location.hash !== '#liquidacion-lineas') return;
+    const el = document.getElementById('liquidacion-lineas');
+    if (el) {
+      window.requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }, [loading, row, location.hash]);
 
   const emit = async () => {
     if (!settlementId) return;
@@ -207,7 +219,11 @@ const TaxSettlementDetail = () => {
               disabled={emitting}
               className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50`}
             >
-              {emitting ? <i className="fas fa-spinner fa-spin text-xs" /> : null}
+              {emitting ? (
+                <i className="fas fa-spinner fa-spin text-xs shrink-0" aria-hidden />
+              ) : (
+                <i className="fas fa-file-signature text-xs shrink-0" aria-hidden />
+              )}
               Emitir liquidación
             </button>
           ) : null}
@@ -216,6 +232,7 @@ const TaxSettlementDetail = () => {
               to={`/payments/new?company_id=${row.company_id}&tax_settlement_id=${row.id}`}
               className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 shadow-sm max-sm:max-w-[min(100%,14rem)]`}
             >
+              <i className="fas fa-coins text-xs shrink-0" aria-hidden />
               <span className="sm:hidden">Pago desde liquidación</span>
               <span className="hidden sm:inline">Registrar pago (desde liquidación)</span>
             </Link>
@@ -225,6 +242,7 @@ const TaxSettlementDetail = () => {
               className={`${btnBase} border-emerald-200 bg-emerald-50 text-emerald-900 cursor-default max-sm:max-w-[min(100%,14rem)]`}
               title="No queda saldo pendiente en las deudas vinculadas a esta liquidación"
             >
+              <i className="fas fa-check-double text-xs shrink-0" aria-hidden />
               <span className="sm:hidden">Saldada</span>
               <span className="hidden sm:inline">Liquidación saldada</span>
             </span>
@@ -233,22 +251,29 @@ const TaxSettlementDetail = () => {
             to={`/payments/new?company_id=${row.company_id}`}
             className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
           >
+            <i className="fas fa-hand-holding-usd text-xs shrink-0" aria-hidden />
             {row.status === 'emitida' ? 'Pago sin vínculo' : 'Registrar pago'}
           </Link>
-          <Link
-            to={`/comprobantes?tax_settlement_id=${row.id}`}
-            title="Comprobantes de esta liquidación"
-            className={`${btnBase} border-primary-200 bg-primary-50/90 text-primary-950 hover:bg-primary-50`}
-          >
-            Comprobantes
-          </Link>
-          <Link
-            to={`/documents/fiscal-receipts?company_id=${row.company_id}`}
-            title="Conciliación — comprobantes pendientes"
-            className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
-          >
-            Conciliación
-          </Link>
+          {row.status === 'emitida' ? (
+            <>
+              <Link
+                to={`/comprobantes?tax_settlement_id=${row.id}`}
+                title="Comprobantes de esta liquidación"
+                className={`${btnBase} border-primary-200 bg-primary-50/90 text-primary-950 hover:bg-primary-50`}
+              >
+                <i className="fas fa-file-invoice text-xs shrink-0" aria-hidden />
+                Comprobantes
+              </Link>
+              <Link
+                to={`/documents/fiscal-receipts?company_id=${row.company_id}`}
+                title="Conciliación — comprobantes pendientes"
+                className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
+              >
+                <i className="fas fa-balance-scale text-xs shrink-0" aria-hidden />
+                Conciliación
+              </Link>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => void downloadPdf()}
@@ -272,13 +297,17 @@ const TaxSettlementDetail = () => {
       </header>
 
       <div className="w-full min-w-0 bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-4 text-sm">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <span className="text-xs font-medium text-slate-500">Fecha emisión</span>
             <p className="text-slate-800">{row.issue_date?.slice(0, 10)}</p>
           </div>
           <div>
-            <span className="text-xs font-medium text-slate-500">Periodo</span>
+            <span className="text-xs font-medium text-slate-500">Periodo liquidación (AAAA-MM)</span>
+            <p className="text-slate-800 font-mono text-sm">{row.liquidation_period || '—'}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium text-slate-500">Etiqueta periodo</span>
             <p className="text-slate-800">{row.period_label || '—'}</p>
           </div>
         </div>
@@ -306,7 +335,16 @@ const TaxSettlementDetail = () => {
         ) : null}
       </div>
 
-      <div className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <section
+        id="liquidacion-lineas"
+        className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-24"
+        aria-labelledby="liquidacion-lineas-titulo"
+      >
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+          <h3 id="liquidacion-lineas-titulo" className="text-sm font-semibold text-slate-800">
+            Líneas / ítems de la liquidación
+          </h3>
+        </div>
         <div className="overflow-x-auto">
         <table className="min-w-full w-full text-sm">
           <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
@@ -322,8 +360,12 @@ const TaxSettlementDetail = () => {
               <tr key={ln.id ?? `${ln.concept}-${ln.sort_order}`}>
                 <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
                 <td className="px-4 py-3 text-slate-800">{ln.concept}</td>
-                <td className="px-4 py-3 text-slate-600 tabular-nums text-xs">
-                  {(ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : row.issue_date?.slice(0, 10)) || '—'}
+                <td className="px-4 py-3 text-slate-600 tabular-nums text-xs font-mono">
+                  {(ln.period_ym && /^\d{4}-\d{2}$/.test(ln.period_ym)
+                    ? ln.period_ym
+                    : ln.period_date && ln.period_date.length >= 10
+                      ? ln.period_date.slice(0, 10)
+                      : row.liquidation_period) || '—'}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums font-medium">S/ {ln.amount.toFixed(2)}</td>
               </tr>
@@ -331,7 +373,7 @@ const TaxSettlementDetail = () => {
           </tbody>
         </table>
         </div>
-      </div>
+      </section>
 
       <ConfirmDialog
         open={deleteDialogOpen}

@@ -340,6 +340,8 @@ const PaymentForm = () => {
     }
     if (!param) {
       setAllocDocHints([]);
+      setSettlementLoadError('');
+      settlementLoadedRef.current = false;
       return;
     }
     if (settlementLoadedRef.current) return;
@@ -349,20 +351,32 @@ const PaymentForm = () => {
     void (async () => {
       try {
         setSettlementLoadError('');
+        const st = await taxSettlementsService.get(sid);
+        if (cancelled) return;
+        if (st.status !== 'emitida') {
+          settlementLoadedRef.current = true;
+          window.dispatchEvent(
+            new CustomEvent('miweb:toast', {
+              detail: {
+                type: 'warning',
+                message:
+                  'No se pueden registrar pagos vinculados a una liquidación en borrador. Emítala primero; puede registrar un pago para la empresa sin ese vínculo.',
+              },
+            }),
+          );
+          navigate(`/payments/new?company_id=${st.company_id}`, { replace: true });
+          return;
+        }
         const sug = await taxSettlementsService.paymentSuggestions(sid);
         if (cancelled) return;
         settlementLoadedRef.current = true;
         setCompanyId(String(sug.company_id));
         setApplyMode('manual');
-        if (sug.status === 'emitida') {
-          setSettlementLink({
-            id: sid,
-            companyId: sug.company_id,
-            number: sug.settlement_number?.trim() ?? '',
-          });
-        } else {
-          setSettlementLink(null);
-        }
+        setSettlementLink({
+          id: sid,
+          companyId: sug.company_id,
+          number: sug.settlement_number?.trim() ?? '',
+        });
         if (sug.lines.length > 0) {
           const hintMap = new Map<number, { id: number; label: string; searchText: string }>();
           for (const l of sug.lines) {
@@ -381,19 +395,13 @@ const PaymentForm = () => {
             })),
           );
           setAmount(sug.suggested_total.toFixed(2));
-          setSettlementLoadError(
-            sug.status !== 'emitida'
-              ? 'Liquidación en borrador: imputaciones según saldos actuales. Al emitirla podrá vincular este pago a la liquidación.'
-              : '',
-          );
+          setSettlementLoadError('');
         } else {
           setAllocDocHints([]);
           setManualAlloc([{ key: newManualAllocKey(), doc: '', amt: '' }]);
           setAmount('');
           setSettlementLoadError(
-            sug.status !== 'emitida'
-              ? 'Liquidación en borrador: no hay saldo pendiente en las deudas de la liquidación. Emítala o cargue imputaciones manualmente.'
-              : 'No hay saldo pendiente en las deudas de esta liquidación. Agregue imputaciones manualmente si corresponde.',
+            'No hay saldo pendiente en las deudas de esta liquidación. Agregue imputaciones manualmente si corresponde.',
           );
         }
         const refLabel = sug.settlement_number?.trim() ? `Liquidación ${sug.settlement_number.trim()}` : `Liquidación #${sid}`;
@@ -409,7 +417,7 @@ const PaymentForm = () => {
     return () => {
       cancelled = true;
     };
-  }, [isEdit, taxSettlementIdFromUrl]);
+  }, [isEdit, taxSettlementIdFromUrl, navigate]);
 
   useEffect(() => {
     if (!settlementLink) return;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Company, Document, Payment } from '../types/dashboard';
@@ -65,6 +65,32 @@ function getDocumentTypeLabel(value: string): string {
   if (upper === 'PLAN') return 'Mensualidad (plan)';
 
   return raw;
+}
+
+/** Periodo contable AAAA-MM (deuda manual / liquidación) o mensualidad plan. */
+function formatDebtPeriod(doc: Document): string {
+  const p = (doc.accounting_period ?? '').trim() || (doc.service_month ?? '').trim();
+  return p || '—';
+}
+
+/** Celda tipo: marca LI si el cargo proviene de una liquidación emitida. */
+function debtTypeCell(doc: Document): ReactNode {
+  const base = getDocumentTypeLabel(doc.type);
+  const fromLiquidacion = String(doc.source ?? '').trim() === 'liquidacion';
+  if (!fromLiquidacion) {
+    return base;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <span
+        className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold font-mono tracking-tight bg-violet-100 text-violet-900 border border-violet-200"
+        title="Generada desde liquidación de impuestos"
+      >
+        LI
+      </span>
+      <span>{base}</span>
+    </span>
+  );
 }
 
 function parsePositiveInt(value: string | null, fallback: number): number {
@@ -711,6 +737,7 @@ const Documents = () => {
                 <th className="px-4 py-3">Fecha</th>
                 <th className="px-4 py-3">Empresa</th>
                 <th className="px-4 py-3">Tipo</th>
+                <th className="px-4 py-3 whitespace-nowrap">Periodo</th>
                 <th className="px-4 py-3">Número</th>
                 <th className="px-4 py-3 min-w-[140px] max-w-[280px]">Descripción</th>
                 <th className="px-4 py-3 text-right">Monto</th>
@@ -722,7 +749,7 @@ const Documents = () => {
             <tbody className="divide-y divide-slate-100">
               {loading && documents.length === 0 ? (
                  <tr>
-                   <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
+                   <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
                      <i className="fas fa-spinner fa-spin mr-2"></i> Cargando deudas...
                    </td>
                  </tr>
@@ -733,7 +760,10 @@ const Documents = () => {
                     <td className="px-4 py-3 text-slate-800 font-medium">
                       {doc.company ? doc.company.business_name : '—'}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{getDocumentTypeLabel(doc.type)}</td>
+                    <td className="px-4 py-3 text-slate-700">{debtTypeCell(doc)}</td>
+                    <td className="px-4 py-3 text-slate-600 font-mono text-xs tabular-nums whitespace-nowrap">
+                      {formatDebtPeriod(doc)}
+                    </td>
                     <td className="px-4 py-3 text-slate-700 font-mono text-xs">{doc.number}</td>
                     <td
                       className="px-4 py-3 text-slate-600 text-xs max-w-[280px] align-top"
@@ -824,7 +854,7 @@ const Documents = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
+                  <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
                     {loading ? "Cargando..." : "No hay deudas registradas."}
                   </td>
                 </tr>

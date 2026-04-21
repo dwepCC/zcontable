@@ -192,6 +192,9 @@ func (ctrl *TaxSettlementController) PaymentSuggestionsAPI(c fiber.Ctx) error {
 		}
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 	}
+	if ts0.Status != models.TaxSettlementStatusIssued {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "solo las liquidaciones emitidas permiten sugerencias de pago"})
+	}
 	res, err := ctrl.svc.PaymentSuggestions(uint(id))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

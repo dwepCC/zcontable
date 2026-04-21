@@ -10,35 +10,13 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { Document, Image, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer';
 import SearchableSelect from '../components/SearchableSelect';
-
-function overdueSemaforo(months: number, hasOverdue: boolean): { label: string; cls: string; pdfColor: string } {
-  if (!hasOverdue || months <= 0) {
-    return {
-      label: 'Al día',
-      cls: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
-      pdfColor: '#047857',
-    };
-  }
-  if (months === 1) {
-    return {
-      label: '1 mes',
-      cls: 'bg-yellow-100 text-yellow-950 border border-yellow-400',
-      pdfColor: '#a16207',
-    };
-  }
-  if (months === 2) {
-    return {
-      label: '2 meses',
-      cls: 'bg-amber-100 text-amber-950 border border-amber-400',
-      pdfColor: '#b45309',
-    };
-  }
-  return {
-    label: `${months} meses`,
-    cls: 'bg-red-100 text-red-900 border border-red-300',
-    pdfColor: '#b91c1c',
-  };
-}
+import Pagination from '../components/Pagination';
+import {
+  PeriodScoreMini,
+  periodDebtMoraSemaforo,
+  periodScoreExportLabel,
+  periodScoreSolidColor,
+} from '../utils/periodDebtScore';
 
 const Reports = () => {
   const role = auth.getRole() ?? '';
@@ -64,7 +42,37 @@ const Reports = () => {
   const [appliedQuery, setAppliedQuery] = useState<FinancialReportQuery>({});
   const financialInvalidDateRangeWarned = useRef(false);
 
+  const [reportPage, setReportPage] = useState(1);
+  const [reportPerPage, setReportPerPage] = useState(10);
+  /** Orden de la tabla por código de empresa: ascendente = menor a mayor. */
+  const [codeSortDir, setCodeSortDir] = useState<'asc' | 'desc'>('asc');
+
   const reportDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const sortedReportRows = useMemo(() => {
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const ca = String(a.company?.code ?? '').trim();
+      const cb = String(b.company?.code ?? '').trim();
+      const cmp = ca.localeCompare(cb, 'es', { numeric: true, sensitivity: 'base' });
+      return codeSortDir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [rows, codeSortDir]);
+
+  const pagedReportRows = useMemo(() => {
+    const start = (reportPage - 1) * reportPerPage;
+    return sortedReportRows.slice(start, start + reportPerPage);
+  }, [sortedReportRows, reportPage, reportPerPage]);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [appliedQuery]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(sortedReportRows.length / reportPerPage));
+    if (reportPage > totalPages) setReportPage(totalPages);
+  }, [sortedReportRows.length, reportPerPage, reportPage]);
 
   const companySelectOptions = useMemo(
     () =>
@@ -138,6 +146,19 @@ const Reports = () => {
     setFilterDateFrom('');
     setFilterDateTo('');
     setFilterMinOverdue('');
+    setReportPage(1);
+    setCodeSortDir('asc');
+  };
+
+  const handleReportPageChange = (next: number) => setReportPage(next);
+  const handleReportPerPageChange = (next: number) => {
+    setReportPerPage(next);
+    setReportPage(1);
+  };
+
+  const toggleCodeSort = () => {
+    setCodeSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    setReportPage(1);
   };
 
   const formatMoney = (value: number) => {
@@ -180,22 +201,24 @@ const Reports = () => {
       });
 
       sheet.columns = [
-        { header: 'Empresa', key: 'empresa', width: 36 },
-        { header: 'Código', key: 'codigo', width: 12 },
-        { header: 'Total documentos', key: 'docs', width: 16 },
-        { header: 'Total pagos', key: 'pays', width: 16 },
-        { header: 'Saldo', key: 'balance', width: 14 },
-        { header: 'Mora (meses)', key: 'mora', width: 14 },
+        { header: 'Empresa', key: 'empresa', width: 24 },
+        { header: 'Código', key: 'codigo', width: 11 },
+        { header: 'Total documentos', key: 'docs', width: 15 },
+        { header: 'Total pagos', key: 'pays', width: 15 },
+        { header: 'Saldo', key: 'balance', width: 13 },
+        { header: 'Periodo', key: 'periodo', width: 11 },
+        { header: 'Mora (periodo)', key: 'mora', width: 16 },
+        { header: 'Score', key: 'score', width: 22 },
       ];
 
       const firmName = firmConfig?.name ? String(firmConfig.name) : 'Estudio';
 
-      sheet.mergeCells('A1:F1');
+      sheet.mergeCells('A1:H1');
       sheet.getCell('A1').value = firmName;
       sheet.getCell('A1').font = { size: 16, bold: true, color: { argb: 'FF0F172A' } };
       sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' };
 
-      sheet.mergeCells('A2:F2');
+      sheet.mergeCells('A2:H2');
       sheet.getCell('A2').value = `Reporte financiero - ${reportDateStr}`;
       sheet.getCell('A2').font = { size: 11, color: { argb: 'FF475569' } };
       sheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left' };
@@ -206,6 +229,8 @@ const Reports = () => {
       sheet.getCell('D4').value = summary.grandPays;
       sheet.getCell('E4').value = summary.grandBalance;
       sheet.getCell('F4').value = '';
+      sheet.getCell('G4').value = '';
+      sheet.getCell('H4').value = '';
 
       sheet.getCell('A5').value = '';
       sheet.getCell('B4').numFmt = '"S/" #,##0.00';
@@ -219,15 +244,17 @@ const Reports = () => {
       headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
       headerRow.commit();
 
-      rows.forEach((r) => {
-        const mora = overdueSemaforo(r.max_overdue_months, r.has_overdue).label;
+      sortedReportRows.forEach((r) => {
+        const mora = periodDebtMoraSemaforo(r.max_overdue_months, r.has_overdue).label;
         const row = sheet.addRow({
           empresa: r.company.business_name,
           codigo: r.company.code,
           docs: r.total_documents,
           pays: r.total_payments,
           balance: r.balance,
+          periodo: r.oldest_open_debt_period || '—',
           mora,
+          score: periodScoreExportLabel(r.max_overdue_months),
         });
         row.getCell('C').numFmt = '"S/" #,##0.00';
         row.getCell('D').numFmt = '"S/" #,##0.00';
@@ -238,6 +265,8 @@ const Reports = () => {
       sheet.getColumn('D').alignment = { horizontal: 'right' };
       sheet.getColumn('E').alignment = { horizontal: 'right' };
       sheet.getColumn('F').alignment = { horizontal: 'center' };
+      sheet.getColumn('G').alignment = { horizontal: 'center' };
+      sheet.getColumn('H').alignment = { horizontal: 'left' };
 
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(
@@ -277,10 +306,12 @@ const Reports = () => {
         rowHead: { flexDirection: 'row', backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
         row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
         cell: { paddingVertical: 8, paddingHorizontal: 8 },
-        cellEmpresa: { width: '32%' },
-        cellCodigo: { width: '11%' },
-        cellMoney: { width: '12%', textAlign: 'right' },
-        cellMora: { width: '15%', textAlign: 'center' },
+        cellEmpresa: { width: '18%' },
+        cellCodigo: { width: '10%' },
+        cellMoney: { width: '11%', textAlign: 'right' },
+        cellPeriodo: { width: '9%', textAlign: 'center' },
+        cellMora: { width: '11%', textAlign: 'center' },
+        cellScore: { width: '17%', textAlign: 'center' },
         headText: { fontSize: 9, fontWeight: 700, color: '#475569' },
         rowText: { fontSize: 9, color: '#0f172a' },
         moraBase: { fontSize: 9, fontWeight: 700 },
@@ -332,14 +363,21 @@ const Reports = () => {
                 <View style={[styles.cell, styles.cellMoney]}>
                   <Text style={styles.headText}>Saldo</Text>
                 </View>
+                <View style={[styles.cell, styles.cellPeriodo]}>
+                  <Text style={styles.headText}>Periodo</Text>
+                </View>
                 <View style={[styles.cell, styles.cellMora]}>
                   <Text style={styles.headText}>Mora</Text>
                 </View>
+                <View style={[styles.cell, styles.cellScore]}>
+                  <Text style={styles.headText}>Score</Text>
+                </View>
               </View>
 
-              {rows.length > 0 ? (
-                rows.map((r, idx) => {
-                  const mora = overdueSemaforo(r.max_overdue_months, r.has_overdue);
+              {sortedReportRows.length > 0 ? (
+                sortedReportRows.map((r, idx) => {
+                  const mora = periodDebtMoraSemaforo(r.max_overdue_months, r.has_overdue);
+                  const scoreFill = periodScoreSolidColor(r.max_overdue_months);
                   return (
                     <View key={`${r.company.id}-${idx}`} style={styles.row} wrap>
                       <View style={[styles.cell, styles.cellEmpresa]}>
@@ -357,8 +395,33 @@ const Reports = () => {
                       <View style={[styles.cell, styles.cellMoney]}>
                         <Text style={styles.rowText}>{formatMoney(r.balance)}</Text>
                       </View>
+                      <View style={[styles.cell, styles.cellPeriodo]}>
+                        <Text style={styles.rowText}>{r.oldest_open_debt_period || '—'}</Text>
+                      </View>
                       <View style={[styles.cell, styles.cellMora]}>
                         <Text style={[styles.moraBase, { color: mora.pdfColor }]}>{mora.label}</Text>
+                      </View>
+                      <View style={[styles.cell, styles.cellScore]}>
+                        <View
+                          style={{
+                            height: 6,
+                            borderRadius: 3,
+                            overflow: 'hidden',
+                            backgroundColor: '#e2e8f0',
+                          }}
+                        >
+                          <View
+                            style={{
+                              height: '100%',
+                              width: '100%',
+                              borderRadius: 3,
+                              backgroundColor: scoreFill,
+                            }}
+                          />
+                        </View>
+                        <Text style={[styles.rowText, { fontSize: 7, marginTop: 2, color: '#64748b' }]}>
+                          {periodScoreExportLabel(r.max_overdue_months)}
+                        </Text>
                       </View>
                     </View>
                   );
@@ -401,8 +464,8 @@ const Reports = () => {
           <h2 className="text-xl font-semibold text-slate-800">Reportes financieros</h2>
           <p className="text-sm text-slate-500">
             {isAdmin
-              ? 'Resumen global de documentos, pagos y saldos por empresa. Puedes filtrar por fechas (afecta totales de pagos), por empresa y por mora mínima (documentos pendientes con vencimiento y saldo).'
-              : 'Resumen de documentos, pagos y saldos de tus empresas asignadas. Los mismos filtros aplican según tus permisos.'}
+              ? 'Resumen global de documentos, pagos y saldos por empresa. Las fechas filtran totales por emisión/pagos. La mora mínima y el score usan el periodo contable del cargo con saldo (periodo de servicio o mes de emisión).'
+              : 'Resumen de documentos, pagos y saldos de tus empresas asignadas. Las mismas reglas de periodo y mora aplican según tus permisos.'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -429,6 +492,20 @@ const Reports = () => {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <div className="sm:col-span-2 lg:col-span-1">
+            <label htmlFor="fin-company" className="block text-xs font-medium text-slate-500 mb-1">
+              Empresa
+            </label>
+            <SearchableSelect
+              id="fin-company"
+              value={filterCompanyId}
+              onChange={setFilterCompanyId}
+              options={companySelectOptions}
+              placeholder="Todas las empresas"
+              disabled={loading && companySelectOptions.length === 0}
+              className="w-full"
+            />
+          </div>
           <div>
             <label htmlFor="fin-date-from" className="block text-xs font-medium text-slate-500 mb-1">
               Fecha desde (pagos)
@@ -453,23 +530,9 @@ const Reports = () => {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             />
           </div>
-          <div className="sm:col-span-2 lg:col-span-1">
-            <label htmlFor="fin-company" className="block text-xs font-medium text-slate-500 mb-1">
-              Empresa
-            </label>
-            <SearchableSelect
-              id="fin-company"
-              value={filterCompanyId}
-              onChange={setFilterCompanyId}
-              options={companySelectOptions}
-              placeholder="Todas las empresas"
-              disabled={loading && companySelectOptions.length === 0}
-              className="w-full"
-            />
-          </div>
           <div>
             <label htmlFor="fin-mora" className="block text-xs font-medium text-slate-500 mb-1">
-              Mora mínima
+              Atraso en periodo (mín.)
             </label>
             <select
               id="fin-mora"
@@ -477,11 +540,11 @@ const Reports = () => {
               onChange={(e) => setFilterMinOverdue(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white"
             >
-              <option value="">Sin filtro de mora</option>
-              <option value="1">≥ 1 mes de retraso</option>
-              <option value="2">≥ 2 meses de retraso</option>
-              <option value="3">≥ 3 meses de retraso</option>
-              <option value="4">≥ 4 meses de retraso</option>
+              <option value="">Sin filtro</option>
+              <option value="1">≥ 1 mes (periodo)</option>
+              <option value="2">≥ 2 meses (periodo)</option>
+              <option value="3">≥ 3 meses (periodo)</option>
+              <option value="4">≥ 4 meses (periodo)</option>
             </select>
           </div>
         </div>
@@ -526,50 +589,99 @@ const Reports = () => {
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">Detalle por empresa</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm text-left">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+        <div className="overflow-x-auto -mx-1 sm:mx-0 touch-pan-x">
+          <table className="w-full min-w-[36rem] sm:min-w-0 text-left text-xs sm:text-sm">
+            <thead className="bg-slate-50 text-[10px] sm:text-xs font-semibold uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3">Empresa</th>
-                <th className="px-4 py-3">Código</th>
-                <th className="px-4 py-3 text-right">Total documentos</th>
-                <th className="px-4 py-3 text-right">Total pagos</th>
-                <th className="px-4 py-3 text-right">Saldo</th>
-                <th className="px-4 py-3 text-center">Mora</th>
-                <th className="px-4 py-3 text-right">Acciones</th>
+                <th className="px-3 py-3 w-[11rem] sm:w-[32rem] max-w-[32rem]">Empresa</th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 w-14 sm:w-24 whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={toggleCodeSort}
+                    className="inline-flex items-center gap-1 max-sm:gap-0.5 text-left font-semibold text-slate-500 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded"
+                    title={codeSortDir === 'asc' ? 'Orden: código menor a mayor' : 'Orden: código mayor a menor'}
+                  >
+                    <span className="max-sm:hidden">Código</span>
+                    <span className="sm:hidden">Cod.</span>
+                    <i
+                      className={`fas text-[9px] sm:text-[10px] ${codeSortDir === 'asc' ? 'fa-sort-alpha-down' : 'fa-sort-alpha-up-alt'}`}
+                      aria-hidden
+                    />
+                  </button>
+                </th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-right whitespace-nowrap" title="Total documentos">
+                  Docs
+                </th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-right whitespace-nowrap" title="Total pagos">
+                  Pagos
+                </th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-right whitespace-nowrap">Saldo</th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-center whitespace-nowrap" title="Periodo contable más antiguo">
+                  <span className="max-sm:hidden">Periodo</span>
+                  <span className="sm:hidden">Per.</span>
+                </th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-center whitespace-nowrap">Mora</th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-center whitespace-nowrap w-14 sm:w-24">Score</th>
+                <th className="px-2 py-2 sm:px-3 sm:py-3 text-right whitespace-nowrap w-28 sm:w-36">Acc.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500 text-sm">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
                     <i className="fas fa-spinner fa-spin mr-2"></i> Cargando reporte...
                   </td>
                 </tr>
-              ) : rows.length > 0 ? (
-                rows.map((row, idx) => {
-                  const mora = overdueSemaforo(row.max_overdue_months, row.has_overdue);
+              ) : sortedReportRows.length > 0 ? (
+                pagedReportRows.map((row, idx) => {
+                  const mora = periodDebtMoraSemaforo(row.max_overdue_months, row.has_overdue);
                   return (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-slate-800 font-medium">{row.company.business_name}</td>
-                      <td className="px-4 py-3 text-slate-600 text-xs font-mono">{row.company.code}</td>
-                      <td className="px-4 py-3 text-right text-slate-800">{formatMoney(row.total_documents)}</td>
-                      <td className="px-4 py-3 text-right text-slate-800">{formatMoney(row.total_payments)}</td>
-                      <td className={`px-4 py-3 text-right ${row.balance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    <tr key={`${row.company.id}-${(reportPage - 1) * reportPerPage + idx}`} className="hover:bg-slate-50">
+                      <td className="px-3 py-3 w-[11rem] sm:w-[32rem] max-w-[32rem] text-slate-800 font-medium align-top">
+                        <span className="block truncate sm:whitespace-normal sm:break-words" title={row.company.business_name}>
+                          {row.company.business_name}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 sm:px-3 sm:py-3 text-slate-600 text-[11px] sm:text-xs font-mono whitespace-nowrap">
+                        {row.company.code}
+                      </td>
+                      <td className="px-2 py-2 sm:px-3 sm:py-3 text-right text-slate-800 whitespace-nowrap tabular-nums text-[11px] sm:text-sm">
+                        {formatMoney(row.total_documents)}
+                      </td>
+                      <td className="px-2 py-2 sm:px-3 sm:py-3 text-right text-slate-800 whitespace-nowrap tabular-nums text-[11px] sm:text-sm">
+                        {formatMoney(row.total_payments)}
+                      </td>
+                      <td
+                        className={`px-2 py-2 sm:px-3 sm:py-3 text-right whitespace-nowrap tabular-nums text-[11px] sm:text-sm ${
+                          row.balance > 0 ? 'text-amber-700' : 'text-emerald-700'
+                        }`}
+                      >
                         {formatMoney(row.balance)}
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${mora.cls}`}>
+                      <td className="px-2 py-2 sm:px-3 sm:py-3 text-center text-slate-700 text-[10px] sm:text-xs font-mono whitespace-nowrap">
+                        {row.oldest_open_debt_period || '—'}
+                      </td>
+                      <td className="px-1.5 py-2 sm:px-3 sm:py-3 text-center">
+                        <span
+                          className={`inline-flex max-w-full items-center justify-center px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-semibold whitespace-nowrap ${mora.cls}`}
+                        >
                           {mora.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-1.5 py-2 sm:px-3 sm:py-3 text-center align-middle">
+                        <div className="flex justify-center">
+                          <PeriodScoreMini compact maxLag={row.max_overdue_months} />
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 sm:px-3 sm:py-3">
+                        <div className="flex items-center justify-end">
                           <Link
                             to={`/companies/${row.company.id}/statement`}
-                            className="inline-flex items-center px-3 py-1.5 rounded-full border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                            title="Estado de cuenta"
+                            className="inline-flex items-center justify-center gap-0 sm:gap-1 max-sm:size-9 max-sm:rounded-full max-sm:p-0 sm:px-3 sm:py-1.5 rounded-full border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-100"
                           >
-                            <i className="fas fa-file-invoice-dollar mr-1"></i> Estado de cuenta
+                            <i className="fas fa-file-invoice-dollar sm:mr-0 text-sm sm:text-xs" aria-hidden />
+                            <span className="hidden sm:inline">Estado de cuenta</span>
                           </Link>
                         </div>
                       </td>
@@ -578,7 +690,7 @@ const Reports = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500 text-sm">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
                     No hay empresas que coincidan con los filtros.
                   </td>
                 </tr>
@@ -586,6 +698,17 @@ const Reports = () => {
             </tbody>
           </table>
         </div>
+        {!loading || sortedReportRows.length > 0 ? (
+          <div className="px-4 sm:px-6 py-4 border-t border-slate-100">
+            <Pagination
+              page={reportPage}
+              perPage={reportPerPage}
+              total={sortedReportRows.length}
+              onPageChange={handleReportPageChange}
+              onPerPageChange={handleReportPerPageChange}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,11 +22,12 @@ func NewTaxSettlementService() *TaxSettlementService {
 }
 
 type SettlementPreviewLine struct {
-	DocumentID uint    `json:"document_id"`
-	Concept    string  `json:"concept"`
-	Amount     float64 `json:"amount"`
-	IssueDate  string  `json:"issue_date"`
-	Status     string  `json:"status"`
+	DocumentID         uint    `json:"document_id"`
+	Concept            string  `json:"concept"`
+	Amount             float64 `json:"amount"`
+	IssueDate          string  `json:"issue_date"`
+	Status             string  `json:"status"`
+	AccountingPeriod   string  `json:"accounting_period"` // YYYY-MM; de service_month si aplica
 }
 
 func documentPreviewConcept(d models.Document) string {
@@ -68,12 +71,17 @@ func (s *TaxSettlementService) PreviewOpenDocuments(companyID uint, asOf *time.T
 		if asOf != nil && d.IssueDate.After(*asOf) {
 			continue
 		}
+		acct := strings.TrimSpace(d.AccountingPeriod)
+		if acct == "" {
+			acct = strings.TrimSpace(d.ServiceMonth)
+		}
 		out = append(out, SettlementPreviewLine{
-			DocumentID: d.ID,
-			Concept:    documentPreviewConcept(d),
-			Amount:     math.Round(bal*100) / 100,
-			IssueDate:  d.IssueDate.Format("2006-01-02"),
-			Status:     d.Status,
+			DocumentID:       d.ID,
+			Concept:          documentPreviewConcept(d),
+			Amount:           math.Round(bal*100) / 100,
+			IssueDate:        d.IssueDate.Format("2006-01-02"),
+			Status:           d.Status,
+			AccountingPeriod: acct,
 		})
 	}
 	return out, nil
@@ -86,18 +94,20 @@ type TaxSettlementLineInput struct {
 	Concept     string   `json:"concept"`
 	Amount      float64  `json:"amount"`
 	SortOrder   int      `json:"sort_order"`
-	PeriodDate  string   `json:"period_date"` // YYYY-MM-DD opcional (líneas sin documento)
+	PeriodYM    string   `json:"period_ym"`   // YYYY-MM (preferido)
+	PeriodDate  string   `json:"period_date"` // YYYY-MM-DD legado; si falta period_ym se deriva el mes
 }
 
 type TaxSettlementCreateInput struct {
-	CompanyID   uint                   `json:"company_id"`
-	IssueDate   time.Time              `json:"issue_date"`
-	PeriodLabel string                 `json:"period_label"`
-	PeriodFrom  *time.Time             `json:"period_from"`
-	PeriodTo    *time.Time             `json:"period_to"`
-	Notes       string                 `json:"notes"`
-	Pdt621JSON  string                 `json:"pdt621_json"`
-	Lines       []TaxSettlementLineInput `json:"lines"`
+	CompanyID          uint                     `json:"company_id"`
+	IssueDate          time.Time                `json:"issue_date"`
+	LiquidationPeriod  string                   `json:"liquidation_period"` // YYYY-MM periodo de la liquidación
+	PeriodLabel        string                   `json:"period_label"`
+	PeriodFrom         *time.Time               `json:"period_from"`
+	PeriodTo           *time.Time               `json:"period_to"`
+	Notes              string                   `json:"notes"`
+	Pdt621JSON         string                   `json:"pdt621_json"`
+	Lines              []TaxSettlementLineInput `json:"lines"`
 }
 
 func parseTaxLinePeriodDate(s string) *time.Time {
@@ -110,6 +120,98 @@ func parseTaxLinePeriodDate(s string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func validatePeriodYM(s string) error {
+	if _, err := time.Parse("2006-01", s); err != nil {
+		return fmt.Errorf("periodo inválido %q (use AAAA-MM)", s)
+	}
+	return nil
+}
+
+// resolveLiquidationPeriodYM obtiene YYYY-MM desde el cuerpo o, si falta, desde period_label o la fecha de emisión.
+func resolveLiquidationPeriodYM(periodLabel string, issueDate time.Time, explicit string) (string, error) {
+	lp := strings.TrimSpace(explicit)
+	if lp == "" {
+		pl := strings.TrimSpace(periodLabel)
+		if len(pl) >= 7 {
+			head := pl[:7]
+			if _, err := time.Parse("2006-01", head); err == nil {
+				lp = head
+			}
+		}
+	}
+	if lp == "" {
+		lp = issueDate.Format("2006-01")
+	}
+	if err := validatePeriodYM(lp); err != nil {
+		return "", err
+	}
+	return lp, nil
+}
+
+func duplicateLiquidationPeriod(tx *gorm.DB, companyID uint, periodYM string, excludeID uint) (bool, error) {
+	var n int64
+	q := tx.Model(&models.TaxSettlement{}).
+		Where("company_id = ? AND liquidation_period = ? AND status IN ?", companyID, periodYM, []string{models.TaxSettlementStatusDraft, models.TaxSettlementStatusIssued})
+	if excludeID > 0 {
+		q = q.Where("id <> ?", excludeID)
+	}
+	if err := q.Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+var issuedLiquidationNumberRe = regexp.MustCompile(`^LI(\d{6})-(\d{4})$`)
+
+func nextIssuedLiquidationSequenceForYear(tx *gorm.DB, companyID uint, year int) (int, error) {
+	var nums []string
+	if err := tx.Model(&models.TaxSettlement{}).
+		Where("company_id = ? AND status = ?", companyID, models.TaxSettlementStatusIssued).
+		Where("number LIKE ?", "LI%-%").
+		Pluck("number", &nums).Error; err != nil {
+		return 0, err
+	}
+	max := 0
+	for _, n := range nums {
+		m := issuedLiquidationNumberRe.FindStringSubmatch(strings.TrimSpace(n))
+		if len(m) != 3 {
+			continue
+		}
+		y, err := strconv.Atoi(m[1][:4])
+		if err != nil || y != year {
+			continue
+		}
+		seq, err := strconv.Atoi(m[2])
+		if err != nil {
+			continue
+		}
+		if seq > max {
+			max = seq
+		}
+	}
+	return max + 1, nil
+}
+
+func normalizeLinePeriodYM(li TaxSettlementLineInput, settlementYM string) (periodYM string, firstOfMonth *time.Time, err error) {
+	py := strings.TrimSpace(li.PeriodYM)
+	if py == "" && strings.TrimSpace(li.PeriodDate) != "" {
+		if t := parseTaxLinePeriodDate(li.PeriodDate); t != nil {
+			py = t.Format("2006-01")
+		}
+	}
+	if py == "" {
+		py = settlementYM
+	}
+	if err := validatePeriodYM(py); err != nil {
+		return "", nil, err
+	}
+	first, e := time.ParseInLocation("2006-01-02", py+"-01", time.Local)
+	if e != nil {
+		return "", nil, e
+	}
+	return py, &first, nil
 }
 
 func (s *TaxSettlementService) validateLine(in TaxSettlementLineInput) error {
@@ -151,6 +253,12 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 	} else {
 		ts.IssueDate = in.IssueDate
 	}
+	lp, err := resolveLiquidationPeriodYM(ts.PeriodLabel, ts.IssueDate, in.LiquidationPeriod)
+	if err != nil {
+		return nil, err
+	}
+	ts.LiquidationPeriod = lp
+
 	lines := make([]models.TaxSettlementLine, 0, len(in.Lines))
 	for i, li := range in.Lines {
 		if err := s.validateLine(li); err != nil {
@@ -169,6 +277,10 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 		if order == 0 {
 			order = i
 		}
+		pym, pdt, err := normalizeLinePeriodYM(li, lp)
+		if err != nil {
+			return nil, err
+		}
 		lines = append(lines, models.TaxSettlementLine{
 			LineType:   li.LineType,
 			DocumentID: li.DocumentID,
@@ -176,10 +288,18 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 			Concept:    strings.TrimSpace(li.Concept),
 			Amount:     li.Amount,
 			SortOrder:  order,
-			PeriodDate: parseTaxLinePeriodDate(li.PeriodDate),
+			PeriodYM:   pym,
+			PeriodDate: pdt,
 		})
 	}
 	if err := database.DB.Transaction(func(tx *gorm.DB) error {
+		dup, err := duplicateLiquidationPeriod(tx, in.CompanyID, lp, 0)
+		if err != nil {
+			return err
+		}
+		if dup {
+			return errors.New("ya existe una liquidación en borrador o emitida para esa empresa y el mismo periodo (AAAA-MM)")
+		}
 		if err := tx.Create(&ts).Error; err != nil {
 			return err
 		}
@@ -197,13 +317,14 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 }
 
 type TaxSettlementUpdateInput struct {
-	IssueDate   time.Time              `json:"issue_date"`
-	PeriodLabel string                 `json:"period_label"`
-	PeriodFrom  *time.Time             `json:"period_from"`
-	PeriodTo    *time.Time             `json:"period_to"`
-	Notes       string                 `json:"notes"`
-	Pdt621JSON  string                 `json:"pdt621_json"`
-	Lines       []TaxSettlementLineInput `json:"lines"`
+	IssueDate          time.Time                `json:"issue_date"`
+	LiquidationPeriod  string                   `json:"liquidation_period"`
+	PeriodLabel        string                   `json:"period_label"`
+	PeriodFrom         *time.Time               `json:"period_from"`
+	PeriodTo           *time.Time               `json:"period_to"`
+	Notes              string                   `json:"notes"`
+	Pdt621JSON         string                   `json:"pdt621_json"`
+	Lines              []TaxSettlementLineInput `json:"lines"`
 }
 
 func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput) (*models.TaxSettlement, error) {
@@ -226,6 +347,16 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 	ts.Notes = in.Notes
 	ts.Pdt621JSON = in.Pdt621JSON
 
+	explicitLP := strings.TrimSpace(in.LiquidationPeriod)
+	if explicitLP == "" {
+		explicitLP = strings.TrimSpace(ts.LiquidationPeriod)
+	}
+	lp, err := resolveLiquidationPeriodYM(ts.PeriodLabel, ts.IssueDate, explicitLP)
+	if err != nil {
+		return nil, err
+	}
+	ts.LiquidationPeriod = lp
+
 	lines := make([]models.TaxSettlementLine, 0, len(in.Lines))
 	for i, li := range in.Lines {
 		if err := s.validateLine(li); err != nil {
@@ -244,6 +375,10 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 		if order == 0 {
 			order = i
 		}
+		pym, pdt, err := normalizeLinePeriodYM(li, lp)
+		if err != nil {
+			return nil, err
+		}
 		lines = append(lines, models.TaxSettlementLine{
 			TaxSettlementID: ts.ID,
 			LineType:        li.LineType,
@@ -252,11 +387,19 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 			Concept:         strings.TrimSpace(li.Concept),
 			Amount:          li.Amount,
 			SortOrder:       order,
-			PeriodDate:      parseTaxLinePeriodDate(li.PeriodDate),
+			PeriodYM:        pym,
+			PeriodDate:      pdt,
 		})
 	}
 
 	if err := database.DB.Transaction(func(tx *gorm.DB) error {
+		dup, err := duplicateLiquidationPeriod(tx, ts.CompanyID, lp, ts.ID)
+		if err != nil {
+			return err
+		}
+		if dup {
+			return errors.New("ya existe otra liquidación en borrador o emitida para esa empresa y el mismo periodo (AAAA-MM)")
+		}
 		if err := tx.Model(&models.TaxSettlementLine{}).Where("tax_settlement_id = ?", ts.ID).Delete(&models.TaxSettlementLine{}).Error; err != nil {
 			return err
 		}
@@ -347,11 +490,18 @@ func createDebtDocumentsForManualLines(tx *gorm.DB, ts *models.TaxSettlement, li
 			continue
 		}
 		issue := ts.IssueDate
-		if ln.PeriodDate != nil && !ln.PeriodDate.IsZero() {
-			issue = *ln.PeriodDate
-		}
 		y, mo, d := issue.Date()
 		issue = time.Date(y, mo, d, 0, 0, 0, 0, issue.Location())
+		periodYM := strings.TrimSpace(ln.PeriodYM)
+		if periodYM == "" && ln.PeriodDate != nil && !ln.PeriodDate.IsZero() {
+			periodYM = ln.PeriodDate.Format("2006-01")
+		}
+		if periodYM == "" {
+			periodYM = strings.TrimSpace(ts.LiquidationPeriod)
+		}
+		if periodYM == "" {
+			periodYM = issue.Format("2006-01")
+		}
 		desc := strings.TrimSpace(ln.Concept)
 		if desc == "" {
 			desc = "Cargo liquidación"
@@ -360,15 +510,16 @@ func createDebtDocumentsForManualLines(tx *gorm.DB, ts *models.TaxSettlement, li
 			desc = desc[:900] + "…"
 		}
 		doc := models.Document{
-			CompanyID:    ts.CompanyID,
-			Type:         "Otro",
-			Number:       fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID),
-			IssueDate:    issue,
-			TotalAmount:  math.Round(ln.Amount*100) / 100,
-			Description:  desc,
-			ServiceMonth: issue.Format("2006-01"),
-			Status:       "pendiente",
-			Source:       "liquidacion",
+			CompanyID:          ts.CompanyID,
+			Type:               "Otro",
+			Number:             fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID),
+			IssueDate:          issue,
+			TotalAmount:        math.Round(ln.Amount*100) / 100,
+			Description:        desc,
+			ServiceMonth:       periodYM,
+			AccountingPeriod:   periodYM,
+			Status:             "pendiente",
+			Source:             "liquidacion",
 		}
 		if err := tx.Omit("Company", "Payments", "Allocations", "Items").Create(&doc).Error; err != nil {
 			return err
@@ -400,13 +551,39 @@ func (s *TaxSettlementService) Emit(id uint) (*models.TaxSettlement, error) {
 		}
 	}
 	tg = th + tm
-	ts.Status = models.TaxSettlementStatusIssued
-	ts.Number = fmt.Sprintf("LI-%s-%06d", ts.IssueDate.Format("20060102"), ts.ID)
 	ts.TotalHonorarios = math.Round(th*100) / 100
 	ts.TotalImpuestos = math.Round(tm*100) / 100
 	ts.TotalGeneral = math.Round(tg*100) / 100
 
+	lp := strings.TrimSpace(ts.LiquidationPeriod)
+	if lp == "" {
+		var err error
+		lp, err = resolveLiquidationPeriodYM(ts.PeriodLabel, ts.IssueDate, "")
+		if err != nil {
+			return nil, err
+		}
+		ts.LiquidationPeriod = lp
+	}
+
 	if err := database.DB.Transaction(func(tx *gorm.DB) error {
+		dup, err := duplicateLiquidationPeriod(tx, ts.CompanyID, lp, ts.ID)
+		if err != nil {
+			return err
+		}
+		if dup {
+			return errors.New("ya existe otra liquidación para esa empresa y periodo; no se puede emitir")
+		}
+		t0, err := time.Parse("2006-01", lp)
+		if err != nil {
+			return err
+		}
+		seq, err := nextIssuedLiquidationSequenceForYear(tx, ts.CompanyID, t0.Year())
+		if err != nil {
+			return err
+		}
+		compact := strings.ReplaceAll(lp, "-", "")
+		ts.Number = fmt.Sprintf("LI%s-%04d", compact, seq)
+		ts.Status = models.TaxSettlementStatusIssued
 		if err := createDebtDocumentsForManualLines(tx, &ts, ts.Lines); err != nil {
 			return err
 		}

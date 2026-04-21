@@ -22,12 +22,13 @@ type MonthlyPaymentStat struct {
 }
 
 type CompanyDebtCard struct {
-	Company          *models.Company
-	TotalDocuments   float64
-	TotalPayments    float64
-	Balance          float64
-	MaxOverdueMonths int
-	HasOverdue       bool
+	Company              *models.Company
+	TotalDocuments       float64
+	TotalPayments        float64
+	Balance              float64
+	MaxOverdueMonths     int    // atraso en meses vs. periodo contable del cargo con saldo
+	HasOverdue           bool   // true si hay al menos un mes de atraso de periodo
+	OldestOpenDebtPeriod string // YYYY-MM del cargo con saldo más antiguo
 }
 
 type DashboardData struct {
@@ -213,14 +214,15 @@ func (ctrl *DashboardController) getDashboardData(minOverdueMonths int) (*Dashbo
 			continue
 		}
 		totalDebt += bal.Balance
-		maxOvd, hasOvd := finService.MaxOverdueMonthsForCompany(cmp.ID)
+		maxLag, oldestYM, _ := finService.MaxPeriodLagMonthsForCompany(cmp.ID)
 		debtCards = append(debtCards, CompanyDebtCard{
-			Company:          bal.Company,
-			TotalDocuments:   bal.TotalDocuments,
-			TotalPayments:    bal.TotalPayments,
-			Balance:          bal.Balance,
-			MaxOverdueMonths: maxOvd,
-			HasOverdue:       hasOvd,
+			Company:              bal.Company,
+			TotalDocuments:       bal.TotalDocuments,
+			TotalPayments:        bal.TotalPayments,
+			Balance:              bal.Balance,
+			MaxOverdueMonths:     maxLag,
+			HasOverdue:           maxLag > 0,
+			OldestOpenDebtPeriod: oldestYM,
 		})
 	}
 
@@ -438,14 +440,15 @@ func (ctrl *DashboardController) getDashboardDataForCompanyIDs(companyIDs []uint
 			continue
 		}
 		totalDebt += bal.Balance
-		maxOvd, hasOvd := finService.MaxOverdueMonthsForCompany(cmp.ID)
+		maxLag, oldestYM, _ := finService.MaxPeriodLagMonthsForCompany(cmp.ID)
 		debtCards = append(debtCards, CompanyDebtCard{
-			Company:          bal.Company,
-			TotalDocuments:   bal.TotalDocuments,
-			TotalPayments:    bal.TotalPayments,
-			Balance:          bal.Balance,
-			MaxOverdueMonths: maxOvd,
-			HasOverdue:       hasOvd,
+			Company:              bal.Company,
+			TotalDocuments:       bal.TotalDocuments,
+			TotalPayments:        bal.TotalPayments,
+			Balance:              bal.Balance,
+			MaxOverdueMonths:     maxLag,
+			HasOverdue:           maxLag > 0,
+			OldestOpenDebtPeriod: oldestYM,
 		})
 	}
 

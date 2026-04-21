@@ -3,22 +3,7 @@ import { Link } from 'react-router-dom';
 import client from '../api/client';
 import { DashboardData } from '../types/dashboard';
 import { auth } from '../services/auth';
-
-function debtorOverdueBadge(months: number, hasOverdue: boolean): { label: string; cls: string } {
-  if (!hasOverdue || months <= 0) {
-    return {
-      label: 'Al día',
-      cls: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
-    };
-  }
-  if (months === 1) {
-    return { label: '1 mes de retraso', cls: 'bg-yellow-100 text-yellow-950 border border-yellow-400' };
-  }
-  if (months === 2) {
-    return { label: '2 meses de retraso', cls: 'bg-amber-100 text-amber-950 border border-amber-400' };
-  }
-  return { label: `${months} meses de retraso`, cls: 'bg-red-100 text-red-900 border border-red-300' };
-}
+import { PeriodScoreMini, periodDebtMoraBadge } from '../utils/periodDebtScore';
 
 const Dashboard = () => {
   const [activeCard, setActiveCard] = useState<number>(0);
@@ -276,13 +261,14 @@ const Dashboard = () => {
               <div>
                 <h2 className="text-lg font-bold text-slate-800">Empresas con deuda</h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Top 10 por saldo pendiente. La mora se calcula según documentos vencidos con saldo. Filtra por meses
-                  mínimos de retraso para priorizar cobros.
+                  Top 10 por saldo pendiente. La mora y el score usan el periodo contable del cargo (periodo de servicio
+                  o mes de emisión si no hay periodo). Filtra por meses mínimos de atraso de periodo para priorizar
+                  cobros.
                 </p>
               </div>
               <div className="flex flex-col gap-1 min-w-[200px]">
                 <label htmlFor="dash-debt-mora" className="text-[11px] font-semibold text-slate-500 uppercase">
-                  Mora mínima
+                  Atraso de periodo (mín.)
                 </label>
                 <select
                   id="dash-debt-mora"
@@ -292,9 +278,9 @@ const Dashboard = () => {
                   className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:opacity-60"
                 >
                   <option value="">Todas (top 10 por saldo)</option>
-                  <option value="1">≥ 1 mes de retraso</option>
-                  <option value="2">≥ 2 meses de retraso</option>
-                  <option value="3">≥ 3 meses de retraso</option>
+                  <option value="1">≥ 1 mes de atraso (periodo)</option>
+                  <option value="2">≥ 2 meses de atraso (periodo)</option>
+                  <option value="3">≥ 3 meses de atraso (periodo)</option>
                 </select>
               </div>
             </div>
@@ -307,7 +293,7 @@ const Dashboard = () => {
               ) : null}
               {!debtListRefreshing && data.TopDebtors.length > 0 ? (
                 data.TopDebtors.map((debtor, idx) => {
-                  const mora = debtorOverdueBadge(debtor.MaxOverdueMonths ?? 0, debtor.HasOverdue ?? false);
+                  const mora = periodDebtMoraBadge(debtor.MaxOverdueMonths ?? 0, debtor.HasOverdue ?? false);
                   return (
                     <div key={debtor.Company?.id ?? idx} className="flex items-center justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-4 min-w-0">
@@ -320,10 +306,18 @@ const Dashboard = () => {
                           <p className="text-sm font-bold text-slate-800 truncate">{debtor.Company.business_name}</p>
                           <p className="text-[11px] text-slate-400 font-medium">
                             Código: {debtor.Company.code} · RUC: {debtor.Company.ruc}
+                            {debtor.OldestOpenDebtPeriod ? (
+                              <>
+                                {' '}
+                                · Periodo más antiguo:{' '}
+                                <span className="text-slate-600">{debtor.OldestOpenDebtPeriod}</span>
+                              </>
+                            ) : null}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
+                        <PeriodScoreMini maxLag={debtor.MaxOverdueMonths ?? 0} />
                         <div className="text-right">
                           <p className="text-xs text-slate-400 uppercase font-semibold">Saldo pendiente</p>
                           <p
@@ -346,7 +340,7 @@ const Dashboard = () => {
               ) : !debtListRefreshing ? (
                 <p className="text-sm text-slate-500">
                   {debtOverdueFilter
-                    ? 'Ninguna empresa con saldo cumple el filtro de mora seleccionado. Prueba con otro umbral o sin filtro.'
+                    ? 'Ninguna empresa con saldo cumple el filtro de atraso de periodo. Prueba con otro umbral o sin filtro.'
                     : 'No hay empresas con saldo pendiente actualmente. 🎉'}
                 </p>
               ) : null}

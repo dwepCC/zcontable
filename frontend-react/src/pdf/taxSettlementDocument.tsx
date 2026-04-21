@@ -156,7 +156,11 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng }: TaxSettl
                 </View>
                 <View style={[styles.cell, styles.colPeriodo]}>
                   <Text style={styles.rowText}>
-                    {(ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : issueStr) || '—'}
+                    {(ln.period_ym && /^\d{4}-\d{2}$/.test(ln.period_ym)
+                      ? ln.period_ym
+                      : ln.period_date && ln.period_date.length >= 10
+                        ? ln.period_date.slice(0, 10)
+                        : settlement.liquidation_period) || '—'}
                   </Text>
                 </View>
                 <View style={[styles.cell, styles.colConcepto]}>
