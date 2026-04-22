@@ -1,5 +1,5 @@
 import client from '../api/client';
-import type { Document } from '../types/dashboard';
+import type { Company, Document } from '../types/dashboard';
 
 export interface DocumentsListParams {
   company_id?: string;
@@ -7,7 +7,19 @@ export interface DocumentsListParams {
   overdue?: string;
   date_from?: string;
   date_to?: string;
+  /** Sin `company_id`: `1` pide listado agrupado por empresa (meta `list_mode: by_company`). */
+  group_by_company?: string;
 }
+
+/** Fila del listado agrupado por empresa (API `/documents` con `group_by_company=1`). */
+export interface CompanyDebtSummary {
+  company_id: number;
+  company: Company;
+  document_count: number;
+  open_balance_total: number;
+}
+
+export type DocumentsListMode = 'documents' | 'by_company';
 
 export interface PaginationMeta {
   page: number;
@@ -66,14 +78,36 @@ export const documentsService = {
     return res.data?.data ?? [];
   },
 
-  async listPaged(params: DocumentsListParams & { page: number; per_page: number }): Promise<{
+  async listPaged(
+    params: DocumentsListParams & { page: number; per_page: number },
+  ): Promise<{
+    list_mode: DocumentsListMode;
     items: Document[];
+    company_summaries: CompanyDebtSummary[];
     pagination: PaginationMeta;
   }> {
-    const res = await client.get<{ data: Document[]; pagination: PaginationMeta }>('/documents', { params });
+    const res = await client.get<{
+      data: Document[] | CompanyDebtSummary[];
+      pagination: PaginationMeta;
+      meta?: { list_mode?: string };
+    }>('/documents', { params });
+    const body = res.data;
+    const pagination =
+      body?.pagination ?? { page: params.page, per_page: params.per_page, total: 0, total_pages: 0 };
+    const listMode: DocumentsListMode = body?.meta?.list_mode === 'by_company' ? 'by_company' : 'documents';
+    if (listMode === 'by_company') {
+      return {
+        list_mode: 'by_company',
+        items: [],
+        company_summaries: (body?.data ?? []) as CompanyDebtSummary[],
+        pagination,
+      };
+    }
     return {
-      items: res.data?.data ?? [],
-      pagination: res.data?.pagination ?? { page: params.page, per_page: params.per_page, total: 0, total_pages: 0 },
+      list_mode: 'documents',
+      items: (body?.data ?? []) as Document[],
+      company_summaries: [],
+      pagination,
     };
   },
 

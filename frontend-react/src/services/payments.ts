@@ -1,5 +1,5 @@
 import client from '../api/client';
-import type { Payment } from '../types/dashboard';
+import type { Payment, TukifacFiscalReceipt } from '../types/dashboard';
 
 export interface PaymentsListParams {
   company_id?: string;
@@ -75,8 +75,11 @@ export const paymentsService = {
   async issueTukifacFromPayment(
     id: number,
     body: PaymentTukifacIssuePayload,
-  ): Promise<{ receipt: unknown; tukifac_response: unknown }> {
-    const res = await client.post<{ receipt: unknown; tukifac_response: unknown }>(`/payments/${id}/issue-tukifac`, body);
+  ): Promise<{ receipt: TukifacFiscalReceipt; tukifac_response: unknown }> {
+    const res = await client.post<{ receipt: TukifacFiscalReceipt; tukifac_response: unknown }>(
+      `/payments/${id}/issue-tukifac`,
+      body,
+    );
     return res.data;
   },
 

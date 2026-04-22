@@ -204,6 +204,21 @@ func parseIssuedReceiptFromTukifacResponse(body []byte, saleNote bool) (external
 	return externalID, number, docType, total, issueDate, nil
 }
 
+// parseTukifacDownloadURLs extrae enlaces de la raíz JSON (data.print_ticket, links.pdf).
+func parseTukifacDownloadURLs(body []byte) (printTicket, pdfURL string) {
+	var root map[string]interface{}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return "", ""
+	}
+	if data, ok := root["data"].(map[string]interface{}); ok {
+		printTicket = strings.TrimSpace(stringish(data["print_ticket"]))
+	}
+	if links, ok := root["links"].(map[string]interface{}); ok {
+		pdfURL = strings.TrimSpace(stringish(links["pdf"]))
+	}
+	return printTicket, pdfURL
+}
+
 // IssueFiscalDocumentToTukifac envía el JSON de factura/boleta (manual o catálogo) y registra el comprobante localmente sin pasar por sincronización.
 func (s *TukifacService) IssueFiscalDocumentToTukifac(companyID uint, payload []byte) (*models.TukifacFiscalReceipt, []byte, error) {
 	return s.issueToTukifac(companyID, payload, false)
@@ -260,6 +275,7 @@ func (s *TukifacService) issueToTukifac(companyID uint, payload []byte, saleNote
 		customerName = "-"
 	}
 
+	printTicket, pdfDL := parseTukifacDownloadURLs(respBody)
 	rec := models.TukifacFiscalReceipt{
 		ExternalID:           externalID,
 		CompanyID:            company.ID,
@@ -271,6 +287,8 @@ func (s *TukifacService) issueToTukifac(companyID uint, payload []byte, saleNote
 		CustomerName:         customerName,
 		ReconciliationStatus: models.TukifacReceiptPending,
 		Origin:               models.TukifacReceiptOriginIssuedLocal,
+		PrintTicketURL:       printTicket,
+		PdfURL:               pdfDL,
 	}
 	if err := database.DB.Create(&rec).Error; err != nil {
 		return nil, respBody, err

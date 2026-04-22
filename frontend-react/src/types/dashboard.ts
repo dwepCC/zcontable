@@ -103,6 +103,8 @@ export interface Document {
   external_id?: string;
   type: string;
   number: string;
+  /** Número legible (p. ej. DEU-LI-202603 para deudas de liquidación); si falta, usar `number`. */
+  display_number?: string;
   issue_date: string;
   due_date?: string;
   total_amount: number;
@@ -140,12 +142,14 @@ export interface Payment {
   document?: Document;
   allocations?: PaymentAllocation[];
   tax_settlement?: { id: number; number: string; status: string };
-  /** Presente si el pago nació de la conciliación Tukifac (vinculado por `linked_payment_id` en el recibo). */
+  /** Presente si el pago tiene comprobante Tukifac vinculado (`linked_payment_id`). */
   tukifac_fiscal_receipt?: {
     id: number;
     number: string;
     external_id: string;
     issue_date: string;
+    print_ticket_url?: string;
+    pdf_url?: string;
   };
 }
 
@@ -166,6 +170,10 @@ export interface TukifacFiscalReceipt {
   state_type_description?: string;
   /** tukifac_sync | issued_local */
   origin?: string;
+  /** URL impresión ticket (Tukifac) si se emitió desde este sistema. */
+  print_ticket_url?: string;
+  /** URL descarga PDF A4 (Tukifac). */
+  pdf_url?: string;
   company?: Company;
   linked_payment?: {
     id: number;

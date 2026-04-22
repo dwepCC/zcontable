@@ -36,6 +36,9 @@ type TukifacFiscalReceipt struct {
 	TaxSettlementID *uint `gorm:"index" json:"tax_settlement_id,omitempty"`
 	StateTypeDescription   string         `gorm:"size:100" json:"state_type_description,omitempty"`
 	Origin                 string         `gorm:"size:30;not null;default:'tukifac_sync'" json:"origin"`
+	// URLs de impresión/descarga devueltas por Tukifac al emitir (ticket térmico y PDF A4).
+	PrintTicketURL string `gorm:"size:2000" json:"print_ticket_url,omitempty"`
+	PdfURL         string `gorm:"size:2000" json:"pdf_url,omitempty"`
 	CreatedAt              time.Time      `json:"created_at"`
 	UpdatedAt              time.Time      `json:"updated_at"`
 	DeletedAt              gorm.DeletedAt `gorm:"index" json:"-"`

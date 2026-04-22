@@ -15,7 +15,9 @@ import {
 } from '../services/tukifacSeriesCache';
 import type { Company, Document } from '../types/dashboard';
 import SearchableSelect from '../components/SearchableSelect';
+import TukifacIssueLinksDialog from '../components/TukifacIssueLinksDialog';
 import { resolveBackendUrl } from '../api/client';
+import { parseTukifacReceiptViewLinks, type TukifacReceiptViewLinks } from '../utils/tukifacReceiptLinks';
 
 function getErrorMessage(e: unknown): string {
   if (!e || typeof e !== 'object') return 'Error al guardar el pago';
@@ -154,6 +156,8 @@ const PaymentForm = () => {
   const [tukifacSerie, setTukifacSerie] = useState('');
   const [tukifacSaleNoteSeriesId, setTukifacSaleNoteSeriesId] = useState('');
   const [seriesRefresh, setSeriesRefresh] = useState(0);
+  /** Tras emitir Tukifac desde este formulario, enlaces ticket / PDF antes de ir al listado. */
+  const [tukifacPostSaveLinks, setTukifacPostSaveLinks] = useState<TukifacReceiptViewLinks | null>(null);
 
   const effectivePaymentType: 'applied' | 'on_account' = isEdit
     ? (loadedPaymentType ?? 'on_account')
@@ -601,12 +605,17 @@ const PaymentForm = () => {
               payment_destination_id: 'cash',
               payment_reference: method.trim() || reference.trim() || 'Caja',
             };
-            await paymentsService.issueTukifacFromPayment(created.id, tukBody);
+            const issueOut = await paymentsService.issueTukifacFromPayment(created.id, tukBody);
             window.dispatchEvent(
               new CustomEvent('miweb:toast', {
                 detail: { type: 'success', message: 'Comprobante enviado a Tukifac correctamente.' },
               }),
             );
+            const viewLinks = parseTukifacReceiptViewLinks(issueOut.receipt);
+            if (viewLinks) {
+              setTukifacPostSaveLinks(viewLinks);
+              return;
+            }
           } catch (te) {
             console.error(te);
             window.dispatchEvent(
@@ -641,6 +650,15 @@ const PaymentForm = () => {
 
   return (
     <div className="space-y-3 sm:space-y-4 w-full min-w-0 max-w-full">
+      <TukifacIssueLinksDialog
+        open={Boolean(tukifacPostSaveLinks)}
+        links={tukifacPostSaveLinks}
+        onContinue={() => {
+          setTukifacPostSaveLinks(null);
+          navigate('/payments', { replace: true });
+        }}
+        continueLabel="Ir al listado de pagos"
+      />
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0 pr-1">
           <h2 className="text-lg sm:text-xl font-semibold text-slate-800">{isEdit ? 'Editar pago' : 'Nuevo pago'}</h2>

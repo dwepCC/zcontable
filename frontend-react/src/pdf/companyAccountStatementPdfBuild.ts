@@ -390,11 +390,21 @@ function drawTableHeader(ctx: TableHeadCtx) {
   }
 }
 
-/** Ancho aprox. del bloque fijo: WhatsApp + línea + 3 columnas bancarias + QR. */
-const FOOT_COL1 = 84;
+/** Ancho columna QR (derecha) en el pie. */
 const FOOT_COL3 = 78;
+/** Separación entre bloque central y columna QR. */
 const FOOT_GAP = 10;
-const WA_ICON_R = 3.5;
+/** Tamaño máx. del logo banco en el pie (pt); un poco menor que antes para no competir con el texto. */
+const FOOT_BANK_LOGO_MAX_W = 58;
+const FOOT_BANK_LOGO_MAX_H = 27;
+/** Reserva máx. usada al medir altura del pie cuando hay logo banco (evita solapamiento al re-envolver). */
+const FOOT_BANK_LEFT_MAX = FOOT_BANK_LOGO_MAX_W + 14;
+/** Espacio horizontal mínimo entre borde derecho del logo banco y el texto (pt). */
+const FOOT_BANK_TEXT_GAP = 4;
+/** Altura objetivo del icono WhatsApp en el PDF (pt). */
+const WA_ICON_H = 11;
+/** Si no hay PNG: en pdf-lib `drawCircle({ size })` es el **diámetro** en pt (no el radio). */
+const WA_FALLBACK_DIAM = 11;
 function measureStatementFooterHeight(
   contentW: number,
   font: PDFFont,
@@ -405,10 +415,16 @@ function measureStatementFooterHeight(
   hasBankLogo: boolean,
   hasQr: boolean,
 ): number {
-  const midW   = contentW - FOOT_COL1 - FOOT_COL3 - 2 * FOOT_GAP;
-  const waW    = contentW - 20;
-  const waLines = wrapToWidth(whatsapp, waW, font, 6, 30);
-  const hWa  = 4 + Math.max(6, waLines.length * 7.1) + 3;
+  const bankReserve = hasBankLogo ? FOOT_BANK_LEFT_MAX : 12;
+  const midW   = contentW - bankReserve - FOOT_BANK_TEXT_GAP - FOOT_COL3 - FOOT_GAP;
+  const waWMeas = Math.max(100, contentW - 22);
+  const waLines = wrapToWidth(whatsapp, waWMeas, font, 6, 30);
+  const waLineHMeas = 7.1;
+  const waAscM = 6 * 0.72;
+  const waDescM = 6 * 0.24;
+  const waTVH =
+    waLines.length > 0 ? (waLines.length - 1) * waLineHMeas + waAscM + waDescM : waLineHMeas;
+  const hWa = 4 + Math.max(WA_ICON_H + 2, waTVH + 1) + 3;
   const bTrim  = (bankBlock || '').trim();
   const bankRows: string[] = [];
   if (bTrim) {
@@ -424,7 +440,7 @@ function measureStatementFooterHeight(
     hMid += (bankRows.length ? 3 : 0) + oLines.length * 7.1;
   }
   if (hMid > 0) hMid += 1;
-  const hLogo = hasBankLogo ? 44 : 0;
+  const hLogo = hasBankLogo ? FOOT_BANK_LOGO_MAX_H + 4 : 0;
   const hQr   = hasQr ? 66 + 16 : 0; // imagen + píldora
   const show3 = bTrim || obsBlock.trim() || hasBankLogo || hasQr;
   if (!show3) return 0.4 + hWa;
@@ -440,33 +456,64 @@ type FooterAtOpts = {
   whatsapp: string;
   bankBlock: string;
   obsBlock: string;
+  /** Logo WhatsApp embebido (p. ej. JPEG desde `public/logo_wp.jpg`); si es null, círculo verde de respaldo. */
+  waImg: PDFImage | null;
   bankImg: PDFImage | null;
   qrImg: PDFImage | null;
   qrCaption: string;
 };
 
 function drawStatementFooterAt(o: FooterAtOpts): void {
-  const { page, dStart, contentW, font, fontB, whatsapp, bankBlock, obsBlock, bankImg, qrImg, qrCaption } = o;
-  const mid2w     = contentW - FOOT_COL1 - FOOT_COL3 - 2 * FOOT_GAP;
+  const { page, dStart, contentW, font, fontB, whatsapp, bankBlock, obsBlock, waImg, bankImg, qrImg, qrCaption } = o;
   const x1 = M;
-  const x2 = M + FOOT_COL1 + FOOT_GAP;
   const x3 = M + contentW - FOOT_COL3;
 
   let    d   = dStart;
   hLine(page, d, M, M + contentW, C.borderGray, 0.4);
   d   += 3;
 
-  const waW     = contentW - 20;
-  const waLines = wrapToWidth(whatsapp, waW, font, 6, 32);
-  const hWaR    = Math.max(6, waLines.length * 7.1);
-  const yIcon   = d + hWaR * 0.5;
-  page.drawCircle({ x: M + 3.5 + WA_ICON_R, y: byTop(page, yIcon), size: WA_ICON_R, color: C.waGreen });
-  let    wy     = d + 2.5;
-  for (const ln of waLines) {
-    page.drawText(ln, { x: M + 16, y: byTop(page, wy), size: 6, font, color: C.textBody });
-    wy += 7.1;
+  const waFs = 6;
+  const waIconW = waImg ? waImg.width * (WA_ICON_H / waImg.height) : WA_FALLBACK_DIAM;
+  const textLeftX = M + waIconW + 5;
+  const waWrapW = Math.max(100, contentW - (textLeftX - M) - 8);
+  const waLines = wrapToWidth(whatsapp, waWrapW, font, waFs, 32);
+  const waLineH = 7.1;
+  const waAsc = waFs * 0.72;
+  const waDesc = waFs * 0.24;
+  const waTextVisualH =
+    waLines.length > 0 ? (waLines.length - 1) * waLineH + waAsc + waDesc : waLineH;
+  const waBlockH = Math.max(WA_ICON_H + 2, waTextVisualH + 1);
+  const dWaTop = d;
+  const midWaFromTop = dWaTop + waBlockH / 2;
+  const textStartY =
+    waLines.length > 0 ? midWaFromTop - waTextVisualH / 2 + waAsc : dWaTop + (waBlockH - waLineH) / 2;
+  const iconTopFromWa = midWaFromTop - WA_ICON_H / 2;
+
+  if (waImg) {
+    const ih = WA_ICON_H;
+    const iw = waIconW;
+    page.drawImage(waImg, {
+      x: M,
+      y: byTop(page, iconTopFromWa + ih),
+      width: iw,
+      height: ih,
+    });
+  } else {
+    const diam = WA_FALLBACK_DIAM;
+    page.drawCircle({
+      x: M + diam / 2,
+      y: byTop(page, midWaFromTop),
+      size: diam,
+      color: C.waGreen,
+    });
   }
-  d = d + 3 + hWaR + 4;
+
+  let wy = textStartY;
+  for (const ln of waLines) {
+    page.drawText(ln, { x: textLeftX, y: byTop(page, wy), size: waFs, font, color: C.textBody });
+    wy += waLineH;
+  }
+  d = dWaTop + waBlockH + 4;
 
   const bTrim = (bankBlock || '').trim();
   const show3 = bTrim || obsBlock.trim() || bankImg != null || qrImg != null;
@@ -475,6 +522,21 @@ function drawStatementFooterAt(o: FooterAtOpts): void {
   hLine(page, d, M, M + contentW, C.borderGray, 0.4);
   d   += 6;
   const d3Top = d;
+
+  let logoH = 0;
+  let logoW_ = 0;
+  if (bankImg) {
+    const s = Math.min(
+      FOOT_BANK_LOGO_MAX_W / bankImg.width,
+      FOOT_BANK_LOGO_MAX_H / bankImg.height,
+      1,
+    );
+    logoW_ = bankImg.width * s;
+    logoH = bankImg.height * s;
+  }
+  const bankLeftColW = bankImg ? logoW_ + 5 : 0;
+  const x2 = M + bankLeftColW + (bankLeftColW > 0 ? FOOT_BANK_TEXT_GAP : 4);
+  const mid2w = Math.max(80, x3 - x2 - 4);
 
   const bankRows: string[] = [];
   if (bTrim) {
@@ -491,14 +553,6 @@ function drawStatementFooterAt(o: FooterAtOpts): void {
   if (bankRows.length) hMid = bankRows.length * 7.1;
   if (obsLines.length)  hMid += (bankRows.length ? 3 : 0) + obsLines.length * 7.1;
   hMid         = hMid + (hMid > 0 ? 1 : 0);
-
-  let    logoH = 0;
-  let    logoW_ = 0;
-  if (bankImg) {
-    const s = Math.min(78 / bankImg.width, 40 / bankImg.height, 1);
-    logoW_ = bankImg.width * s;
-    logoH  = bankImg.height * s;
-  }
   const qrMax = 64;
   let    qrH  = 0;
   let    qrW  = 0;
@@ -515,7 +569,12 @@ function drawStatementFooterAt(o: FooterAtOpts): void {
   const rowH     = Math.max(logoH, hMid, qrBlockH, 1);
 
   if (bankImg) {
-    const tImg = d3Top + (rowH - logoH) / 2;
+    // Centrado vertical respecto solo al bloque de texto bancario + OBS (no a la fila completa con QR).
+    const hasBankText = bankRows.length > 0 || obsLines.length > 0;
+    const textBlockH = hasBankText ? Math.max(0, hMid - 1) : 0;
+    const tImg = hasBankText
+      ? d3Top + Math.max(0, (textBlockH - logoH) / 2)
+      : d3Top + Math.max(0, (rowH - logoH) / 2);
     page.drawImage(bankImg, { x: x1, y: byTop(page, tImg + logoH), width: logoW_, height: logoH });
   }
 
@@ -622,6 +681,26 @@ export async function buildAccountStatementPdfBlob(
     qrB   ? embedWithRasterFallback(pdf, extra?.paymentQrPng, qrB) : Promise.resolve<PDFImage | null>(null),
   ]);
 
+  /** Logo WhatsApp para el pie del PDF (`public/logo_wp.jpg`). La vista web usa otro recurso; aquí solo JPEG embebido. */
+  let waStatementIcon: PDFImage | null = null;
+  try {
+    const base =
+      typeof import.meta !== 'undefined' &&
+      import.meta.env &&
+      typeof import.meta.env.BASE_URL === 'string'
+        ? import.meta.env.BASE_URL
+        : '/';
+    const waPath = `${base}logo_wp.jpg`;
+    const res = await fetch(waPath);
+    if (res.ok) {
+      const blob = await res.blob();
+      const wb = new Uint8Array(await blob.arrayBuffer());
+      waStatementIcon = await embedWithRasterFallback(pdf, blob, wb);
+    }
+  } catch {
+    /* Si no hay imagen o falla la carga, el pie usa el círculo verde de respaldo. */
+  }
+
   const maxW       = contentW - 92 - 4;
   const razonLines = wrapToWidth((company.business_name || '—').replace(/\r/g, ''), maxW, font, 7.8, 3);
   const dirLines   = wrapToWidth((company.address?.trim() || '—').replace(/\r/g, ''), maxW, font, 7.8, 3);
@@ -698,7 +777,7 @@ export async function buildAccountStatementPdfBlob(
       const y1  = d + 6.5;
       const opD = formatLedgerDateDisplay(row.operation_date);
       const prD = formatLedgerDateDisplay(row.process_date);
-      const doc = truncateDocumentNumberDisplay(row.document_number);
+      const doc = truncateDocumentNumberDisplay(row.document_number, 24);
       const cgo = row.cargo > 0 ? money(row.cargo) : '-';
       const abo = row.abono > 0 ? money(row.abono) : '-';
       const bal = money(row.balance);
@@ -746,6 +825,7 @@ export async function buildAccountStatementPdfBlob(
       whatsapp,
       bankBlock,
       obsBlock,
+      waImg: waStatementIcon,
       bankImg,
       qrImg,
       qrCaption,

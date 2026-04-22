@@ -11,6 +11,12 @@ import type { Product } from '../services/products';
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const formatDateInput = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
+/** YYYY-MM del mes calendario anterior al mes de `d` (hora local). Ej.: 22-abr-2026 → 2026-03. */
+function previousMonthYMFromDate(d: Date): string {
+  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  return `${prev.getFullYear()}-${pad2(prev.getMonth() + 1)}`;
+}
+
 const MONTH_NAMES_ES = [
   'enero',
   'febrero',
@@ -64,7 +70,7 @@ const TaxSettlementNew = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [issueDate, setIssueDate] = useState(() => formatDateInput(new Date()));
-  const [liquidationPeriod, setLiquidationPeriod] = useState(() => formatDateInput(new Date()).slice(0, 7));
+  const [liquidationPeriod, setLiquidationPeriod] = useState(() => previousMonthYMFromDate(new Date()));
   const liquidationPeriodManualRef = useRef(false);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineRow[]>([]);
@@ -80,11 +86,14 @@ const TaxSettlementNew = () => {
     void companiesService.list().then(setCompanies).catch(() => setCompanies([]));
   }, []);
 
-  /** Al cambiar la fecha de emisión, sugerir el mismo mes-calendario como periodo de liquidación si el usuario no lo fijó a mano. */
+  /** Al cambiar la fecha de emisión, sugerir el mes calendario anterior al de esa fecha como periodo liquidado (si el usuario no lo fijó a mano). */
   useEffect(() => {
     if (liquidationPeriodManualRef.current) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) return;
-    setLiquidationPeriod(issueDate.slice(0, 7));
+    const [yy, mo, dd] = issueDate.split('-').map((x) => Number(x));
+    if (!Number.isFinite(yy) || !Number.isFinite(mo) || !Number.isFinite(dd)) return;
+    const d = new Date(yy, mo - 1, dd);
+    setLiquidationPeriod(previousMonthYMFromDate(d));
   }, [issueDate]);
 
   /** Si cambia el periodo cabecera, propagar a líneas que aún coincidían con el periodo anterior. */

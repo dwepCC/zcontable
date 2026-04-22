@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -163,35 +161,13 @@ func duplicateLiquidationPeriod(tx *gorm.DB, companyID uint, periodYM string, ex
 	return n > 0, nil
 }
 
-var issuedLiquidationNumberRe = regexp.MustCompile(`^LI(\d{6})-(\d{4})$`)
-
-func nextIssuedLiquidationSequenceForYear(tx *gorm.DB, companyID uint, year int) (int, error) {
-	var nums []string
-	if err := tx.Model(&models.TaxSettlement{}).
-		Where("company_id = ? AND status = ?", companyID, models.TaxSettlementStatusIssued).
-		Where("number LIKE ?", "LI%-%").
-		Pluck("number", &nums).Error; err != nil {
-		return 0, err
+// settlementNumberFromLiquidationPeriod devuelve el número visible LI-YYYYMM a partir del periodo AAAA-MM.
+func settlementNumberFromLiquidationPeriod(lp string) (string, error) {
+	compact := strings.ReplaceAll(strings.TrimSpace(lp), "-", "")
+	if len(compact) != 6 {
+		return "", fmt.Errorf("periodo de liquidación inválido para numeración: %q", lp)
 	}
-	max := 0
-	for _, n := range nums {
-		m := issuedLiquidationNumberRe.FindStringSubmatch(strings.TrimSpace(n))
-		if len(m) != 3 {
-			continue
-		}
-		y, err := strconv.Atoi(m[1][:4])
-		if err != nil || y != year {
-			continue
-		}
-		seq, err := strconv.Atoi(m[2])
-		if err != nil {
-			continue
-		}
-		if seq > max {
-			max = seq
-		}
-	}
-	return max + 1, nil
+	return "LI-" + compact, nil
 }
 
 func normalizeLinePeriodYM(li TaxSettlementLineInput, settlementYM string) (periodYM string, firstOfMonth *time.Time, err error) {
@@ -258,6 +234,11 @@ func (s *TaxSettlementService) CreateDraft(in TaxSettlementCreateInput) (*models
 		return nil, err
 	}
 	ts.LiquidationPeriod = lp
+	num, err := settlementNumberFromLiquidationPeriod(lp)
+	if err != nil {
+		return nil, err
+	}
+	ts.Number = num
 
 	lines := make([]models.TaxSettlementLine, 0, len(in.Lines))
 	for i, li := range in.Lines {
@@ -356,6 +337,11 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 		return nil, err
 	}
 	ts.LiquidationPeriod = lp
+	num, err := settlementNumberFromLiquidationPeriod(lp)
+	if err != nil {
+		return nil, err
+	}
+	ts.Number = num
 
 	lines := make([]models.TaxSettlementLine, 0, len(in.Lines))
 	for i, li := range in.Lines {
@@ -464,13 +450,33 @@ func (s *TaxSettlementService) ListPaged(params TaxSettlementListParams) ([]mode
 		return nil, 0, err
 	}
 	var list []models.TaxSettlement
-	err := q.Preload("Company").
+	err := q.Preload("Company").Preload("Lines", func(db *gorm.DB) *gorm.DB {
+		return db.Order("sort_order ASC, id ASC")
+	}).
 		Order("issue_date DESC, id DESC").
 		Limit(perPage).
 		Offset((page - 1) * perPage).
 		Find(&list).Error
 	if err != nil {
 		return nil, 0, err
+	}
+	// Borradores: total_general no está persistido hasta emitir; se calcula desde líneas para listados.
+	for i := range list {
+		if list[i].Status != models.TaxSettlementStatusDraft {
+			continue
+		}
+		var th, tm float64
+		for _, ln := range list[i].Lines {
+			switch ln.LineType {
+			case models.TaxSettlementLineDocRef, models.TaxSettlementLineAdjust:
+				th += ln.Amount
+			case models.TaxSettlementLineTaxManual:
+				tm += ln.Amount
+			}
+		}
+		list[i].TotalHonorarios = math.Round(th*100) / 100
+		list[i].TotalImpuestos = math.Round(tm*100) / 100
+		list[i].TotalGeneral = math.Round((th+tm)*100) / 100
 	}
 	return list, total, nil
 }
@@ -511,7 +517,7 @@ func createDebtDocumentsForManualLines(tx *gorm.DB, ts *models.TaxSettlement, li
 		}
 		doc := models.Document{
 			CompanyID:          ts.CompanyID,
-			Type:               "Otro",
+			Type:               models.DocumentTypeLiquidacion,
 			Number:             fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID),
 			IssueDate:          issue,
 			TotalAmount:        math.Round(ln.Amount*100) / 100,
@@ -573,16 +579,11 @@ func (s *TaxSettlementService) Emit(id uint) (*models.TaxSettlement, error) {
 		if dup {
 			return errors.New("ya existe otra liquidación para esa empresa y periodo; no se puede emitir")
 		}
-		t0, err := time.Parse("2006-01", lp)
+		num, err := settlementNumberFromLiquidationPeriod(lp)
 		if err != nil {
 			return err
 		}
-		seq, err := nextIssuedLiquidationSequenceForYear(tx, ts.CompanyID, t0.Year())
-		if err != nil {
-			return err
-		}
-		compact := strings.ReplaceAll(lp, "-", "")
-		ts.Number = fmt.Sprintf("LI%s-%04d", compact, seq)
+		ts.Number = num
 		ts.Status = models.TaxSettlementStatusIssued
 		if err := createDebtDocumentsForManualLines(tx, &ts, ts.Lines); err != nil {
 			return err

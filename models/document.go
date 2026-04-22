@@ -6,6 +6,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// DocumentTypeLiquidacion es el tipo guardado en `documents.type` para cargos creados al emitir
+// una liquidación (líneas ajuste / impuesto manual, número DEU-LIQ-*).
+const DocumentTypeLiquidacion = "LI"
+
 // Document representa un comprobante financiero (sincronizado o manual)
 type Document struct {
 	ID             uint           `gorm:"primaryKey" json:"id"`
@@ -29,6 +33,8 @@ type Document struct {
 	Payments   []Payment            `gorm:"foreignKey:DocumentID" json:"payments,omitempty"`
 	Allocations []PaymentAllocation `gorm:"foreignKey:DocumentID" json:"allocations,omitempty"`
 	Items      []DocumentItem       `gorm:"foreignKey:DocumentID" json:"items,omitempty"`
+	// Número legible para UI (p. ej. DEU-LI-202603 en deudas de liquidación); no persiste en BD.
+	DisplayNumber string `json:"display_number,omitempty" gorm:"-"`
 }
 
 func (Document) TableName() string {

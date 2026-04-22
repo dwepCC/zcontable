@@ -358,6 +358,7 @@ const Payments = () => {
                 <th className="px-4 py-3">Empresa</th>
                 <th className="px-4 py-3">Tipo</th>
                 <th className="px-4 py-3">Tukifac</th>
+                <th className="px-4 py-3">PDF</th>
                 <th className="px-4 py-3">Deuda</th>
                 <th className="px-4 py-3">Método</th>
                 <th className="px-4 py-3 text-right">Monto</th>
@@ -368,12 +369,16 @@ const Payments = () => {
             <tbody className="divide-y divide-slate-100">
               {loading && payments.length === 0 ? (
                  <tr>
-                   <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
+                   <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
                      <i className="fas fa-spinner fa-spin mr-2"></i> Cargando pagos...
                    </td>
                  </tr>
               ) : payments.length > 0 ? (
-                payments.map((payment) => (
+                payments.map((payment) => {
+                  const tukRec = payment.tukifac_fiscal_receipt;
+                  const ticketUrl = (tukRec?.print_ticket_url ?? '').trim();
+                  const pdfUrl = (tukRec?.pdf_url ?? '').trim();
+                  return (
                   <tr key={payment.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-slate-700">{payment.date ? payment.date.slice(0, 10) : '—'}</td>
                     <td className="px-4 py-3 text-slate-800 font-medium">
@@ -387,12 +392,44 @@ const Payments = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700 font-mono text-xs">
-                      {payment.tukifac_fiscal_receipt?.number ? (
-                        <span title={`ID Tukifac: ${payment.tukifac_fiscal_receipt.external_id}`}>
-                          {payment.tukifac_fiscal_receipt.number}
+                      {tukRec?.number ? (
+                        <span title={`ID Tukifac: ${tukRec.external_id}`}>
+                          {tukRec.number}
                         </span>
                       ) : (
                         <span className="text-slate-400 font-sans">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {!ticketUrl && !pdfUrl ? (
+                        <span className="text-slate-400 text-xs">—</span>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {ticketUrl ? (
+                            <a
+                              href={ticketUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 hover:bg-slate-100"
+                              title="Vista ticket (Tukifac)"
+                            >
+                              <i className="fas fa-receipt text-[10px]" aria-hidden />
+                              Ticket
+                            </a>
+                          ) : null}
+                          {pdfUrl ? (
+                            <a
+                              href={pdfUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-800 hover:bg-slate-50"
+                              title="PDF A4 (Tukifac)"
+                            >
+                              <i className="fas fa-file-pdf text-[10px] text-red-600" aria-hidden />
+                              A4
+                            </a>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
@@ -438,10 +475,11 @@ const Payments = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-slate-500 text-sm">
+                  <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
                     {loading ? "Cargando..." : "No hay pagos registrados."}
                   </td>
                 </tr>

@@ -346,7 +346,7 @@ const Comprobantes = () => {
           <div className="p-8 text-center text-slate-500 text-sm">No hay comprobantes con los filtros actuales.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[960px] w-full text-sm">
+            <table className="min-w-[1040px] w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase border-b border-slate-200">
                 <tr>
                   <th className="px-3 py-3 text-left">Tipo</th>
@@ -357,6 +357,7 @@ const Comprobantes = () => {
                   <th className="px-3 py-3 text-left">Estado</th>
                   <th className="px-3 py-3 text-left">Origen</th>
                   <th className="px-3 py-3 text-left">Liquidación</th>
+                  <th className="px-3 py-3 text-left">PDF</th>
                   <th className="px-3 py-3 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -367,6 +368,8 @@ const Comprobantes = () => {
                   const recon = r.reconciliation_label ?? r.reconciliation_status;
                   const sunat = r.state_type_description?.trim();
                   const stBadge = r.settlement_link_status ?? (r.reconciliation_status === 'descartado' ? 'descartado' : 'pendiente');
+                  const ticketUrl = (r.print_ticket_url ?? '').trim();
+                  const pdfUrl = (r.pdf_url ?? '').trim();
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80">
                       <td className="px-3 py-3 text-slate-800 font-medium">{kind}</td>
@@ -392,6 +395,38 @@ const Comprobantes = () => {
                             ? `N° ${r.settlement_number || `#${r.effective_tax_settlement_id}`}`
                             : r.settlement_link_message ?? 'Pendiente de vincular a liquidación'}
                         </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        {ticketUrl || pdfUrl ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {ticketUrl ? (
+                              <a
+                                href={ticketUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 hover:bg-slate-100"
+                                title="Vista ticket (Tukifac)"
+                              >
+                                <i className="fas fa-receipt text-[10px]" aria-hidden />
+                                Ticket
+                              </a>
+                            ) : null}
+                            {pdfUrl ? (
+                              <a
+                                href={pdfUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-800 hover:bg-slate-50"
+                                title="PDF A4 (Tukifac)"
+                              >
+                                <i className="fas fa-file-pdf text-[10px] text-red-600" aria-hidden />
+                                A4
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-right">
                         {canManualLinkSettlement(r) ? (

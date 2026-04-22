@@ -38,7 +38,8 @@ function typeOptionsForEdit(currentType: string) {
   const t = String(currentType ?? '').trim();
   const base = [...DEBT_TYPE_OPTIONS];
   if (t && !base.some((o) => o.value === t)) {
-    base.push({ value: t, label: t === 'PLAN' ? 'Mensualidad (plan)' : t });
+    const label = t === 'PLAN' ? 'Mensualidad (plan)' : t === 'LI' ? 'Liquidación (LI)' : t;
+    base.push({ value: t, label });
   }
   return base;
 }

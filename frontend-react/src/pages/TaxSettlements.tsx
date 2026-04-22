@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { taxSettlementsService } from '../services/taxSettlements';
-import type { TaxSettlement } from '../types/dashboard';
+import type { TaxSettlement, TaxSettlementLine } from '../types/dashboard';
 import Pagination from '../components/Pagination';
 import SearchableSelect from '../components/SearchableSelect';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -16,6 +17,33 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   const i = Math.trunc(n);
   if (i <= 0) return fallback;
   return i;
+}
+
+function settlementLineTypeLabel(t: string): string {
+  switch (t) {
+    case 'document_ref':
+      return 'Deuda';
+    case 'adjustment':
+      return 'Ajuste';
+    case 'tax_manual':
+      return 'Impuesto';
+    default:
+      return t ? t : '—';
+  }
+}
+
+function linePeriodForModal(ln: TaxSettlementLine, settlementPeriod: string): string {
+  const pym = (ln.period_ym ?? '').trim();
+  if (pym && /^\d{4}-\d{2}$/.test(pym)) return pym;
+  const pd = (ln.period_date ?? '').trim();
+  if (pd.length >= 7) return pd.slice(0, 7);
+  const head = settlementPeriod.trim();
+  return head || '—';
+}
+
+function sumSettlementLineAmounts(lines: TaxSettlementLine[] | undefined): number {
+  const s = (lines ?? []).reduce((acc, ln) => acc + (Number.isFinite(ln.amount) ? ln.amount : 0), 0);
+  return Math.round(s * 100) / 100;
 }
 
 function settlementDeleteWarningFromRow(row: TaxSettlement): string {
@@ -44,6 +72,7 @@ const TaxSettlements = () => {
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<TaxSettlement | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [itemsModalRow, setItemsModalRow] = useState<TaxSettlement | null>(null);
   const [filterCompanyId, setFilterCompanyId] = useState(initialCompanyId);
   const [pagination, setPagination] = useState({
     page,
@@ -78,6 +107,15 @@ const TaxSettlements = () => {
   useEffect(() => {
     void fetchList();
   }, [fetchList]);
+
+  useEffect(() => {
+    if (!itemsModalRow) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setItemsModalRow(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [itemsModalRow]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -273,24 +311,28 @@ const TaxSettlements = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.status === 'emitida' ? (
-                      <span className="inline-flex items-center justify-end gap-1">
+                    {Number.isFinite(row.total_general) ? (
+                      <span className="inline-flex items-center justify-end gap-1 text-slate-800 font-medium">
                         <i className="fas fa-coins text-slate-400 text-[11px]" aria-hidden />
-                        {row.total_general.toFixed(2)}
+                        S/&nbsp;{row.total_general.toLocaleString('es-PE', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     ) : (
                       '—'
                     )}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <Link
-                      to={`/tax-settlements/${row.id}#liquidacion-lineas`}
+                    <button
+                      type="button"
+                      onClick={() => setItemsModalRow(row)}
                       className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-50 hover:border-primary-200"
-                      title="Ver líneas de la liquidación"
+                      title="Ver ítems de la liquidación"
                     >
                       <i className="fas fa-list-ul text-[11px]" aria-hidden />
                       Ver ítems
-                    </Link>
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-wrap justify-end gap-x-3 gap-y-1.5">
@@ -358,6 +400,105 @@ const TaxSettlements = () => {
         }}
         onConfirm={() => void confirmDeleteFromList()}
       />
+
+      {itemsModalRow
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[10001] flex items-end sm:items-center justify-center p-0 sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="settlement-items-modal-title"
+            >
+              <button
+                type="button"
+                className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                aria-label="Cerrar"
+                onClick={() => setItemsModalRow(null)}
+              />
+              <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200">
+                <div className="px-4 py-4 sm:px-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+                  <div className="min-w-0">
+                    <h2 id="settlement-items-modal-title" className="text-base font-semibold text-slate-900">
+                      Ítems de la liquidación
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-600 truncate" title={itemsModalRow.company?.business_name}>
+                      {itemsModalRow.number?.trim() || `#${itemsModalRow.id}`}
+                      {itemsModalRow.company?.business_name ? ` · ${itemsModalRow.company.business_name}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setItemsModalRow(null)}
+                    className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-slate-100 text-slate-600"
+                    aria-label="Cerrar"
+                  >
+                    <i className="fas fa-times" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto flex-1 px-4 py-3 sm:px-5">
+                  {(itemsModalRow.lines ?? []).length === 0 ? (
+                    <p className="text-sm text-slate-500 py-4 text-center">No hay líneas cargadas.</p>
+                  ) : (
+                    <table className="min-w-full text-sm">
+                      <thead className="text-xs font-semibold uppercase text-slate-500 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 pr-3 text-left">Tipo</th>
+                          <th className="py-2 pr-3 text-left">Descripción</th>
+                          <th className="py-2 pr-3 text-left whitespace-nowrap">Periodo</th>
+                          <th className="py-2 text-right">Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(itemsModalRow.lines ?? []).map((ln) => (
+                          <tr key={ln.id ?? `${ln.sort_order}-${ln.concept}`}>
+                            <td className="py-2.5 pr-3 text-slate-600 whitespace-nowrap">
+                              {settlementLineTypeLabel(ln.line_type)}
+                            </td>
+                            <td className="py-2.5 pr-3 text-slate-800">{ln.concept || '—'}</td>
+                            <td className="py-2.5 pr-3 text-slate-600 font-mono text-xs tabular-nums whitespace-nowrap">
+                              {linePeriodForModal(ln, itemsModalRow.liquidation_period ?? '')}
+                            </td>
+                            <td className="py-2.5 text-right tabular-nums font-medium text-slate-800">
+                              S/&nbsp;
+                              {Number(ln.amount).toLocaleString('es-PE', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 border-slate-200 bg-slate-50">
+                          <td colSpan={3} className="py-3 pr-3 text-right text-sm font-semibold text-slate-800">
+                            Total
+                          </td>
+                          <td className="py-3 text-right text-sm font-semibold tabular-nums text-slate-900">
+                            S/&nbsp;
+                            {sumSettlementLineAmounts(itemsModalRow.lines).toLocaleString('es-PE', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+                <div className="px-4 py-3 sm:px-5 border-t border-slate-100 bg-slate-50/80 rounded-b-2xl shrink-0 flex justify-end">
+                  <Link
+                    to={`/tax-settlements/${itemsModalRow.id}#liquidacion-lineas`}
+                    onClick={() => setItemsModalRow(null)}
+                    className="text-sm font-medium text-primary-700 hover:text-primary-800"
+                  >
+                    Abrir ficha completa
+                  </Link>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 };

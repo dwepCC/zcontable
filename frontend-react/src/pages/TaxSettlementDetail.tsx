@@ -24,6 +24,7 @@ const TaxSettlementDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [emitting, setEmitting] = useState(false);
+  const [emitDialogOpen, setEmitDialogOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -64,13 +65,13 @@ const TaxSettlementDetail = () => {
     }
   }, [loading, row, location.hash]);
 
-  const emit = async () => {
+  const performEmit = async () => {
     if (!settlementId) return;
-    if (!confirm('¿Emitir liquidación? Se asignará un número correlativo y se fijarán los totales.')) return;
     setEmitting(true);
     try {
       const updated = await taxSettlementsService.emit(settlementId);
       setRow(updated);
+      setEmitDialogOpen(false);
       window.dispatchEvent(new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Liquidación emitida.' } }));
     } catch (e: unknown) {
       const msg =
@@ -215,7 +216,7 @@ const TaxSettlementDetail = () => {
           {row.status === 'borrador' && canEmit ? (
             <button
               type="button"
-              onClick={() => void emit()}
+              onClick={() => setEmitDialogOpen(true)}
               disabled={emitting}
               className={`${btnBase} border-primary-700 bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50`}
             >
@@ -374,6 +375,23 @@ const TaxSettlementDetail = () => {
         </table>
         </div>
       </section>
+
+      <ConfirmDialog
+        open={emitDialogOpen}
+        title="Emitir liquidación"
+        message={
+          row
+            ? `El número «${row.number?.trim() || '—'}» ya corresponde a este borrador. Al emitir se fijarán los totales y el estado pasará a emitida. Las líneas de ajuste / impuesto manual generarán las deudas internas (DEU-LIQ…) si aplica. Esta acción no se puede deshacer como borrador.`
+            : ''
+        }
+        confirmLabel="Sí, emitir"
+        cancelLabel="Cancelar"
+        loading={emitting}
+        onClose={() => {
+          if (!emitting) setEmitDialogOpen(false);
+        }}
+        onConfirm={() => void performEmit()}
+      />
 
       <ConfirmDialog
         open={deleteDialogOpen}

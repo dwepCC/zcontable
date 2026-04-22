@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"miappfiber/database"
 	"miappfiber/models"
 )
 
@@ -77,7 +79,7 @@ func statementDocumentTypeCode(d models.Document) string {
 		return "NV"
 	case "recibo":
 		return "RC"
-	case "liquidacion_impuestos":
+	case "liquidacion_impuestos", "li":
 		return "LI"
 	case "plan":
 		return "PL"
@@ -87,6 +89,174 @@ func statementDocumentTypeCode(d models.Document) string {
 		return strings.ToUpper(raw[:2])
 	}
 	return "DO"
+}
+
+func isDocumentFromLiquidacion(d models.Document) bool {
+	if strings.TrimSpace(strings.ToLower(d.Source)) == "liquidacion" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(d.Type), "LI")
+}
+
+// IsDocumentFromLiquidacion indica deuda generada al emitir liquidación (DEU-LIQ-* / tipo LI).
+func IsDocumentFromLiquidacion(d models.Document) bool {
+	return isDocumentFromLiquidacion(d)
+}
+
+// liquidationSettlementIDFromDebtNumber extrae el ID de tax_settlement del número DEU-LIQ-{id}-{lineId}.
+func liquidationSettlementIDFromDebtNumber(number string) (uint, bool) {
+	s := strings.TrimSpace(number)
+	const prefix = "DEU-LIQ-"
+	if len(s) < len(prefix)+2 || !strings.HasPrefix(strings.ToUpper(s), prefix) {
+		return 0, false
+	}
+	rest := s[len(prefix):]
+	i := strings.IndexByte(rest, '-')
+	if i <= 0 {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(rest[:i], 10, 32)
+	if err != nil || id == 0 {
+		return 0, false
+	}
+	return uint(id), true
+}
+
+func collectSettlementNumbersForDebtDocs(docs []models.Document) map[uint]string {
+	ids := make([]uint, 0)
+	seen := make(map[uint]struct{})
+	for _, d := range docs {
+		if !isDocumentFromLiquidacion(d) {
+			continue
+		}
+		sid, ok := liquidationSettlementIDFromDebtNumber(d.Number)
+		if !ok || sid == 0 {
+			continue
+		}
+		if _, dup := seen[sid]; dup {
+			continue
+		}
+		seen[sid] = struct{}{}
+		ids = append(ids, sid)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var rows []models.TaxSettlement
+	if err := database.DB.Select("id", "number").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil
+	}
+	out := make(map[uint]string, len(rows))
+	for _, r := range rows {
+		if n := strings.TrimSpace(r.Number); n != "" {
+			out[r.ID] = n
+		}
+	}
+	return out
+}
+
+func normalizeDebtPeriodYM(accountingPeriod, serviceMonth string) string {
+	s := strings.TrimSpace(accountingPeriod)
+	if s == "" {
+		s = strings.TrimSpace(serviceMonth)
+	}
+	if s == "" {
+		return ""
+	}
+	if len(s) >= 7 && s[4] == '-' {
+		return s[:7]
+	}
+	if len(s) == 6 {
+		return s[:4] + "-" + s[4:6]
+	}
+	return s
+}
+
+// mesesStmtNombre mes en minúsculas para texto de estado de cuenta (ej. marzo-2026).
+var mesesStmtNombre = []string{
+	"", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+	"julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+}
+
+func formatDebtPeriodHumanES(ym string) string {
+	ym = strings.TrimSpace(ym)
+	if ym == "" {
+		return ""
+	}
+	var yStr, moStr string
+	if len(ym) >= 7 && ym[4] == '-' {
+		yStr, moStr = ym[:4], ym[5:7]
+	} else if len(ym) == 6 {
+		yStr, moStr = ym[:4], ym[4:6]
+	} else {
+		return ym
+	}
+	mo, err := strconv.Atoi(moStr)
+	if err != nil || mo < 1 || mo > 12 {
+		return ym
+	}
+	return fmt.Sprintf("%s-%s", mesesStmtNombre[mo], yStr)
+}
+
+func statementDocumentDetailWithPeriod(d models.Document) string {
+	base := statementDocumentDetail(d)
+	ym := normalizeDebtPeriodYM(d.AccountingPeriod, d.ServiceMonth)
+	if ym == "" {
+		return base
+	}
+	ymHuman := formatDebtPeriodHumanES(ym)
+	if ymHuman == "" {
+		ymHuman = ym
+	}
+	if base != "" {
+		return base + " (" + ymHuman + ")"
+	}
+	return "(" + ymHuman + ")"
+}
+
+func ledgerCargoTypeDisplay(d models.Document) string {
+	if isDocumentFromLiquidacion(d) {
+		return "LI"
+	}
+	return statementDocumentTypeCode(d)
+}
+
+func ledgerCargoDocNumber(d models.Document, settlementNums map[uint]string) string {
+	if isDocumentFromLiquidacion(d) {
+		if sid, ok := liquidationSettlementIDFromDebtNumber(d.Number); ok {
+			if settlementNums != nil {
+				if n := settlementNums[sid]; n != "" {
+					return n
+				}
+			}
+		}
+	}
+	num := strings.TrimSpace(d.Number)
+	if num == "" {
+		return fmt.Sprintf("#%d", d.ID)
+	}
+	return num
+}
+
+func tukifacReceiptTypeDisplay(rec *models.TukifacFiscalReceipt) string {
+	if rec == nil {
+		return ""
+	}
+	dt := strings.TrimSpace(strings.ToUpper(rec.DocumentTypeID))
+	switch dt {
+	case "01", "03", "07", "08", "09", "20", "40":
+		return dt
+	case "NV":
+		return "NV"
+	default:
+		if dt != "" {
+			if len(dt) <= 4 {
+				return dt
+			}
+			return dt[:4]
+		}
+	}
+	return "CF"
 }
 
 func statementDocumentDetail(d models.Document) string {
@@ -120,6 +290,7 @@ func paymentLedgerDetail(p models.Payment) string {
 
 func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) []ledgerEntry {
 	entries := make([]ledgerEntry, 0, len(docs)+len(pays))
+	settlementNums := collectSettlementNumbersForDebtDocs(docs)
 
 	for _, d := range docs {
 		if strings.TrimSpace(strings.ToLower(d.Status)) == "anulado" {
@@ -133,19 +304,16 @@ func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) [
 		if proc.IsZero() {
 			proc = d.IssueDate
 		}
-		code := statementDocumentTypeCode(d)
-		num := strings.TrimSpace(d.Number)
-		if num == "" {
-			num = fmt.Sprintf("#%d", d.ID)
-		}
+		typeDisp := ledgerCargoTypeDisplay(d)
+		docNum := ledgerCargoDocNumber(d, settlementNums)
 		entries = append(entries, ledgerEntry{
 			opDate:    op,
 			processAt: proc,
 			isPayment: false,
 			uid:       d.ID,
-			typeCode:  fmt.Sprintf("%s%04d", code, d.ID),
-			docNumber: num,
-			detail:    statementDocumentDetail(d),
+			typeCode:  typeDisp,
+			docNumber: docNum,
+			detail:    statementDocumentDetailWithPeriod(d),
 			cargo:     math.Round(d.TotalAmount*100) / 100,
 			abono:     0,
 		})
@@ -167,13 +335,23 @@ func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) [
 		if refDoc == "" {
 			refDoc = fmt.Sprintf("P-%d", p.ID)
 		}
+		typeDisp := fmt.Sprintf("AB%06d", p.ID)
+		docNum := refDoc
+		if p.TukifacFiscalReceipt != nil {
+			if tc := tukifacReceiptTypeDisplay(p.TukifacFiscalReceipt); tc != "" {
+				typeDisp = tc
+			}
+			if n := strings.TrimSpace(p.TukifacFiscalReceipt.Number); n != "" {
+				docNum = n
+			}
+		}
 		entries = append(entries, ledgerEntry{
 			opDate:    op,
 			processAt: proc,
 			isPayment: true,
 			uid:       p.ID,
-			typeCode:  fmt.Sprintf("AB%06d", p.ID),
-			docNumber: refDoc,
+			typeCode:  typeDisp,
+			docNumber: docNum,
 			detail:    paymentLedgerDetail(p),
 			payMethod: strings.TrimSpace(p.Method),
 			opCode:    strings.TrimSpace(p.Reference),

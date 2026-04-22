@@ -348,9 +348,6 @@ function BankStatementView({
               </div>
             </div>
           )}
-          <p className="text-xs text-slate-500 sm:w-full sm:order-last">
-            Fechas según zona horaria Perú (America/Lima). Por defecto se muestra el año en curso completo.
-          </p>
         </div>
         <button
           type="button"
@@ -484,7 +481,7 @@ function BankStatementView({
                 </tr>
               ) : (
                 rows.map((row, idx) => (
-                  <tr key={`${row.type_code}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
+                  <tr key={`${row.operation_date}-${row.type_code}-${row.document_number}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
                     <td className="px-2 py-2 text-slate-700 whitespace-nowrap tabular-nums align-top">
                       {formatLedgerDateDisplay(row.operation_date)}
                     </td>
@@ -496,7 +493,7 @@ function BankStatementView({
                       className="px-1.5 py-2 text-slate-700 font-mono text-[10px] align-top whitespace-nowrap min-w-0"
                       title={(row.document_number ?? '').trim() || undefined}
                     >
-                      {truncateDocumentNumberDisplay(row.document_number)}
+                      {truncateDocumentNumberDisplay(row.document_number, 24)}
                     </td>
                     <td className="px-2 py-2 text-slate-700 align-top whitespace-normal break-words min-w-0 hyphens-auto">
                       {row.detail || '—'}

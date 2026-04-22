@@ -89,6 +89,7 @@ func (s *FinanceService) GetCompanyStatement(companyID uint, ledgerYear int, led
 	if err := database.DB.
 		Preload("Document").
 		Preload("TaxSettlement").
+		Preload("TukifacFiscalReceipt").
 		Where("company_id = ?", companyID).
 		Order("date DESC, id DESC").
 		Find(&pays).Error; err != nil {

@@ -3,6 +3,7 @@ package controllers
 import (
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"miappfiber/models"
@@ -32,8 +33,20 @@ func (ctrl *DocumentController) ListAPI(c fiber.Ctx) error {
 			params.CompanyID = uint(id)
 		}
 	}
-	params.Status = c.Query("status", "")
+	rawStatus := strings.TrimSpace(c.Query("status", ""))
 	params.Overdue = c.Query("overdue", "") == "1"
+	params.ExplicitAllStatuses = false
+	// "vencido" no es estado en BD; equivale a filtro por vencimiento (overdue).
+	if strings.EqualFold(rawStatus, "vencido") {
+		params.Status = ""
+		params.Overdue = true
+	} else if strings.EqualFold(rawStatus, "all") {
+		// Ver todos los estados de deuda (sin filtro por status ni modo saldo implícito).
+		params.Status = ""
+		params.ExplicitAllStatuses = true
+	} else {
+		params.Status = rawStatus
+	}
 	pageStr := c.Query("page", "")
 	perPageStr := c.Query("per_page", "")
 	if fromStr := c.Query("date_from", ""); fromStr != "" {
@@ -58,7 +71,7 @@ func (ctrl *DocumentController) ListAPI(c fiber.Ctx) error {
 	// Una empresa sin filtro por fecha de emisión: solo documentos con saldo (pendiente/parcial), todas las fechas.
 	params.ImplicitOpenBalances = params.CompanyID != 0 &&
 		params.DateFrom == nil && params.DateTo == nil &&
-		params.Status == "" && !params.Overdue
+		params.Status == "" && !params.Overdue && !params.ExplicitAllStatuses
 
 	if !isAdmin(c) {
 		userID, err := getUserID(c)
@@ -90,6 +103,30 @@ func (ctrl *DocumentController) ListAPI(c fiber.Ctx) error {
 			perPage = v
 		}
 
+		groupQC := c.Query("group_by_company", "")
+		params.GroupByCompany = (groupQC == "1" || groupQC == "true") && params.CompanyID == 0
+
+		if params.GroupByCompany {
+			rows, total, err := ctrl.documentService.ListCompaniesDebtSummaryPaged(params, page, perPage)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
+			totalPages := 0
+			if perPage > 0 {
+				totalPages = int(math.Ceil(float64(total) / float64(perPage)))
+			}
+			return c.JSON(fiber.Map{
+				"data": rows,
+				"pagination": fiber.Map{
+					"page":        page,
+					"per_page":    perPage,
+					"total":       total,
+					"total_pages": totalPages,
+				},
+				"meta": fiber.Map{"list_mode": "by_company"},
+			})
+		}
+
 		list, total, err := ctrl.documentService.ListPaged(params, page, perPage)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -106,6 +143,7 @@ func (ctrl *DocumentController) ListAPI(c fiber.Ctx) error {
 				"total":       total,
 				"total_pages": totalPages,
 			},
+			"meta": fiber.Map{"list_mode": "documents"},
 		})
 	}
 

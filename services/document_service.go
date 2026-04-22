@@ -28,6 +28,18 @@ type DocumentListParams struct {
 	AllowedCompanyIDs []uint
 	// ImplicitOpenBalances: una empresa sin rango de fechas de emisión → solo pendiente+parcial con saldo (incluye vencidas).
 	ImplicitOpenBalances bool
+	// ExplicitAllStatuses: status=all en URL → no filtrar por estado (ni modo implícito de saldos).
+	ExplicitAllStatuses bool
+	// GroupByCompany: sin company_id, devolver filas agregadas por empresa (paginación por cantidad de empresas).
+	GroupByCompany bool
+}
+
+// CompanyDebtSummaryRow es una fila del listado agrupado por empresa (saldo abierto en el rango/filtros).
+type CompanyDebtSummaryRow struct {
+	CompanyID        uint           `json:"company_id"`
+	Company          models.Company `json:"company"`
+	DocumentCount    int64          `json:"document_count"`
+	OpenBalanceTotal float64        `json:"open_balance_total"`
 }
 
 func isValidDocumentStatus(s string) bool {
@@ -235,6 +247,9 @@ func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentLi
 	}
 
 	singleCompanyNoIssueDates := params.CompanyID != 0 && params.DateFrom == nil && params.DateTo == nil
+	// Con rango de emisión (p. ej. vista mensual / todas las empresas), no recortar por vencimiento:
+	// "pendiente" debe listar todas las pendientes en el rango (las vencidas usan filtro "vencido"/overdue).
+	hasIssueDateRange := params.DateFrom != nil || params.DateTo != nil
 
 	if params.ImplicitOpenBalances {
 		q = q.Where("status IN ?", []string{"pendiente", "parcial"})
@@ -244,7 +259,7 @@ func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentLi
 		}
 		if params.Overdue {
 			q = q.Where("due_date IS NOT NULL AND due_date < ? AND status <> ? AND status <> ?", startOfToday, "pagado", "anulado")
-		} else if (params.Status == "pendiente" || params.Status == "parcial") && !singleCompanyNoIssueDates {
+		} else if (params.Status == "pendiente" || params.Status == "parcial") && !singleCompanyNoIssueDates && !hasIssueDateRange {
 			q = q.Where("(due_date IS NULL OR due_date >= ?)", startOfToday)
 		}
 	}
@@ -258,6 +273,40 @@ func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentLi
 	return q
 }
 
+func formatDebtDisplayNumberFromSettlementNumber(settlementNumber string) string {
+	s := strings.TrimSpace(settlementNumber)
+	if s == "" {
+		return ""
+	}
+	upper := strings.ToUpper(s)
+	if strings.HasPrefix(upper, "LI-") {
+		return "DEU-LI-" + s[len("LI-"):]
+	}
+	return "DEU-LI-" + s
+}
+
+func (s *DocumentService) enrichDocumentDisplayNumbers(list []models.Document) {
+	if len(list) == 0 {
+		return
+	}
+	settlementNums := collectSettlementNumbersForDebtDocs(list)
+	for i := range list {
+		d := &list[i]
+		if !isDocumentFromLiquidacion(*d) {
+			continue
+		}
+		sid, ok := liquidationSettlementIDFromDebtNumber(d.Number)
+		if !ok {
+			continue
+		}
+		sn := strings.TrimSpace(settlementNums[sid])
+		if sn == "" {
+			continue
+		}
+		d.DisplayNumber = formatDebtDisplayNumberFromSettlementNumber(sn)
+	}
+}
+
 func (s *DocumentService) List(params DocumentListParams) ([]models.Document, error) {
 	var list []models.Document
 	q := database.DB.Model(&models.Document{})
@@ -265,6 +314,7 @@ func (s *DocumentService) List(params DocumentListParams) ([]models.Document, er
 	if err := q.Preload("Company").Order("issue_date DESC, id DESC").Find(&list).Error; err != nil {
 		return nil, err
 	}
+	s.enrichDocumentDisplayNumbers(list)
 	return list, nil
 }
 
@@ -293,7 +343,67 @@ func (s *DocumentService) ListPaged(params DocumentListParams, page int, perPage
 	if err := q.Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
+	s.enrichDocumentDisplayNumbers(list)
 	return list, total, nil
+}
+
+// ListCompaniesDebtSummaryPaged lista empresas distintas que tienen documentos con los mismos filtros;
+// total es la cantidad de empresas; OpenBalanceTotal suma max(0, total_amount - pagado) por documento.
+func (s *DocumentService) ListCompaniesDebtSummaryPaged(params DocumentListParams, page, perPage int) ([]CompanyDebtSummaryRow, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 20
+	}
+
+	base := database.DB.Model(&models.Document{})
+	base = s.applyDocumentListFilters(base, params)
+
+	countSub := base.Session(&gorm.Session{}).Select("company_id").Group("company_id")
+	var total int64
+	if err := database.DB.Table("(?) AS company_groups", countSub).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	type idRow struct {
+		CompanyID uint `gorm:"column:company_id"`
+	}
+	var idRows []idRow
+	if err := base.Session(&gorm.Session{}).Select("company_id").Group("company_id").
+		Order("company_id ASC").Limit(perPage).Offset((page - 1) * perPage).Find(&idRows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]CompanyDebtSummaryRow, 0, len(idRows))
+	for _, ir := range idRows {
+		if ir.CompanyID == 0 {
+			continue
+		}
+		var docs []models.Document
+		q := base.Session(&gorm.Session{}).Where("company_id = ?", ir.CompanyID).
+			Select("id", "total_amount", "status")
+		if err := q.Find(&docs).Error; err != nil {
+			return nil, 0, err
+		}
+		var openSum float64
+		for _, d := range docs {
+			paid := DocumentPaidTotal(database.DB, d.ID)
+			ob := d.TotalAmount - paid
+			if ob > 0 && !math.IsNaN(ob) {
+				openSum += math.Round(ob*100) / 100
+			}
+		}
+		var co models.Company
+		_ = database.DB.First(&co, ir.CompanyID).Error
+		out = append(out, CompanyDebtSummaryRow{
+			CompanyID:        ir.CompanyID,
+			Company:          co,
+			DocumentCount:    int64(len(docs)),
+			OpenBalanceTotal: math.Round(openSum*100) / 100,
+		})
+	}
+	return out, total, nil
 }
 
 func (s *DocumentService) GetByID(id uint) (*models.Document, error) {
