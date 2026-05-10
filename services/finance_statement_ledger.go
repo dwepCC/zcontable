@@ -41,6 +41,8 @@ type AccountLedgerMovement struct {
 	Cargo          float64 `json:"cargo"`
 	Abono          float64 `json:"abono"`
 	Balance        float64 `json:"balance"`
+	PaymentID      *uint   `json:"payment_id,omitempty"`
+	PaymentNotes   string  `json:"payment_notes,omitempty"`
 }
 
 // AccountLedger resumen y movimientos de un mes calendario o de un rango de fechas (zona America/Lima).
@@ -68,8 +70,10 @@ type ledgerEntry struct {
 	detail    string
 	payMethod string
 	opCode    string
-	cargo     float64
-	abono     float64
+	cargo        float64
+	abono        float64
+	paymentNotes string
+	paymentID    *uint
 }
 
 func statementDocumentTypeCode(d models.Document) string {
@@ -273,8 +277,8 @@ func statementDocumentDetail(d models.Document) string {
 }
 
 func paymentLedgerDetail(p models.Payment) string {
-	if strings.TrimSpace(p.Notes) != "" {
-		return strings.TrimSpace(p.Notes)
+	if s := strings.TrimSpace(p.Description); s != "" {
+		return s
 	}
 	if p.Document != nil && strings.TrimSpace(p.Document.Number) != "" {
 		return fmt.Sprintf("Abono a deuda %s", strings.TrimSpace(p.Document.Number))
@@ -345,6 +349,7 @@ func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) [
 				docNum = n
 			}
 		}
+		pid := p.ID
 		entries = append(entries, ledgerEntry{
 			opDate:    op,
 			processAt: proc,
@@ -357,6 +362,8 @@ func collectSortedLedgerEntries(docs []models.Document, pays []models.Payment) [
 			opCode:    strings.TrimSpace(p.Reference),
 			cargo:     0,
 			abono:     math.Round(p.Amount*100) / 100,
+			paymentNotes: strings.TrimSpace(p.Notes),
+			paymentID:    &pid,
 		})
 	}
 
@@ -415,7 +422,7 @@ func ledgerFromSortedEntries(
 			procStr = opStr
 		}
 
-		movements = append(movements, AccountLedgerMovement{
+		mv := AccountLedgerMovement{
 			OperationDate:  opStr,
 			ProcessDate:    procStr,
 			TypeCode:       e.typeCode,
@@ -426,7 +433,12 @@ func ledgerFromSortedEntries(
 			Cargo:          e.cargo,
 			Abono:          e.abono,
 			Balance:        running,
-		})
+		}
+		if e.isPayment {
+			mv.PaymentID = e.paymentID
+			mv.PaymentNotes = e.paymentNotes
+		}
+		movements = append(movements, mv)
 	}
 
 	sumCargos = math.Round(sumCargos*100) / 100

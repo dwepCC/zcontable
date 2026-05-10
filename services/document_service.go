@@ -6,12 +6,49 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"miappfiber/database"
 	"miappfiber/models"
 
 	"gorm.io/gorm"
 )
+
+const maxManualDebtNumberRunes = 6
+
+func isManualDocumentSource(src string) bool {
+	s := strings.TrimSpace(strings.ToLower(src))
+	return s == "" || s == "manual"
+}
+
+func validateManualDocumentNumber(n string) error {
+	if utf8.RuneCountInString(strings.TrimSpace(n)) > maxManualDebtNumberRunes {
+		return errors.New("el número de la deuda no puede superar 6 caracteres")
+	}
+	return nil
+}
+
+// allocateShortDebtNumber asigna hasta 6 caracteres (relleno numérico), único por empresa.
+func allocateShortDebtNumber(tx *gorm.DB, companyID uint) (string, error) {
+	var count int64
+	if err := tx.Model(&models.Document{}).Where("company_id = ?", companyID).Count(&count).Error; err != nil {
+		return "", err
+	}
+	for try := 0; try < 10000; try++ {
+		v := uint64(count) + 1 + uint64(try)
+		candidate := fmt.Sprintf("%06d", v%1000000)
+		var exists int64
+		if err := tx.Model(&models.Document{}).
+			Where("company_id = ? AND number = ?", companyID, candidate).
+			Count(&exists).Error; err != nil {
+			return "", err
+		}
+		if exists == 0 {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("no se pudo generar un número de deuda único")
+}
 
 type DocumentService struct{}
 
@@ -78,8 +115,14 @@ func (s *DocumentService) Create(input *models.Document) error {
 	if input.Type == "" {
 		return errors.New("el tipo de comprobante es requerido")
 	}
-	if strings.TrimSpace(input.Number) == "" {
-		input.Number = fmt.Sprintf("DEU-%d-%d", input.CompanyID, time.Now().UnixNano())
+	if input.Source == "" {
+		input.Source = "manual"
+	}
+	input.Number = strings.TrimSpace(input.Number)
+	if isManualDocumentSource(input.Source) && input.Number != "" {
+		if err := validateManualDocumentNumber(input.Number); err != nil {
+			return err
+		}
 	}
 	items := input.Items
 	input.Items = nil
@@ -95,9 +138,6 @@ func (s *DocumentService) Create(input *models.Document) error {
 		input.TotalAmount = math.Round(sum*100) / 100
 	} else if input.TotalAmount <= 0 {
 		return errors.New("el monto debe ser mayor a 0")
-	}
-	if input.Source == "" {
-		input.Source = "manual"
 	}
 	if input.Status == "" {
 		input.Status = "pendiente"
@@ -134,6 +174,13 @@ func (s *DocumentService) Create(input *models.Document) error {
 	}
 
 	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if input.Number == "" && isManualDocumentSource(input.Source) {
+			n, err := allocateShortDebtNumber(tx, input.CompanyID)
+			if err != nil {
+				return err
+			}
+			input.Number = n
+		}
 		if err := tx.Omit("Items", "Company", "Payments", "Allocations").Create(input).Error; err != nil {
 			return err
 		}
@@ -159,7 +206,13 @@ func (s *DocumentService) Update(id uint, input *models.Document) error {
 			d.Type = input.Type
 		}
 		if input.Number != "" {
-			d.Number = input.Number
+			num := strings.TrimSpace(input.Number)
+			if isManualDocumentSource(d.Source) {
+				if err := validateManualDocumentNumber(num); err != nil {
+					return err
+				}
+			}
+			d.Number = num
 		}
 		if !input.IssueDate.IsZero() {
 			d.IssueDate = input.IssueDate

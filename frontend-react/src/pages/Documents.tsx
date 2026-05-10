@@ -176,6 +176,7 @@ const Documents = () => {
   const [payReference, setPayReference] = useState('');
   const [payAttachmentName, setPayAttachmentName] = useState('');
   const [payAttachmentFile, setPayAttachmentFile] = useState<File | null>(null);
+  const [payDescription, setPayDescription] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [payTukifacKind, setPayTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
   const [payTukifacSerie, setPayTukifacSerie] = useState('');
@@ -623,6 +624,7 @@ const Documents = () => {
     setPayReference('');
     setPayAttachmentName('');
     setPayAttachmentFile(null);
+    setPayDescription((doc.description ?? '').trim());
     setPayNotes('');
     setPayTukifacKind('sale_note');
     setPayTukifacSerie('');
@@ -721,6 +723,7 @@ const Documents = () => {
         method: payMethod.trim(),
         reference: payReference.trim() || undefined,
         attachment: attachmentUrl || undefined,
+        description: payDescription.trim() || undefined,
         notes: payNotes.trim() || undefined,
       });
       window.dispatchEvent(
@@ -1207,6 +1210,20 @@ const Documents = () => {
                 </div>
               </div>
 
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Descripción del pago (estado de cuenta)
+                  </label>
+                  <textarea
+                    value={payDescription}
+                    onChange={(ev) => setPayDescription(ev.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none min-h-[72px]"
+                    placeholder="Ej. concepto del servicio o mes; por defecto se usa la descripción de la deuda."
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Comprobante</label>
@@ -1278,12 +1295,12 @@ const Documents = () => {
                   ) : null}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Notas</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Notas internas</label>
                   <textarea
                     value={payNotes}
                     onChange={(ev) => setPayNotes(ev.target.value)}
                     className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none min-h-[96px]"
-                    placeholder="Opcional"
+                    placeholder="Opcional; no aparece en la columna principal del estado de cuenta."
                   />
                 </div>
               </div>

@@ -136,6 +136,8 @@ export interface Payment {
   method: string;
   reference: string;
   attachment: string;
+  /** Detalle visible en estado de cuenta (ej. servicio o concepto cobrado). */
+  description?: string;
   notes: string;
   fiscal_status?: string;
   company?: Company;
@@ -295,6 +297,10 @@ export interface AccountLedgerMovement {
   cargo: number;
   abono: number;
   balance: number;
+  /** Solo abonos: id del pago en sistema. */
+  payment_id?: number;
+  /** Notas internas del pago; no se muestran en la columna Detalle (modal). */
+  payment_notes?: string;
 }
 
 export interface AccountLedger {

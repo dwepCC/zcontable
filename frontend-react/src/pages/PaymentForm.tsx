@@ -141,6 +141,7 @@ const PaymentForm = () => {
   const [method, setMethod] = useState('');
   const [reference, setReference] = useState('');
   const [attachment, setAttachment] = useState('');
+  const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [applyMode, setApplyMode] = useState<'single' | 'fifo' | 'manual'>('single');
   const [manualAlloc, setManualAlloc] = useState<ManualAllocRow[]>([{ key: newManualAllocKey(), doc: '', amt: '' }]);
@@ -298,6 +299,7 @@ const PaymentForm = () => {
           setMethod(pay.method ?? '');
           setReference(pay.reference ?? '');
           setAttachment(pay.attachment ?? '');
+          setDescription(pay.description ?? '');
           setNotes(pay.notes ?? '');
         }
       } catch (e) {
@@ -409,7 +411,7 @@ const PaymentForm = () => {
           );
         }
         const refLabel = sug.settlement_number?.trim() ? `Liquidación ${sug.settlement_number.trim()}` : `Liquidación #${sid}`;
-        setNotes((n) => (n.trim() ? n : refLabel));
+        setDescription((d) => (d.trim() ? d : refLabel));
       } catch {
         if (!cancelled) {
           setAllocDocHints([]);
@@ -557,6 +559,7 @@ const PaymentForm = () => {
       method: method.trim() ? method.trim() : undefined,
       reference: reference.trim() ? reference.trim() : undefined,
       attachment: attachment.trim() ? attachment.trim() : undefined,
+      description: description.trim() ? description.trim() : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
     };
 
@@ -1044,19 +1047,41 @@ const PaymentForm = () => {
         </div>
 
         <section className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="px-3 py-4 sm:p-5">
-            <label htmlFor="notes" className="sr-only">
-              Notas
-            </label>
-            <textarea
-              id="notes"
-              name="notes"
-              rows={3}
-              value={notes}
-              onChange={(ev) => setNotes(ev.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none min-h-[5.5rem]"
-              placeholder="Notas sobre el pago…"
-            />
+          <div className="px-3 py-4 sm:p-5 space-y-4">
+            <div>
+              <label htmlFor="payment_description" className="block text-sm font-medium text-slate-700 mb-1">
+                Descripción del pago
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                Concepto que verá el cliente en el estado de cuenta (ej. nombre del servicio o mes liquidado).
+              </p>
+              <textarea
+                id="payment_description"
+                name="description"
+                rows={2}
+                value={description}
+                onChange={(ev) => setDescription(ev.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none min-h-[4.5rem]"
+                placeholder="Ej. Honorarios marzo 2026, Plan contable…"
+              />
+            </div>
+            <div>
+              <label htmlFor="notes" className="block text-sm font-medium text-slate-700 mb-1">
+                Notas internas
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                Uso interno; no se muestra en la columna principal del estado de cuenta (solo en «ver más» si hay texto).
+              </p>
+              <textarea
+                id="notes"
+                name="notes"
+                rows={3}
+                value={notes}
+                onChange={(ev) => setNotes(ev.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none min-h-[5.5rem]"
+                placeholder="Observaciones internas sobre el pago…"
+              />
+            </div>
           </div>
         </section>
 

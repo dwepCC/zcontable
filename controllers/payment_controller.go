@@ -161,6 +161,7 @@ func (ctrl *PaymentController) CreateAPI(c fiber.Ctx) error {
 		Method           string                            `json:"method"`
 		Reference        string                            `json:"reference"`
 		Attachment       string                            `json:"attachment"`
+		Description      string                            `json:"description"`
 		Notes            string                            `json:"notes"`
 		FiscalStatus     string                            `json:"fiscal_status"`
 		AllocationMode   string                            `json:"allocation_mode"`
@@ -206,6 +207,7 @@ func (ctrl *PaymentController) CreateAPI(c fiber.Ctx) error {
 		Method:          body.Method,
 		Reference:       body.Reference,
 		Attachment:      body.Attachment,
+		Description:     body.Description,
 		Notes:           body.Notes,
 		FiscalStatus:    body.FiscalStatus,
 		AllocationMode:  body.AllocationMode,

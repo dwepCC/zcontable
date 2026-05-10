@@ -330,11 +330,18 @@ const Products = () => {
                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-xs">
-                          {p.tukifac_item_id ? (
-                            <span className="text-emerald-700 font-medium">Tukifac #{p.tukifac_item_id}</span>
-                          ) : (
-                            <span className="text-slate-500">Local</span>
-                          )}
+                          {(() => {
+                            const cod =
+                              p.tukifac_item_id != null && String(p.tukifac_item_id).trim() !== ''
+                                ? String(p.tukifac_item_id).trim()
+                                : '';
+                            if (cod) {
+                              return (
+                                <span className="text-emerald-700 font-medium font-mono">{cod}</span>
+                              );
+                            }
+                            return <span className="text-slate-500">Local</span>;
+                          })()}
                         </td>
                         <td className="px-4 py-3">{p.active ? 'Sí' : 'No'}</td>
                         <td className="px-4 py-3 text-right">
