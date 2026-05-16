@@ -54,36 +54,74 @@ function truncateText(s: string, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
+/** Periodo contable / servicio YYYY-MM para mostrar en selects de deuda. */
+function debtPeriodLabel(d: Document): string {
+  return ((d.accounting_period ?? '').trim() || (d.service_month ?? '').trim()) || '';
+}
+
 /**
- * Etiqueta en selects de deuda: descripción, monto y estado (pendiente/parcial, etc.).
- * No incluye número ni external_id (códigos); esos sí entran en searchText para buscar.
+ * Quita sufijos de cantidad duplicados en el texto del concepto (si el monto va aparte en la UI).
  */
-function debtSelectLabel(d: Document): string {
-  const descRaw = (d.description ?? '').trim();
-  const desc = descRaw ? truncateText(descRaw, 80) : 'Sin descripción';
-  const amt = Number.isFinite(d.total_amount) ? d.total_amount.toFixed(2) : '0.00';
-  const status = (d.status ?? '').trim();
-  const vcto = d.due_date && d.due_date.length >= 10 ? d.due_date.slice(0, 10) : '';
-  const parts: string[] = [desc, `S/ ${amt}`];
-  if (status) parts.push(status);
-  if (vcto) parts.push(`vcto ${vcto}`);
-  return parts.join(' · ');
+function stripConceptQuantityNoise(s: string): string {
+  let t = s.trim();
+  t = t.replace(/\s*[·•]\s*[Cc]ant\.?\s*:?\s*\d+([.,]\d+)?\s*$/u, '');
+  t = t.replace(/\s*\(\s*[Cc]ant\.?\s*:?\s*\d+([.,]\d+)?\s*\)\s*$/u, '');
+  t = t.replace(/\s*[×x]\s*\d+([.,]\d+)?\s*$/u, '');
+  return t.trim();
+}
+
+/** Descripción + período YYYY-MM solo separados por " - " (sin la palabra «período»). */
+function joinDebtDescAndPeriod(description: string, periodYm: string): string {
+  const d = description.trim();
+  const p = periodYm.trim();
+  if (d && p) return `${d} - ${p}`;
+  if (d) return d;
+  if (p) return p;
+  return 'Sin descripción';
+}
+
+/**
+ * Etiqueta en selects de deuda: «descripción - YYYY-MM»; en modo una sola deuda añade « · S/ …» (sin estado ni vencimiento).
+ * Número / external_id siguen en searchText para buscar.
+ */
+function debtSelectLabel(d: Document, opts?: { omitAmount?: boolean }): string {
+  const omitAmount = opts?.omitAmount ?? false;
+  const descRaw = stripConceptQuantityNoise((d.description ?? '').trim());
+  const desc = descRaw ? truncateText(descRaw, 80) : '';
+  const period = debtPeriodLabel(d);
+  let label = joinDebtDescAndPeriod(desc || 'Sin descripción', period);
+  if (!omitAmount) {
+    const amt = Number.isFinite(d.total_amount) ? d.total_amount.toFixed(2) : '0.00';
+    label = `${label} · S/ ${amt}`;
+  }
+  return label;
 }
 
 function debtSelectSearchText(d: Document): string {
-  return [d.number, d.external_id, d.description, d.type, d.status, d.due_date].filter(Boolean).join(' ');
+  return [
+    d.number,
+    d.external_id,
+    d.description,
+    d.accounting_period,
+    d.service_month,
+    d.type,
+    d.status,
+    d.due_date,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
-/** Misma idea que `debtSelectLabel`, para filas sugeridas antes de que el documento aparezca en `documents`. */
-function debtSelectLabelFromSuggestion(l: Pick<SettlementPaymentSuggestion, 'concept' | 'amount'>): string {
-  const descRaw = (l.concept ?? '').trim();
-  const desc = descRaw ? truncateText(descRaw, 80) : 'Sin descripción';
-  const amt = Number.isFinite(l.amount) ? l.amount.toFixed(2) : '0.00';
-  return [desc, `S/ ${amt}`, 'pendiente'].join(' · ');
+/** Sugerencia desde liquidación: misma regla «concepto - YYYY-MM»; el monto va en el campo numérico. */
+function debtSelectLabelFromSuggestion(l: SettlementPaymentSuggestion): string {
+  const descRaw = stripConceptQuantityNoise((l.concept ?? '').trim());
+  const desc = descRaw ? truncateText(descRaw, 80) : '';
+  const py = (l.period_ym ?? '').trim();
+  return joinDebtDescAndPeriod(desc || 'Sin descripción', py);
 }
 
 function debtSelectSearchTextFromSuggestion(l: SettlementPaymentSuggestion): string {
-  return [l.document_number, l.concept, String(l.document_id)].filter(Boolean).join(' ');
+  return [l.document_number, l.concept, l.period_ym, String(l.document_id)].filter(Boolean).join(' ');
 }
 
 type ManualAllocRow = { key: string; doc: string; amt: string };
@@ -192,7 +230,7 @@ const PaymentForm = () => {
   const manualDebtSelectOptions = useMemo(() => {
     const fromDocs = documents.map((d) => ({
       value: String(d.id),
-      label: debtSelectLabel(d),
+      label: debtSelectLabel(d, { omitAmount: true }),
       searchText: debtSelectSearchText(d),
     }));
     const seen = new Set(fromDocs.map((o) => o.value));

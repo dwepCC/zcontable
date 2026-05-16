@@ -115,6 +115,8 @@ export interface Document {
   /** Periodo contable YYYY-MM (independiente de issue_date). */
   accounting_period?: string;
   items?: DocumentItem[];
+  /** Presente en API de listado/detalle: si existen filas en `document_items`. */
+  has_items?: boolean;
 }
 
 export interface PaymentAllocation {

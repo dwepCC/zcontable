@@ -73,7 +73,12 @@ func (ctrl *DocumentController) ListAPI(c fiber.Ctx) error {
 		params.DateFrom == nil && params.DateTo == nil &&
 		params.Status == "" && !params.Overdue && !params.ExplicitAllStatuses
 
-	if !hasStudioScope(c) {
+
+
+	incItems := strings.TrimSpace(c.Query("include_items", ""))
+	params.IncludeItems = incItems == "1" || strings.EqualFold(incItems, "true")
+
+	if !isAdmin(c) {
 		userID, err := getUserID(c)
 		if err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})

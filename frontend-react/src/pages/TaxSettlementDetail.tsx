@@ -362,11 +362,12 @@ const TaxSettlementDetail = () => {
                 <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
                 <td className="px-4 py-3 text-slate-800">{ln.concept}</td>
                 <td className="px-4 py-3 text-slate-600 tabular-nums text-xs font-mono">
-                  {(ln.period_ym && /^\d{4}-\d{2}$/.test(ln.period_ym)
-                    ? ln.period_ym
-                    : ln.period_date && ln.period_date.length >= 10
-                      ? ln.period_date.slice(0, 10)
-                      : row.liquidation_period) || '—'}
+                  {(() => {
+                    const p = (ln.period_ym ?? '').trim();
+                    if (p) return p;
+                    if (ln.period_date && ln.period_date.length >= 10) return ln.period_date.slice(0, 10);
+                    return row.liquidation_period || '—';
+                  })()}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums font-medium">S/ {ln.amount.toFixed(2)}</td>
               </tr>

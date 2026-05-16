@@ -69,6 +69,8 @@ type DocumentListParams struct {
 	ExplicitAllStatuses bool
 	// GroupByCompany: sin company_id, devolver filas agregadas por empresa (paginación por cantidad de empresas).
 	GroupByCompany bool
+	// IncludeItems: con company_id fijo, adjunta líneas (document_items) en cada fila del listado paginado.
+	IncludeItems bool
 }
 
 // CompanyDebtSummaryRow es una fila del listado agrupado por empresa (saldo abierto en el rango/filtros).
@@ -284,6 +286,40 @@ func (s *DocumentService) Update(id uint, input *models.Document) error {
 	})
 }
 
+// SQL correlacionado: saldo abierto del documento según imputaciones + pagos legacy (misma regla que DocumentPaidTotal).
+func documentOpenBalancePositiveClause() string {
+	return `(
+		documents.total_amount - (
+			COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa
+				INNER JOIN payments p ON p.id = pa.payment_id AND p.deleted_at IS NULL
+				WHERE pa.document_id = documents.id AND pa.deleted_at IS NULL), 0)
+			+
+			COALESCE((SELECT SUM(p.amount) FROM payments p
+				WHERE p.document_id = documents.id AND p.deleted_at IS NULL
+				AND NOT EXISTS (SELECT 1 FROM payment_allocations pa2 WHERE pa2.payment_id = p.id AND pa2.deleted_at IS NULL)), 0)
+		)
+	) > 0.005`
+}
+
+func shouldFilterDocumentsWithRealOpenBalance(params DocumentListParams) bool {
+	if params.ExplicitAllStatuses {
+		return false
+	}
+	if params.Status == "pagado" || params.Status == "anulado" {
+		return false
+	}
+	if params.Overdue {
+		return true
+	}
+	if params.Status == "pendiente" || params.Status == "parcial" {
+		return true
+	}
+	if params.ImplicitOpenBalances {
+		return true
+	}
+	return false
+}
+
 func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentListParams) *gorm.DB {
 	now := time.Now()
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
@@ -323,6 +359,9 @@ func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentLi
 	if params.DateTo != nil {
 		q = q.Where("issue_date < ?", *params.DateTo)
 	}
+	if shouldFilterDocumentsWithRealOpenBalance(params) {
+		q = q.Where(documentOpenBalancePositiveClause())
+	}
 	return q
 }
 
@@ -360,6 +399,33 @@ func (s *DocumentService) enrichDocumentDisplayNumbers(list []models.Document) {
 	}
 }
 
+// enrichDocumentHasItems marca HasItems según existencia de líneas en document_items (una consulta por lote).
+func (s *DocumentService) enrichDocumentHasItems(list []models.Document) {
+	if len(list) == 0 {
+		return
+	}
+	ids := make([]uint, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	var docIDs []uint
+	if err := database.DB.Raw(
+		"SELECT DISTINCT document_id FROM document_items WHERE document_id IN ?",
+		ids,
+	).Scan(&docIDs).Error; err != nil {
+		return
+	}
+	set := make(map[uint]struct{}, len(docIDs))
+	for _, id := range docIDs {
+		set[id] = struct{}{}
+	}
+	for i := range list {
+		if _, ok := set[list[i].ID]; ok {
+			list[i].HasItems = true
+		}
+	}
+}
+
 func (s *DocumentService) List(params DocumentListParams) ([]models.Document, error) {
 	var list []models.Document
 	q := database.DB.Model(&models.Document{})
@@ -368,6 +434,7 @@ func (s *DocumentService) List(params DocumentListParams) ([]models.Document, er
 		return nil, err
 	}
 	s.enrichDocumentDisplayNumbers(list)
+	s.enrichDocumentHasItems(list)
 	return list, nil
 }
 
@@ -387,16 +454,28 @@ func (s *DocumentService) ListPaged(params DocumentListParams, page int, perPage
 		return nil, 0, err
 	}
 
-	var list []models.Document
-	q := base.Preload("Company").
-		Order("issue_date DESC, id DESC").
+	q := base.Preload("Company")
+	if params.IncludeItems && params.CompanyID != 0 {
+		q = q.Preload("Items", func(db *gorm.DB) *gorm.DB {
+			return db.Order("sort_order ASC, id ASC")
+		})
+	}
+	q = q.Order("issue_date DESC, id DESC").
 		Limit(perPage).
 		Offset((page - 1) * perPage)
 
+	var list []models.Document
 	if err := q.Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	s.enrichDocumentDisplayNumbers(list)
+	if params.IncludeItems && params.CompanyID != 0 {
+		for i := range list {
+			list[i].HasItems = len(list[i].Items) > 0
+		}
+	} else {
+		s.enrichDocumentHasItems(list)
+	}
 	return list, total, nil
 }
 
@@ -469,6 +548,7 @@ func (s *DocumentService) GetByID(id uint) (*models.Document, error) {
 		First(&d, id).Error; err != nil {
 		return nil, err
 	}
+	d.HasItems = len(d.Items) > 0
 	return &d, nil
 }
 
@@ -498,10 +578,7 @@ func (s *DocumentService) RecalculateStatusFromPayments(documentID uint) error {
 		return nil
 	}
 
-	var paid float64
-	database.DB.Model(&models.Payment{}).
-		Where("document_id = ?", documentID).
-		Select("COALESCE(SUM(amount),0)").Scan(&paid)
+	paid := DocumentPaidTotal(database.DB, documentID)
 
 	total := d.TotalAmount
 	next := "pendiente"
