@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { productsService, type ProductUpsertInput, type ProductKind } from '../services/products';
 import { productCategoriesService, type ProductCategory } from '../services/productCategories';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import SearchableSelect from '../components/SearchableSelect';
 import { SUNAT_PRODUCT_UNIT_LABEL, SUNAT_SERVICE_UNITS } from '../constants/sunatUnitOfMeasure';
 
@@ -86,8 +87,10 @@ const ProductForm = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const editId = id ? Number(id) : null;
-  const role = auth.getRole() ?? '';
-  const canUpsert = ['Administrador', 'Supervisor', 'Contador'].includes(role);
+  const canUpsert = useMemo(
+    () => auth.hasPermission(P.productsCreate) || auth.hasPermission(P.productsUpdate),
+    [],
+  );
 
   const [productKind, setProductKind] = useState<ProductKind>('service');
   const [description, setDescription] = useState('');

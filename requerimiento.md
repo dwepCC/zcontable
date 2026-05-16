@@ -1,282 +1,384 @@
-DOCUMENTO DE REQUERIMIENTOS – MÓDULO FINANCIERO ERP
-Este documento detalla los requerimientos funcionales y técnicos del módulo financiero inicial del nuevo sistema ERP del estudio contable. Este sistema será independiente de Tukifac, pero se integrará con él únicamente para sincronizar documentos electrónicos.
-1. OBJETIVO DEL MÓDULO
-El módulo permitirá gestionar cuentas por cobrar, pagos, saldos de clientes, ingresos del estudio y estados de cuenta. Servirá como base del core financiero del ERP.
-2. INTEGRACIÓN CON TUKIFAC
-El sistema se conectará mediante API a Tukifac para consultar documentos electrónicos emitidos. No almacenará la factura completa, solo su referencia financiera.
-Datos sincronizados desde Tukifac:
-• ID del documento (requerido)
-• Tipo de comprobante (requerido)
-• Número de documento (requerido)
-• Fecha de emisión (requerido)
-• Monto total (requerido)
-• Estado del documento (requerido)
-3. GESTIÓN DE CLIENTES / EMPRESAS
-Campos requeridos:
-• RUC
-• Razón social
-• Código interno del estudio
-• Estado del cliente
-Campos opcionales:
-• Nombre comercial
-• Dirección
-• Teléfono
-• Correo electrónico
-• Fecha de inicio de servicio
-4. CONTACTOS RESPONSABLES POR EMPRESA
-Cada empresa podrá registrar uno o varios contactos responsables para la comunicación con el estudio.
-Campos requeridos:
-• Nombre completo
-• Cargo en la empresa
-• Teléfono o celular
-• Correo electrónico
-Campos opcionales:
-• Observaciones
-• Prioridad de contacto
-5. FUNCIONALIDADES FINANCIERAS
-• Sincronizar facturas desde Tukifac
-• Registrar cargos manuales
-• Registrar pagos manuales
-• Adjuntar comprobantes
-• Calcular saldos automáticamente
-• Generar estados de cuenta
-• Historial financiero por cliente
-6. CONFIGURACIÓN DEL ESTUDIO
-El sistema contará con un panel de configuración del estudio.
-Campos configurables:
-• Nombre del estudio (requerido)
-• RUC del estudio (requerido)
-• Dirección (requerido)
-• Teléfono (opcional)
-• Correo institucional (opcional)
-• Logo del estudio (opcional)
-7. ROLES Y PERMISOS
-El sistema incluirá gestión de usuarios con control de acceso por roles.
-Roles sugeridos:
-• Administrador
-• Supervisor
-• Contador
-• Asistente
-Permisos configurables:
-• Ver clientes
-• Registrar pagos
-• Sincronizar facturas
-• Generar reportes
-• Configurar el sistema
-8. VISTAS DEL SISTEMA (ESTIMADAS)
-• Dashboard financiero
-• Gestión de clientes
-• Contactos por empresa
-• Estado de cuenta del cliente
-• Registro de pagos
-• Reportes financieros
-• Configuración del estudio
-• Gestión de usuarios y roles
+Aprobado el análisis.
 
-9. ASIGNACIÓN DE EQUIPO CONTABLE POR EMPRESA
+Vamos a implementar un sistema de Roles y Permisos usando un MODELO PROPIO EN BASE DE DATOS (NO Casbin por ahora).
 
-En el estudio contable, cada empresa cliente será atendida por un equipo contable asignado.
+IMPORTANTE:
+El objetivo es construir una arquitectura sólida, escalable y preparada para que el sistema evolucione hacia un ERP modular completo.
 
-Este equipo estará conformado por:
+NO quiero una implementación improvisada ni hardcodeada.
+La implementación debe seguir buenas prácticas, clean architecture y minimizar deuda técnica.
 
-Supervisor contable
+Contexto del proyecto:
+- Backend: Go
+- Framework: Fiber
+- ORM: GORM
+- Base de datos: MySQL
+- Frontend: React + TypeScript
+- Sistema actual ya está funcionando y tiene autenticación JWT
+- Existen roles legacy por string:
+  - Administrador
+  - Supervisor
+  - Contador
+  - Asistente
+
+Actualmente existen validaciones distribuidas con:
+- RequireRole(...)
+- auth.getRole()
+- comparaciones de strings de rol
+- lógica repetida en Sidebar y múltiples vistas.
+
+TODO esto debe migrarse gradualmente al nuevo sistema de permisos.
+
+REGLA CRÍTICA:
+NO romper funcionalidades existentes.
+La migración debe ser incremental y compatible con el sistema actual mientras se completa.
+
+==================================================
+FASE 1 — ANÁLISIS DEL SISTEMA ACTUAL
+==================================================
+
+Antes de programar:
+
+1. Analiza TODO el backend y frontend.
+
+2. Genera un inventario completo de permisos inferidos del sistema actual.
+
+Debes analizar:
+
+BACKEND
+- Todas las rutas protegidas
+- Todos los RequireRole(...)
+- Todos los middlewares
+- Todos los endpoints sensibles
+- CRUDs
+- Acciones especiales
+
+FRONTEND
+- Sidebar
+- Menús
+- Botones
+- Vistas protegidas
+- auth.getRole()
+- Condiciones basadas en role
+- Acciones habilitadas/deshabilitadas
+
+Genera una matriz inicial:
+
+ROL × PERMISO
+
+Ejemplo:
+
+Administrador:
+- users.view
+- users.create
+- users.update
+- users.delete
+
+Supervisor:
+- sales.view
+- sales.create
 
-Asistente contable
+etc.
+
+NO inventar permisos.
+Inferirlos del sistema existente.
 
-Contador general (opcional según la organización)
+==================================================
+FASE 2 — DISEÑO DE ARQUITECTURA
+==================================================
 
-Al momento de registrar o editar una empresa en el sistema, se deberá poder asignar el equipo contable responsable de su gestión.
+Implementaremos MODELO PROPIO EN BASE DE DATOS.
 
-Campos de asignación
+Diseña las tablas definitivas.
 
-Supervisor contable (usuario del sistema)
+Debe existir:
 
-Asistente contable (usuario del sistema)
+modules
+permissions
+roles
+role_permissions
+user_roles
 
-Contador general responsable (opcional)
+Estructura requerida:
 
-Reglas del sistema
+modules
+- id
+- code
+- name
+- icon
+- sort_order
+- active
+- timestamps
 
-Un usuario puede estar asignado a múltiples empresas.
+permissions
+- id
+- module_id
+- code (UNIQUE)
+- action
+- name
+- description
+- timestamps
 
-Cada empresa debe tener al menos un supervisor asignado.
+roles
+- id
+- code
+- name
+- description
+- is_system
+- timestamps
 
-La asignación podrá modificarse en cualquier momento por un administrador.
+role_permissions
+- role_id
+- permission_id
 
-Beneficios de esta estructura
+user_roles
+- user_id
+- role_id
 
-Esto permitirá:
+IMPORTANTE:
+No eliminar inmediatamente el campo role string legacy del usuario.
+Debe mantenerse temporalmente para compatibilidad.
 
-Controlar qué usuarios pueden acceder a cada empresa
+==================================================
+FASE 3 — ESTÁNDAR DE PERMISOS
+==================================================
 
-Organizar el trabajo del estudio
+Usar nomenclatura obligatoria:
 
-Tener responsables claros por cliente
+module.action
 
-Facilitar seguimiento y control de cuentas por cobrar
+Ejemplos:
 
-10. CONTROL DE ACCESO POR EMPRESAS ASIGNADAS
+users.view
+users.create
+users.update
+users.delete
 
-El sistema deberá implementar restricción de acceso por empresa asignada.
+companies.view
+companies.create
+companies.update
 
-Esto significa que los usuarios del sistema solo podrán visualizar y gestionar información de las empresas que tengan asignadas.
+sales.view
+sales.create
+sales.delete
+sales.cancel
+sales.export
 
-Reglas de acceso
+inventory.view
+inventory.adjust
 
-Administrador
+payments.view
+payments.create
 
-Acceso total a todas las empresas
+settings.view
+settings.roles
+settings.users
 
-Puede asignar equipos contables
+reports.financial
+reports.inventory
 
-Puede gestionar usuarios
+NO mezclar formatos.
+TODO debe seguir la misma convención.
 
-Supervisor
+==================================================
+FASE 4 — IMPLEMENTACIÓN BACKEND
+==================================================
 
-Puede ver todas las empresas que tiene asignadas
+Crear un AuthorizationService centralizado.
 
-Puede registrar pagos
+Debe existir algo similar a:
 
-Puede revisar estados de cuenta
+HasPermission(userID, permissionCode)
 
-Puede generar reportes de sus empresas
+o
 
-Asistente
+Can(userID, permissionCode)
 
-Solo puede ver las empresas asignadas
+NO hacer validaciones dispersas.
 
-Puede registrar pagos
+NO usar strings hardcodeados de rol.
 
-Puede adjuntar comprobantes
+NO usar RequireRole nuevo.
 
-Puede registrar observaciones
+Debe existir middleware reutilizable:
 
-Contador
+RequirePermission("users.create")
 
-Puede revisar información financiera
+Ejemplo:
 
-Puede generar reportes
+app.Post(
+    "/users",
+    Auth(),
+    RequirePermission("users.create"),
+    controller.CreateUser,
+)
 
-Puede ver historial de clientes
+El middleware debe:
 
-11. GESTIÓN COMPLETA DE USUARIOS
+1. Obtener user_id del JWT
+2. Resolver permisos del usuario
+3. Verificar permiso
+4. Responder 403 consistente
 
-El sistema deberá incluir un módulo completo de gestión de usuarios del sistema.
+Formato de error:
 
-Funcionalidades
+{
+  "success": false,
+  "code": "INSUFFICIENT_PERMISSIONS",
+  "message": "No tienes permisos para realizar esta acción"
+}
 
-Crear usuarios
+==================================================
+FASE 5 — PERFORMANCE
+==================================================
 
-Editar usuarios
+MUY IMPORTANTE:
 
-Activar / desactivar usuarios
+No consultar permisos a DB en cada request.
 
-Asignar roles
+Implementar cache en memoria.
 
-Asignar empresas
+El sistema debe:
 
-Cambiar contraseñas
+- cargar permisos del usuario
+- cachearlos
+- invalidarlos al modificar:
+  - roles
+  - role_permissions
+  - user_roles
 
-Restablecer contraseñas
+Evitar N+1 queries.
 
-Campos del usuario
+Optimizar joins GORM.
 
-Campos requeridos:
+==================================================
+FASE 6 — FRONTEND
+==================================================
 
-Nombre completo
+Implementar un sistema centralizado de permisos.
 
-Correo electrónico
+NO usar más:
 
-Rol del usuario
+auth.getRole()
 
-Estado (activo / inactivo)
+NO comparar strings de roles.
 
-Campos opcionales:
+Debe existir:
 
-Teléfono
+hasPermission(permission)
 
-Cargo
+o hook:
 
-Foto de perfil
+usePermissions()
 
-Relación usuario - empresa
+Ejemplo:
 
-Se implementará una relación muchos a muchos entre:
+hasPermission("users.create")
 
+o
+
+can("users.create")
+
+Implementar en TODO el sistema actual.
+
+Debe actualizar:
+
+1. Sidebar
+- mostrar/ocultar módulos
+
+2. Rutas protegidas
+
+3. Botones:
+- crear
+- editar
+- eliminar
+- exportar
+- aprobar
+- anular
+
+4. Formularios
+
+5. Acciones especiales
+
+TODO debe quedar alineado con backend.
+
+Si backend niega permiso,
+frontend también debe ocultar.
+
+Pero backend SIEMPRE es la autoridad final.
+
+==================================================
+FASE 7 — COMPATIBILIDAD LEGACY
+==================================================
+
+Durante la migración:
+
+El sistema debe seguir funcionando.
+
+Si aún no existe permiso configurado,
+usar fallback temporal basado en role string legacy.
+
+Ejemplo:
+
+Administrador → acceso total temporal
+
+Esto solo mientras termina migración.
+
+Marcar claramente qué partes son temporales.
+
+==================================================
+FASE 8 — UI DE ADMINISTRACIÓN
+==================================================
+
+Agregar dentro del módulo Usuarios:
+
+1. Gestión de Roles
+- listar
+- crear
+- editar
+- eliminar
+
+2. Gestión de permisos por rol
+
+Pantalla tipo matriz:
+
+Módulo:
 Usuarios
 
-Empresas
+☑ Ver
+☑ Crear
+☑ Editar
+☑ Eliminar
 
-Esto permitirá que:
+Módulo:
+Ventas
 
-Un usuario gestione varias empresas
+☑ Ver
+☑ Crear
+☑ Anular
 
-Una empresa tenga varios usuarios asignados
+Agrupar permisos por módulo.
 
-12. SEGUIMIENTO DE CUENTAS POR COBRAR
+UI limpia y profesional.
 
-El sistema deberá permitir el seguimiento de facturas emitidas a los clientes del estudio.
+NO generar algo básico o improvisado.
 
-Cada empresa podrá tener facturas pendientes de pago correspondientes a los servicios contables.
+==================================================
+REGLA CRÍTICA DE IMPLEMENTACIÓN
+==================================================
 
-Flujo del proceso
+Antes de escribir código:
 
-Se sincroniza la factura desde Tukifac
+1. Mostrar plan exacto de implementación.
+2. Mostrar migraciones.
+3. Mostrar arquitectura propuesta.
+4. Mostrar lista final de permisos inferidos.
+5. Mostrar estrategia de compatibilidad.
 
-Se registra como cuenta por cobrar
+NO empezar a modificar archivos hasta aprobación.
 
-Se muestra en el estado de cuenta del cliente
+Una vez aprobado:
+hacer cambios pequeños, seguros e incrementales.
 
-Se registran pagos parciales o totales
-
-El sistema actualiza automáticamente el saldo
-
-Estados posibles de la factura
-
-Pendiente
-
-Parcialmente pagado
-
-Pagado
-
-Anulado
-
-Información mostrada
-
-Número de documento
-
-Fecha de emisión
-
-Monto total
-
-Pagos registrados
-
-Saldo pendiente
-
-13. HISTORIAL FINANCIERO POR EMPRESA
-
-Cada empresa tendrá un historial financiero completo.
-
-Este historial mostrará:
-
-Facturas emitidas
-
-Pagos realizados
-
-Ajustes manuales
-
-Cargos adicionales
-
-Saldo total
-
-Esto permitirá tener una visión clara del estado financiero del cliente con el estudio contable.
-
-1️⃣ Recordatorios automáticos de pago
-
-correo
-
-whatsapp
-
-notificaciones internas
-
-2️⃣ Alertas de deuda vencida
+Evitar romper funcionalidades existentes.
+Priorizar estabilidad del sistema.

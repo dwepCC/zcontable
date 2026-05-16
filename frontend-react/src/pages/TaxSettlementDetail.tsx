@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { saveAs } from 'file-saver';
 import { taxSettlementsService } from '../services/taxSettlements';
 import { configService } from '../services/config';
 import type { TaxSettlement } from '../types/dashboard';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import {
   generateTaxSettlementPdfBlob,
   getLogoPngBlobForPdf,
@@ -17,8 +18,7 @@ const TaxSettlementDetail = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const settlementId = Number(id);
-  const role = auth.getRole() ?? '';
-  const canEmit = ['Administrador', 'Supervisor', 'Contador'].includes(role);
+  const canEmit = useMemo(() => auth.hasPermission(P.taxSettlementsEmit), []);
 
   const [row, setRow] = useState<TaxSettlement | null>(null);
   const [loading, setLoading] = useState(true);

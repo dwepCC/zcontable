@@ -5,6 +5,7 @@ import (
 	"miappfiber/config"
 	"miappfiber/database"
 	"miappfiber/routes"
+	"miappfiber/services"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -34,6 +35,13 @@ func main() {
 
 	if err := database.Seed(); err != nil {
 		log.Printf("seed (puede ignorarse si ya hay datos): %v", err)
+	}
+
+	if err := database.SeedRBAC(database.DB); err != nil {
+		log.Printf("ERROR seed rbac: %v", err)
+	} else {
+		services.Authz().InvalidateAll()
+		log.Print("seed rbac: OK (caché de permisos reiniciada)")
 	}
 
 	app := fiber.New()

@@ -5,6 +5,7 @@ import { companiesService } from '../services/companies';
 import { taxSettlementsService } from '../services/taxSettlements';
 import type { Company, SettlementPreviewLine } from '../types/dashboard';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import ProductPickerModal, { productLabel, productUnitPrice } from '../components/ProductPickerModal';
 import type { Product } from '../services/products';
 
@@ -45,9 +46,34 @@ function formatPEN(n: number): string {
   return n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Solo dígitos y un separador decimal (. o ,). */
+function sanitizeAmountInput(raw: string): string {
+  let out = '';
+  let hasSep = false;
+  for (const ch of raw) {
+    if (ch >= '0' && ch <= '9') {
+      out += ch;
+      continue;
+    }
+    if ((ch === '.' || ch === ',') && !hasSep) {
+      out += ch;
+      hasSep = true;
+    }
+  }
+  return out;
+}
+
 function parseLineAmount(raw: string): number {
-  const n = Number(raw);
+  const normalized = raw.trim().replace(',', '.');
+  if (!normalized) return 0;
+  const n = Number(normalized);
   return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function formatAmountOnBlur(raw: string): string {
+  const t = raw.trim();
+  if (!t) return '';
+  return parseLineAmount(t).toFixed(2);
 }
 
 type LineRow = {
@@ -64,8 +90,7 @@ type LineRow = {
 const TaxSettlementNew = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const role = auth.getRole() ?? '';
-  const allowed = ['Administrador', 'Supervisor', 'Contador'].includes(role);
+  const allowed = useMemo(() => auth.hasPermission(P.taxSettlementsCreate), []);
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -227,7 +252,12 @@ const TaxSettlementNew = () => {
     }[] = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
-      const amt = Number(l.amount);
+      const amountRaw = l.amount.trim();
+      if (!amountRaw) {
+        setError('Indique el monto de cada línea');
+        return;
+      }
+      const amt = parseLineAmount(amountRaw);
       if (!Number.isFinite(amt) || amt < 0) {
         setError('Revise los montos de cada línea');
         return;
@@ -429,12 +459,13 @@ const TaxSettlementNew = () => {
                           <div className="flex items-center justify-end gap-1 rounded-lg border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-primary-500/25 focus-within:border-primary-400">
                             <span className="pl-2 text-xs font-medium text-slate-500">S/</span>
                             <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
                               value={l.amount}
-                              onChange={(e) => updateLine(l.key, { amount: e.target.value })}
-                              className="w-full min-w-0 py-2 pr-2 rounded-r-lg border-0 text-sm text-right tabular-nums outline-none"
+                              onChange={(e) => updateLine(l.key, { amount: sanitizeAmountInput(e.target.value) })}
+                              onBlur={(e) => updateLine(l.key, { amount: formatAmountOnBlur(e.target.value) })}
+                              className="w-full min-w-0 py-2 pr-2 rounded-r-lg border-0 text-sm text-right tabular-nums outline-none [appearance:textfield]"
                             />
                           </div>
                         </td>

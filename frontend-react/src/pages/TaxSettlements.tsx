@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { taxSettlementsService } from '../services/taxSettlements';
@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { companiesService } from '../services/companies';
 import type { Company } from '../types/dashboard';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   if (!value) return fallback;
@@ -62,9 +63,8 @@ const TaxSettlements = () => {
   const page = parsePositiveInt(searchParams.get('page'), 1);
   const perPage = parsePositiveInt(searchParams.get('per_page'), 20);
 
-  const role = auth.getRole() ?? '';
-  const canCreate = ['Administrador', 'Supervisor', 'Contador'].includes(role);
-  const canRegisterPayment = ['Administrador', 'Supervisor', 'Contador', 'Asistente'].includes(role);
+  const canCreate = useMemo(() => auth.hasPermission(P.taxSettlementsCreate), []);
+  const canRegisterPayment = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
 
   const [list, setList] = useState<TaxSettlement[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);

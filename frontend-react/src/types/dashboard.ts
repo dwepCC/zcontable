@@ -266,12 +266,21 @@ export interface FirmConfig {
   updated_at?: string;
 }
 
+export interface UserRoleBrief {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export interface User {
   id: number;
   name: string;
   username: string;
   email?: string;
-  role: string;
+  /** Roles RBAC asignados (API). */
+  roles?: UserRoleBrief[];
+  /** Permisos efectivos (API list/get usuario). */
+  permission_codes?: string[];
   active?: boolean;
   dni?: string;
   phone?: string;

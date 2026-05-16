@@ -8,6 +8,7 @@ import { paymentsService } from '../services/payments';
 import { taxSettlementsService } from '../services/taxSettlements';
 import type { Company, Document, TaxSettlement, TukifacFiscalReceipt } from '../types/dashboard';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import SearchableSelect from '../components/SearchableSelect';
 import Pagination from '../components/Pagination';
 
@@ -28,8 +29,7 @@ const FiscalReceipts = () => {
   const initialPage = parsePositiveInt(searchParams.get('page'), 1);
   const initialPerPage = parsePositiveInt(searchParams.get('per_page'), 20);
 
-  const role = auth.getRole() ?? '';
-  const canAct = ['Administrador', 'Supervisor', 'Contador', 'Asistente'].includes(role);
+  const canAct = useMemo(() => auth.hasPermission(P.tukifacFiscalReceiptsList), []);
 
   const [list, setList] = useState<TukifacFiscalReceipt[]>([]);
   const [loading, setLoading] = useState(true);

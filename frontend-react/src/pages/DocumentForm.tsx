@@ -5,6 +5,7 @@ import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../uti
 import { companiesService } from '../services/companies';
 import { documentsService, type DocumentItemInput, type DocumentUpsertInput } from '../services/documents';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import type { Company } from '../types/dashboard';
 import SearchableSelect from '../components/SearchableSelect';
 import ProductPickerModal, { productLabel, productUnitPrice } from '../components/ProductPickerModal';
@@ -62,8 +63,10 @@ const DocumentForm = () => {
   const documentId = params.id ? Number(params.id) : null;
   const isEdit = Boolean(documentId);
 
-  const role = auth.getRole() ?? '';
-  const canUpsert = role === 'Administrador' || role === 'Supervisor' || role === 'Contador';
+  const canUpsert = useMemo(
+    () => auth.hasPermission(P.documentsCreate) || auth.hasPermission(P.documentsUpdate),
+    [],
+  );
 
   const peruvianToday = useMemo(() => formatInTimeZone(new Date(), 'America/Lima', 'yyyy-MM-dd'), []);
 

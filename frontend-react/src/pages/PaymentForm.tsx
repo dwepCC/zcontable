@@ -7,6 +7,7 @@ import { documentsService } from '../services/documents';
 import { paymentsService, type PaymentTukifacIssuePayload, type PaymentUpsertInput } from '../services/payments';
 import { taxSettlementsService, type SettlementPaymentSuggestion } from '../services/taxSettlements';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import {
   ensureTukifacSeriesCached,
   getCachedDocumentSeries,
@@ -110,17 +111,10 @@ const PaymentForm = () => {
   const isEdit = Boolean(paymentId);
   const taxSettlementIdFromUrl = searchParams.get('tax_settlement_id');
 
-  const role = auth.getRole() ?? '';
-  const canCreate = useMemo(
-    () => role === 'Administrador' || role === 'Supervisor' || role === 'Contador' || role === 'Asistente',
-    [role],
-  );
-  const canEdit = useMemo(() => role === 'Administrador' || role === 'Supervisor' || role === 'Contador', [role]);
+  const canCreate = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
+  const canEdit = useMemo(() => auth.hasPermission(P.paymentsUpdate), []);
   const canUpsert = isEdit ? canEdit : canCreate;
-  const canIssueTukifac = useMemo(
-    () => role === 'Administrador' || role === 'Supervisor' || role === 'Contador',
-    [role],
-  );
+  const canIssueTukifac = useMemo(() => auth.hasPermission(P.paymentsIssueTukifac), []);
 
   const peruvianToday = useMemo(() => formatInTimeZone(new Date(), 'America/Lima', 'yyyy-MM-dd'), []);
 

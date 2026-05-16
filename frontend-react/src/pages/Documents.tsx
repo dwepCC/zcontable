@@ -18,6 +18,7 @@ import {
   pickDefaultSeries,
 } from '../services/tukifacSeriesCache';
 import { auth } from '../services/auth';
+import { P } from '../rbac/codes';
 import { dateInputToRFC3339MidnightPeru } from '../utils/peruDates';
 import SearchableSelect from '../components/SearchableSelect';
 import Pagination from '../components/Pagination';
@@ -542,14 +543,13 @@ const Documents = () => {
     });
   };
 
-  const role = auth.getRole() ?? '';
-  const canUpsert = role === 'Administrador' || role === 'Supervisor' || role === 'Contador';
-  const canDelete = role === 'Administrador' || role === 'Supervisor';
-  const canCreatePayment = role === 'Administrador' || role === 'Supervisor' || role === 'Contador' || role === 'Asistente';
-  const canIssueTukifac = useMemo(
-    () => role === 'Administrador' || role === 'Supervisor' || role === 'Contador',
-    [role],
+  const canUpsert = useMemo(
+    () => auth.hasPermission(P.documentsCreate) || auth.hasPermission(P.documentsUpdate),
+    [],
   );
+  const canDelete = useMemo(() => auth.hasPermission(P.documentsDelete), []);
+  const canCreatePayment = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
+  const canIssueTukifac = useMemo(() => auth.hasPermission(P.paymentsIssueTukifac), []);
 
   const payMethodOptions = useMemo(() => {
     const base = [
