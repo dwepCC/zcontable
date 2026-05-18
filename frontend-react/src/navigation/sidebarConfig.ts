@@ -44,15 +44,11 @@ export type OperationalModuleConfig = {
 };
 
 /** Rutas bajo `/m/:slug` para módulos aún sin implementar */
-export const COMING_SOON_MODULE_SLUGS = ['supervisors', 'module-3', 'module-4', 'module-5'] as const;
+export const COMING_SOON_MODULE_SLUGS = ['module-3', 'module-4', 'module-5'] as const;
 export type ComingSoonModuleSlug = (typeof COMING_SOON_MODULE_SLUGS)[number];
 
 /** Textos de la vista "próximamente" por ruta `/m/:slug` */
 export const PLACEHOLDER_PAGE_COPY: Record<ComingSoonModuleSlug, { title: string; subtitle: string }> = {
-  supervisors: {
-    title: 'Supervisores',
-    subtitle: 'Módulo de supervisión y contabilidad. En preparación.',
-  },
   'module-3': {
     title: 'Módulo 3',
     subtitle: 'Reservado para expansión del ERP.',
@@ -69,10 +65,9 @@ export const PLACEHOLDER_PAGE_COPY: Record<ComingSoonModuleSlug, { title: string
 
 /** Mapeo estable id operativo → slug URL (p. ej. permisos o analytics) */
 export const COMING_SOON_BY_OPERATIONAL_ID: Record<
-  Exclude<OperationalModuleId, 'finance'>,
+  Exclude<OperationalModuleId, 'finance' | 'supervisors'>,
   { slug: ComingSoonModuleSlug }
 > = {
-  supervisors: { slug: 'supervisors' },
   module3: { slug: 'module-3' },
   module4: { slug: 'module-4' },
   module5: { slug: 'module-5' },
@@ -117,7 +112,45 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
     id: 'supervisors',
     label: 'Supervisores',
     icon: 'fas fa-user-check',
-    entries: [],
+    entries: [
+      {
+        type: 'group',
+        label: 'Operación',
+        items: [
+          {
+            to: '/supervisors/dashboard',
+            icon: 'fas fa-chart-pie',
+            label: 'Dashboard',
+            exact: true,
+            permission: P.supervisorsDashboardView,
+          },
+          {
+            to: '/supervisors/periods',
+            icon: 'fas fa-calendar-alt',
+            label: 'Períodos',
+            permission: P.supervisorsPeriodsView,
+          },
+          {
+            to: '/supervisors/controls',
+            icon: 'fas fa-clipboard-check',
+            label: 'Control mensual',
+            permission: P.supervisorsControlsView,
+          },
+          {
+            to: '/supervisors/reports',
+            icon: 'fas fa-file-alt',
+            label: 'Reportes',
+            permission: P.supervisorsReportsView,
+          },
+          {
+            to: '/supervisors/notifications',
+            icon: 'fas fa-bell',
+            label: 'Notificaciones',
+            permission: P.supervisorsNotificationsView,
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'module3',
@@ -225,7 +258,6 @@ function collectNavPaths(): NavPathRow[] {
 const NAV_PATH_ROWS = collectNavPaths();
 
 const SLUG_PREFIX_TO_MODULE: Record<string, OperationalModuleId> = {
-  supervisors: 'supervisors',
   'module-3': 'module3',
   'module-4': 'module4',
   'module-5': 'module5',

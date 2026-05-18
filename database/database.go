@@ -59,5 +59,14 @@ func AutoMigrate() error {
 		&models.Product{},
 		&models.TaxSettlement{},
 		&models.TaxSettlementLine{},
+		&models.SupervisorPeriod{},
+		&models.SupervisorMonthlyControl{},
+		&models.SupervisorDeclaration{},
+		&models.SupervisorTaxLiquidation{},
+		&models.SupervisorNPS{},
+		&models.SupervisorChangeLog{},
+		&models.SupervisorObservation{},
+		&models.SupervisorAttachment{},
+		&models.SupervisorNotification{},
 	)
 }

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import client from '../api/client';
+import { auth } from '../services/auth';
 import { companiesService } from '../services/companies';
+import { supervisorsService, type SupervisorNotification } from '../services/supervisors';
+import { P } from '../rbac/codes';
 import type { Company, DashboardData } from '../types/dashboard';
 import { PeriodScoreMini, periodDebtMoraBadge } from '../utils/periodDebtScore';
 
@@ -28,7 +31,9 @@ const Header = ({
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState('');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [supervisorNotifications, setSupervisorNotifications] = useState<SupervisorNotification[]>([]);
   const [lastNotificationsFetchAt, setLastNotificationsFetchAt] = useState<number | null>(null);
+  const canSupervisorNotif = useMemo(() => auth.hasPermission(P.supervisorsNotificationsView), []);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
@@ -82,13 +87,25 @@ const Header = ({
     return () => window.clearTimeout(handle);
   }, [searchTerm]);
 
+  const fetchSupervisorNotifications = async () => {
+    if (!canSupervisorNotif) return;
+    try {
+      setSupervisorNotifications(await supervisorsService.listNotifications(true));
+    } catch {
+      setSupervisorNotifications([]);
+    }
+  };
+
   const fetchNotifications = async () => {
     if (notificationsLoadingRef.current) return;
     try {
       notificationsLoadingRef.current = true;
       setNotificationsLoading(true);
       setNotificationsError('');
-      const response = await client.get<DashboardData>('/dashboard');
+      const [response] = await Promise.all([
+        client.get<DashboardData>('/dashboard'),
+        fetchSupervisorNotifications(),
+      ]);
       setDashboardData(response.data);
       const now = Date.now();
       lastNotificationsFetchAtRef.current = now;
@@ -121,14 +138,18 @@ const Header = ({
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [canSupervisorNotif]);
 
-  const notificationsCount = useMemo(() => {
+  const financeNotificationsCount = useMemo(() => {
     const debt = dashboardData?.DebtCompaniesCount ?? dashboardData?.TopDebtors?.length ?? 0;
     const pending = dashboardData?.PendingDocsCount ?? 0;
     const overdue = dashboardData?.OverdueDocsCount ?? 0;
     return debt + pending + overdue;
   }, [dashboardData]);
+
+  const supervisorUnreadCount = supervisorNotifications.length;
+
+  const notificationsCount = financeNotificationsCount + (canSupervisorNotif ? supervisorUnreadCount : 0);
 
   return (
     <header className="relative z-50 bg-white/70 backdrop-blur rounded-2xl shadow-[0_12px_30px_-18px_rgba(15,23,42,0.35)] border border-slate-200/60 px-6 py-2 flex items-center justify-between mb-3 flex-shrink-0">
@@ -263,6 +284,51 @@ const Header = ({
                 <div className="px-4 py-4 text-sm text-red-700 bg-red-50 border-t border-red-100">{notificationsError}</div>
               ) : (
                 <div className="px-2 py-2">
+                  {canSupervisorNotif ? (
+                    <div className="px-2 py-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Supervisores contables
+                        </p>
+                        <Link
+                          to="/supervisors/notifications"
+                          className="text-[11px] font-semibold text-primary-700 hover:text-primary-800"
+                          onClick={() => setIsNotificationsOpen(false)}
+                        >
+                          Ver todas
+                          {supervisorUnreadCount > 0 ? ` (${supervisorUnreadCount})` : ''}
+                        </Link>
+                      </div>
+                      {supervisorNotifications.length > 0 ? (
+                        <div className="space-y-1 mb-2">
+                          {supervisorNotifications.slice(0, 5).map((n) => (
+                            <Link
+                              key={n.id}
+                              to={
+                                n.monthly_control_id
+                                  ? `/supervisors/controls/${n.monthly_control_id}`
+                                  : '/supervisors/notifications'
+                              }
+                              className="block px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors"
+                              onClick={() => setIsNotificationsOpen(false)}
+                            >
+                              <p className="text-xs font-semibold text-slate-800 truncate">{n.title}</p>
+                              <p className="text-[11px] text-slate-500 line-clamp-2">{n.message}</p>
+                              {n.period_ym ? (
+                                <p className="text-[10px] text-slate-400 mt-0.5">Período {n.period_ym}</p>
+                              ) : null}
+                            </Link>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 rounded-xl bg-slate-50 text-xs text-slate-600 border border-slate-100 mb-2">
+                          Sin alertas de supervisores sin leer.
+                        </div>
+                      )}
+                      <div className="h-px bg-slate-100 my-1" />
+                    </div>
+                  ) : null}
+
                   <div className="px-2 py-2">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Empresas con deuda</p>

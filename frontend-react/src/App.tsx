@@ -31,6 +31,12 @@ import RolePermissions from './pages/RolePermissions';
 import Login from './pages/Login';
 import Placeholder from './pages/Placeholder';
 import ModuleComingSoon from './pages/ModuleComingSoon';
+import SupervisorDashboard from './pages/supervisors/SupervisorDashboard';
+import SupervisorPeriods from './pages/supervisors/SupervisorPeriods';
+import SupervisorControls from './pages/supervisors/SupervisorControls';
+import SupervisorControlDetail from './pages/supervisors/SupervisorControlDetail';
+import SupervisorReports from './pages/supervisors/SupervisorReports';
+import SupervisorNotifications from './pages/supervisors/SupervisorNotifications';
 import ProtectedRoute from './components/ProtectedRoute';
 import { auth } from './services/auth';
 
@@ -89,6 +95,12 @@ function App() {
             <Route path="payments/new" element={<PaymentForm />} />
             <Route path="payments/:id/edit" element={<PaymentForm />} />
             <Route path="reports/financial" element={<Reports />} />
+            <Route path="supervisors/dashboard" element={<SupervisorDashboard />} />
+            <Route path="supervisors/periods" element={<SupervisorPeriods />} />
+            <Route path="supervisors/controls" element={<SupervisorControls />} />
+            <Route path="supervisors/controls/:id" element={<SupervisorControlDetail />} />
+            <Route path="supervisors/reports" element={<SupervisorReports />} />
+            <Route path="supervisors/notifications" element={<SupervisorNotifications />} />
             <Route path="settings/firm" element={<Settings />} />
             <Route path="users" element={<Users />} />
             <Route path="users/roles" element={<RolePermissions />} />

@@ -19,6 +19,7 @@ const (
 	seedRoleSupervisor    = "Supervisor"
 	seedRoleContador      = "Contador"
 	seedRoleAsistente     = "Asistente"
+	seedRoleAnalista      = "Analista"
 )
 
 // SeedRBAC crea módulos, permisos, roles del sistema, matriz role↔permiso y asigna roles por defecto a usuarios sin user_roles.
@@ -69,6 +70,7 @@ func seedRBACModules(db *gorm.DB) error {
 		{Code: "liquidation", Name: "Liquidación masiva", Icon: "fas fa-calculator", SortOrder: 130, Active: true},
 		{Code: "tax_settlements", Name: "Liquidaciones de impuestos", Icon: "fas fa-file-signature", SortOrder: 140, Active: true},
 		{Code: "rbac", Name: "Roles y permisos", Icon: "fas fa-user-shield", SortOrder: 150, Active: true},
+		{Code: "supervisors", Name: "Supervisores contables", Icon: "fas fa-user-check", SortOrder: 155, Active: true},
 	}
 	for i := range rows {
 		r := rows[i]
@@ -186,6 +188,48 @@ func seedRBACPermissions(db *gorm.DB) error {
 		rbac.RBACRolesView:          {Mod: "rbac", Name: "Ver roles y matriz de permisos"},
 		rbac.RBACRolesManage:        {Mod: "rbac", Name: "Administrar roles y permisos"},
 		rbac.RBACPermissionsCatalog: {Mod: "rbac", Name: "Ver catálogo de permisos"},
+
+		rbac.SupervisorsDashboardView: {Mod: "supervisors", Name: "Dashboard supervisores"},
+
+		rbac.SupervisorsPeriodsView:   {Mod: "supervisors", Name: "Ver períodos contables"},
+		rbac.SupervisorsPeriodsCreate: {Mod: "supervisors", Name: "Crear período contable"},
+		rbac.SupervisorsPeriodsUpdate: {Mod: "supervisors", Name: "Editar período contable"},
+		rbac.SupervisorsPeriodsDelete: {Mod: "supervisors", Name: "Eliminar período contable"},
+		rbac.SupervisorsPeriodsClose:     {Mod: "supervisors", Name: "Cerrar período contable"},
+		rbac.SupervisorsPeriodsBootstrap: {Mod: "supervisors", Name: "Generar controles masivos del período"},
+
+		rbac.SupervisorsControlsView:   {Mod: "supervisors", Name: "Ver control mensual"},
+		rbac.SupervisorsControlsCreate: {Mod: "supervisors", Name: "Crear control mensual"},
+		rbac.SupervisorsControlsUpdate: {Mod: "supervisors", Name: "Editar control mensual"},
+		rbac.SupervisorsControlsDelete: {Mod: "supervisors", Name: "Eliminar control mensual"},
+
+		rbac.SupervisorsDeclarationsView:  {Mod: "supervisors", Name: "Ver declaraciones"},
+		rbac.SupervisorsDeclarationsCreate:  {Mod: "supervisors", Name: "Crear declaración"},
+		rbac.SupervisorsDeclarationsUpdate:  {Mod: "supervisors", Name: "Editar declaración"},
+		rbac.SupervisorsDeclarationsDelete:  {Mod: "supervisors", Name: "Eliminar declaración"},
+		rbac.SupervisorsDeclarationsApprove: {Mod: "supervisors", Name: "Aprobar declaración"},
+		rbac.SupervisorsDeclarationsObserve: {Mod: "supervisors", Name: "Observar declaración"},
+
+		rbac.SupervisorsLiquidationsView:    {Mod: "supervisors", Name: "Ver liquidación tributaria"},
+		rbac.SupervisorsLiquidationsCreate:  {Mod: "supervisors", Name: "Crear liquidación tributaria"},
+		rbac.SupervisorsLiquidationsUpdate:  {Mod: "supervisors", Name: "Editar liquidación tributaria"},
+		rbac.SupervisorsLiquidationsDelete:  {Mod: "supervisors", Name: "Eliminar liquidación tributaria"},
+		rbac.SupervisorsLiquidationsApprove: {Mod: "supervisors", Name: "Aprobar liquidación tributaria"},
+
+		rbac.SupervisorsNPSView:     {Mod: "supervisors", Name: "Ver NPS"},
+		rbac.SupervisorsNPSCreate:   {Mod: "supervisors", Name: "Crear NPS"},
+		rbac.SupervisorsNPSUpdate:   {Mod: "supervisors", Name: "Editar NPS"},
+		rbac.SupervisorsNPSDelete:   {Mod: "supervisors", Name: "Eliminar NPS"},
+		rbac.SupervisorsNPSGenerate: {Mod: "supervisors", Name: "Generar código NPS"},
+
+		rbac.SupervisorsReportsView: {Mod: "supervisors", Name: "Reportes supervisores"},
+
+		rbac.SupervisorsObservationsView:   {Mod: "supervisors", Name: "Ver observaciones"},
+		rbac.SupervisorsObservationsCreate: {Mod: "supervisors", Name: "Registrar observaciones"},
+		rbac.SupervisorsHistoryView:        {Mod: "supervisors", Name: "Ver historial de cambios"},
+		rbac.SupervisorsAttachmentsUpload:  {Mod: "supervisors", Name: "Subir adjuntos supervisores"},
+		rbac.SupervisorsNotificationsView:  {Mod: "supervisors", Name: "Ver notificaciones supervisores"},
+		rbac.SupervisorsNPSRegisterPayment: {Mod: "supervisors", Name: "Registrar pago NPS"},
 	}
 
 	for _, code := range rbac.AllPermissionCodes {
@@ -223,6 +267,7 @@ func seedRBACSystemRoles(db *gorm.DB) error {
 		{Code: seedRoleSupervisor, Name: "Supervisor", Description: "Supervisión operativa", IsSystem: true},
 		{Code: seedRoleContador, Name: "Contador", Description: "Gestión contable y fiscal", IsSystem: true},
 		{Code: seedRoleAsistente, Name: "Asistente", Description: "Apoyo operativo", IsSystem: true},
+		{Code: seedRoleAnalista, Name: "Analista", Description: "Analista contable (avance y liquidaciones)", IsSystem: true},
 	}
 	for i := range system {
 		r := system[i]
@@ -283,6 +328,22 @@ func supervisorPermissionCodes() []string {
 	return permissionCodesExcept(exclSupervisor)
 }
 
+// analistaPermissionCodes permisos del analista contable (sin aprobar/cerrar período ni bootstrap).
+func analistaPermissionCodes() []string {
+	return []string{
+		rbac.SupervisorsDashboardView,
+		rbac.SupervisorsPeriodsView,
+		rbac.SupervisorsControlsView, rbac.SupervisorsControlsCreate, rbac.SupervisorsControlsUpdate,
+		rbac.SupervisorsDeclarationsView, rbac.SupervisorsDeclarationsUpdate,
+		rbac.SupervisorsLiquidationsView, rbac.SupervisorsLiquidationsUpdate,
+		rbac.SupervisorsNPSView, rbac.SupervisorsNPSCreate, rbac.SupervisorsNPSUpdate, rbac.SupervisorsNPSGenerate,
+		rbac.SupervisorsReportsView,
+		rbac.SupervisorsObservationsView, rbac.SupervisorsObservationsCreate,
+		rbac.SupervisorsHistoryView, rbac.SupervisorsAttachmentsUpload,
+		rbac.SupervisorsNotificationsView, rbac.SupervisorsNPSRegisterPayment,
+	}
+}
+
 func seedRBACRolePermissions(db *gorm.DB) error {
 	type roleBind struct {
 		roleCode string
@@ -336,6 +397,10 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+	analistaIDs, err := permissionIDsByCodes(db, analistaPermissionCodes())
+	if err != nil {
+		return err
+	}
 
 	binds := []roleBind{
 		{roleCode: seedRoleSuperusuario, codes: rbac.AllPermissionCodes},
@@ -343,6 +408,7 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 		{roleCode: seedRoleSupervisor, codes: supervisorCodes},
 		{roleCode: seedRoleContador, codes: contadorCodes},
 		{roleCode: seedRoleAsistente, codes: asistenteAllow},
+		{roleCode: seedRoleAnalista, codes: analistaPermissionCodes()},
 	}
 
 	for _, b := range binds {
@@ -360,6 +426,8 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 			ids = contadorIDs
 		case seedRoleAsistente:
 			ids = asistenteIDs
+		case seedRoleAnalista:
+			ids = analistaIDs
 		}
 		if err := db.Model(&role).Association("Permissions").Replace([]models.Permission{}); err != nil {
 			return err

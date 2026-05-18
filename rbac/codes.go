@@ -97,6 +97,48 @@ const (
 	RBACRolesView           = "rbac.roles_view"
 	RBACRolesManage         = "rbac.roles_manage"
 	RBACPermissionsCatalog  = "rbac.permissions_catalog"
+
+	SupervisorsDashboardView = "supervisors.dashboard_view"
+
+	SupervisorsPeriodsView   = "supervisors.periods_view"
+	SupervisorsPeriodsCreate = "supervisors.periods_create"
+	SupervisorsPeriodsUpdate = "supervisors.periods_update"
+	SupervisorsPeriodsDelete = "supervisors.periods_delete"
+	SupervisorsPeriodsClose     = "supervisors.periods_close"
+	SupervisorsPeriodsBootstrap = "supervisors.periods_bootstrap"
+
+	SupervisorsControlsView   = "supervisors.controls_view"
+	SupervisorsControlsCreate = "supervisors.controls_create"
+	SupervisorsControlsUpdate = "supervisors.controls_update"
+	SupervisorsControlsDelete = "supervisors.controls_delete"
+
+	SupervisorsDeclarationsView    = "supervisors.declarations_view"
+	SupervisorsDeclarationsCreate    = "supervisors.declarations_create"
+	SupervisorsDeclarationsUpdate    = "supervisors.declarations_update"
+	SupervisorsDeclarationsDelete    = "supervisors.declarations_delete"
+	SupervisorsDeclarationsApprove   = "supervisors.declarations_approve"
+	SupervisorsDeclarationsObserve   = "supervisors.declarations_observe"
+
+	SupervisorsLiquidationsView    = "supervisors.liquidations_view"
+	SupervisorsLiquidationsCreate  = "supervisors.liquidations_create"
+	SupervisorsLiquidationsUpdate  = "supervisors.liquidations_update"
+	SupervisorsLiquidationsDelete  = "supervisors.liquidations_delete"
+	SupervisorsLiquidationsApprove = "supervisors.liquidations_approve"
+
+	SupervisorsNPSView     = "supervisors.nps_view"
+	SupervisorsNPSCreate   = "supervisors.nps_create"
+	SupervisorsNPSUpdate   = "supervisors.nps_update"
+	SupervisorsNPSDelete   = "supervisors.nps_delete"
+	SupervisorsNPSGenerate = "supervisors.nps_generate"
+
+	SupervisorsReportsView = "supervisors.reports_view"
+
+	SupervisorsObservationsView   = "supervisors.observations_view"
+	SupervisorsObservationsCreate = "supervisors.observations_create"
+	SupervisorsHistoryView        = "supervisors.history_view"
+	SupervisorsAttachmentsUpload  = "supervisors.attachments_upload"
+	SupervisorsNotificationsView  = "supervisors.notifications_view"
+	SupervisorsNPSRegisterPayment = "supervisors.nps_register_payment"
 )
 
 // AllPermissionCodes lista completa para seed y tests.
@@ -119,4 +161,13 @@ var AllPermissionCodes = []string{
 	LiquidationRun,
 	TaxSettlementsPreview, TaxSettlementsList, TaxSettlementsView, TaxSettlementsPaymentSuggestions, TaxSettlementsCreate, TaxSettlementsUpdate, TaxSettlementsEmit, TaxSettlementsDelete,
 	RBACRolesView, RBACRolesManage, RBACPermissionsCatalog,
+	SupervisorsDashboardView,
+	SupervisorsPeriodsView, SupervisorsPeriodsCreate, SupervisorsPeriodsUpdate, SupervisorsPeriodsDelete, SupervisorsPeriodsClose, SupervisorsPeriodsBootstrap,
+	SupervisorsControlsView, SupervisorsControlsCreate, SupervisorsControlsUpdate, SupervisorsControlsDelete,
+	SupervisorsDeclarationsView, SupervisorsDeclarationsCreate, SupervisorsDeclarationsUpdate, SupervisorsDeclarationsDelete, SupervisorsDeclarationsApprove, SupervisorsDeclarationsObserve,
+	SupervisorsLiquidationsView, SupervisorsLiquidationsCreate, SupervisorsLiquidationsUpdate, SupervisorsLiquidationsDelete, SupervisorsLiquidationsApprove,
+	SupervisorsNPSView, SupervisorsNPSCreate, SupervisorsNPSUpdate, SupervisorsNPSDelete, SupervisorsNPSGenerate,
+	SupervisorsReportsView,
+	SupervisorsObservationsView, SupervisorsObservationsCreate, SupervisorsHistoryView,
+	SupervisorsAttachmentsUpload, SupervisorsNotificationsView, SupervisorsNPSRegisterPayment,
 }

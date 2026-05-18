@@ -63,6 +63,8 @@ func main() {
 
 	routes.Setup(app)
 
+	services.StartSupervisorAutomationLoop()
+
 	addr := ":" + config.AppConfig.ServerPort
 	log.Printf("Servidor en http://localhost%s", addr)
 	log.Fatal(app.Listen(addr))

@@ -1,0 +1,800 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { resolveBackendUrl } from '../../api/client';
+import SearchableSelect from '../../components/SearchableSelect';
+import {
+  supervisorsService,
+  type SupervisorAttachment,
+  type SupervisorChangeLog,
+  type SupervisorDeclaration,
+  type SupervisorMonthlyControl,
+  type SupervisorNPS,
+  type SupervisorObservation,
+  type SupervisorTaxLiquidation,
+} from '../../services/supervisors';
+import { auth } from '../../services/auth';
+import { usersService } from '../../services/users';
+import { P } from '../../rbac/codes';
+import type { User } from '../../types/dashboard';
+import {
+  controlStatusLabel,
+  declarationStatusLabel,
+  declarationTypeLabel,
+  liquidationValidationLabel,
+  npsStatusLabel,
+  riskLevelLabel,
+} from '../../utils/supervisorLabels';
+
+const SupervisorControlDetail = () => {
+  const { id } = useParams();
+  const controlId = Number(id);
+  const canView = useMemo(() => auth.hasPermission(P.supervisorsControlsView), []);
+  const canUpdateControl = useMemo(() => auth.hasPermission(P.supervisorsControlsUpdate), []);
+  const canDeclUpdate = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsUpdate), []);
+  const canDeclApprove = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
+  const canDeclObserve = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsObserve), []);
+  const canLiqView = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsView), []);
+  const canLiqUpdate = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsUpdate), []);
+  const canLiqApprove = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsApprove), []);
+  const canNpsView = useMemo(() => auth.hasPermission(P.supervisorsNPSView), []);
+  const canNpsCreate = useMemo(() => auth.hasPermission(P.supervisorsNPSCreate), []);
+  const canNpsGenerate = useMemo(() => auth.hasPermission(P.supervisorsNPSGenerate), []);
+  const canNpsDelete = useMemo(() => auth.hasPermission(P.supervisorsNPSDelete), []);
+  const canNpsPay = useMemo(() => auth.hasPermission(P.supervisorsNPSRegisterPayment), []);
+  const canObsView = useMemo(() => auth.hasPermission(P.supervisorsObservationsView), []);
+  const canObsCreate = useMemo(() => auth.hasPermission(P.supervisorsObservationsCreate), []);
+  const canHistory = useMemo(() => auth.hasPermission(P.supervisorsHistoryView), []);
+  const canAttach = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
+  const canPickUsers = useMemo(() => auth.hasPermission(P.usersView), []);
+
+  const [control, setControl] = useState<SupervisorMonthlyControl | null>(null);
+  const [declarations, setDeclarations] = useState<SupervisorDeclaration[]>([]);
+  const [liquidation, setLiquidation] = useState<SupervisorTaxLiquidation | null>(null);
+  const [npsList, setNpsList] = useState<SupervisorNPS[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [observations, setObservations] = useState<SupervisorObservation[]>([]);
+  const [history, setHistory] = useState<SupervisorChangeLog[]>([]);
+  const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
+  const [newObservation, setNewObservation] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [tab, setTab] = useState<'decl' | 'liq' | 'nps' | 'audit'>('decl');
+  const [msg, setMsg] = useState('');
+  const [liqForm, setLiqForm] = useState({
+    igv: 0,
+    renta_mensual: 0,
+    otros_tributos: 0,
+    notes: '',
+    responsible_user_id: '',
+    approver_user_id: '',
+    validation_status: 'pendiente',
+  });
+  const [newNps, setNewNps] = useState({ tributo: 'IGV', importe: 0 });
+
+  const userOptions = useMemo(
+    () =>
+      users.map((u) => ({
+        value: String(u.id),
+        label: u.name || u.username || `#${u.id}`,
+        searchText: [u.username, u.email].filter(Boolean).join(' '),
+      })),
+    [users],
+  );
+
+  const load = useCallback(async () => {
+    if (!controlId) return;
+    try {
+      const [ctrl, decls] = await Promise.all([
+        supervisorsService.getControl(controlId),
+        supervisorsService.listDeclarations(controlId),
+      ]);
+      setControl(ctrl);
+      setDeclarations(decls);
+      if (canLiqView) {
+        try {
+          const liq = await supervisorsService.getLiquidation(controlId);
+          setLiquidation(liq);
+          setLiqForm({
+            igv: liq.igv,
+            renta_mensual: liq.renta_mensual,
+            otros_tributos: liq.otros_tributos,
+            notes: liq.notes || '',
+            responsible_user_id: liq.responsible_user_id ? String(liq.responsible_user_id) : '',
+            approver_user_id: liq.approver_user_id ? String(liq.approver_user_id) : '',
+            validation_status: liq.validation_status || 'pendiente',
+          });
+        } catch {
+          setLiquidation(null);
+        }
+      }
+      if (canNpsView) {
+        setNpsList(await supervisorsService.listNPS(controlId));
+      }
+      setMsg('');
+    } catch {
+      setMsg('No se pudo cargar el control');
+    }
+  }, [controlId, canLiqView, canNpsView]);
+
+  useEffect(() => {
+    if (canView && controlId) void load();
+  }, [canView, controlId, load]);
+
+  useEffect(() => {
+    if ((!canUpdateControl && !canLiqUpdate) || !canPickUsers) return;
+    void usersService.list().then(setUsers).catch(() => setUsers([]));
+  }, [canUpdateControl, canLiqUpdate, canPickUsers]);
+
+  const loadAudit = useCallback(async () => {
+    if (!controlId) return;
+    const tasks: Promise<void>[] = [];
+    if (canObsView) {
+      tasks.push(
+        supervisorsService.listObservations(controlId).then(setObservations).catch(() => setObservations([])),
+      );
+    }
+    if (canHistory) {
+      tasks.push(
+        supervisorsService
+          .listHistory('monthly_control', controlId)
+          .then(setHistory)
+          .catch(() => setHistory([])),
+      );
+    }
+    if (canObsView || canAttach) {
+      tasks.push(
+        supervisorsService.listAttachments(controlId).then(setAttachments).catch(() => setAttachments([])),
+      );
+    }
+    await Promise.all(tasks);
+  }, [controlId, canObsView, canHistory, canAttach]);
+
+  useEffect(() => {
+    if (tab === 'audit' && controlId) void loadAudit();
+  }, [tab, controlId, loadAudit]);
+
+  const saveControlField = async (patch: Record<string, unknown>) => {
+    if (!control) return;
+    try {
+      const updated = await supervisorsService.updateControl(control.id, patch);
+      setControl(updated);
+      setMsg('');
+    } catch {
+      setMsg('Error al actualizar el control');
+    }
+  };
+
+  const addObservation = async () => {
+    if (!controlId || !newObservation.trim()) return;
+    try {
+      await supervisorsService.createObservation({ monthly_control_id: controlId, body: newObservation.trim() });
+      setNewObservation('');
+      await loadAudit();
+    } catch {
+      setMsg('No se pudo registrar la observación');
+    }
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!controlId) return;
+    try {
+      await supervisorsService.uploadAttachment(controlId, 0, file);
+      await loadAudit();
+    } catch {
+      setMsg('Error al subir el archivo');
+    }
+  };
+
+  const saveLiquidation = async () => {
+    if (!controlId) return;
+    try {
+      await supervisorsService.updateLiquidation(controlId, {
+        igv: liqForm.igv,
+        renta_mensual: liqForm.renta_mensual,
+        otros_tributos: liqForm.otros_tributos,
+        notes: liqForm.notes,
+        validation_status: liqForm.validation_status,
+        responsible_user_id: liqForm.responsible_user_id ? Number(liqForm.responsible_user_id) : 0,
+        approver_user_id: liqForm.approver_user_id ? Number(liqForm.approver_user_id) : 0,
+      });
+      await load();
+      setMsg('Liquidación guardada.');
+    } catch {
+      setMsg('Error al guardar liquidación');
+    }
+  };
+
+  const addNps = async () => {
+    if (!controlId) return;
+    try {
+      await supervisorsService.createNPS({
+        monthly_control_id: controlId,
+        tributo: newNps.tributo,
+        importe: newNps.importe,
+      });
+      setNpsList(await supervisorsService.listNPS(controlId));
+    } catch {
+      setMsg('Error al crear NPS');
+    }
+  };
+
+  if (!canView || !controlId) {
+    return <p className="p-6 text-center text-slate-600">Sin permiso o ID inválido.</p>;
+  }
+
+  if (!control) {
+    return <p className="p-6 text-center text-slate-500">{msg || 'Cargando…'}</p>;
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div>
+        <Link to="/supervisors/controls" className="text-sm text-primary-700">
+          ← Volver a controles
+        </Link>
+        <h2 className="text-xl font-semibold text-slate-800 mt-2">
+          {control.company?.business_name ?? `Empresa #${control.company_id}`}
+        </h2>
+        <p className="text-sm text-slate-500">
+          Período {control.period_ym} · {controlStatusLabel(control.general_status)} · Riesgo{' '}
+          {riskLevelLabel(control.risk_level)}
+        </p>
+      </div>
+
+      {msg ? <p className="text-sm text-red-600">{msg}</p> : null}
+
+      {canUpdateControl ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void supervisorsService.registerInfoReceived(control.id).then((c) => {
+                setControl(c);
+                setMsg('Información registrada como recibida.');
+              });
+            }}
+            className="px-4 py-2 rounded-full border border-primary-200 text-primary-800 text-sm font-medium hover:bg-primary-50"
+          >
+            Registrar recepción de información
+          </button>
+          {control.info_received_at ? (
+            <span className="text-xs text-slate-500 self-center">
+              Recibida: {new Date(control.info_received_at).toLocaleString()}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {canUpdateControl ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-4">
+          <p className="font-medium text-slate-700">Datos del control</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block">
+              Régimen tributario
+              <input
+                value={control.tax_regime ?? ''}
+                onChange={(e) => setControl((c) => (c ? { ...c, tax_regime: e.target.value } : c))}
+                onBlur={() => void saveControlField({ tax_regime: control.tax_regime ?? '' })}
+                className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-1.5"
+              />
+            </label>
+            <label className="block">
+              Vencimiento
+              <input
+                type="date"
+                value={control.due_date?.slice(0, 10) ?? ''}
+                onChange={(e) => void saveControlField({ due_date: e.target.value || null })}
+                className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-1.5"
+              />
+            </label>
+            <label className="block">
+              Nivel de riesgo
+              <select
+                value={control.risk_level}
+                onChange={(e) => void saveControlField({ risk_level: e.target.value })}
+                className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-1.5"
+              >
+                <option value="bajo">Bajo</option>
+                <option value="medio">Medio</option>
+                <option value="alto">Alto</option>
+                <option value="critico">Crítico</option>
+              </select>
+            </label>
+            <label className="block">
+              Estado general
+              <select
+                value={control.general_status}
+                onChange={(e) => void saveControlField({ general_status: e.target.value })}
+                className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-1.5"
+              >
+                <option value="pendiente">Pendiente</option>
+                <option value="al_dia">Al día</option>
+                <option value="observado">Observado</option>
+                <option value="vencido">Vencido</option>
+                <option value="cerrado">Cerrado</option>
+              </select>
+            </label>
+            <label className="block">
+              Responsable
+              {canPickUsers ? (
+                <div className="mt-1">
+                  <SearchableSelect
+                    value={control.responsible_user_id ? String(control.responsible_user_id) : ''}
+                    onChange={(v) => void saveControlField({ responsible_user_id: v ? Number(v) : null })}
+                    options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                    placeholder="Seleccionar responsable"
+                  />
+                </div>
+              ) : (
+                <p className="mt-1 text-slate-600">
+                  {control.responsible?.full_name || control.responsible?.username || 'Sin asignar'}
+                </p>
+              )}
+            </label>
+            <label className="block">
+              Supervisor
+              {canPickUsers ? (
+                <div className="mt-1">
+                  <SearchableSelect
+                    value={control.supervisor_user_id ? String(control.supervisor_user_id) : ''}
+                    onChange={(v) => void saveControlField({ supervisor_user_id: v ? Number(v) : null })}
+                    options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                    placeholder="Seleccionar supervisor"
+                  />
+                </div>
+              ) : (
+                <p className="mt-1 text-slate-600">
+                  {control.supervisor?.full_name || control.supervisor?.username || 'Sin asignar'}
+                </p>
+              )}
+            </label>
+          </div>
+          <label className="block">
+            Observaciones internas
+            <textarea
+              value={control.observations ?? ''}
+              onChange={(e) => setControl((c) => (c ? { ...c, observations: e.target.value } : c))}
+              onBlur={() => void saveControlField({ observations: control.observations ?? '' })}
+              rows={2}
+              className="mt-1 block w-full border border-slate-200 rounded-lg px-3 py-1.5"
+            />
+          </label>
+        </div>
+      ) : null}
+
+      <div className="flex gap-2 border-b border-slate-200">
+        {(['decl', 'liq', 'nps', 'audit'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-500'
+            }`}
+          >
+            {t === 'decl'
+              ? 'Declaraciones'
+              : t === 'liq'
+                ? 'Liquidación'
+                : t === 'nps'
+                  ? 'NPS'
+                  : 'Historial'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'decl' ? (
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="text-left px-4 py-3">Tipo</th>
+                <th className="text-left px-4 py-3">Estado</th>
+                <th className="text-right px-4 py-3">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {declarations.map((d) => (
+                <tr key={d.id}>
+                  <td className="px-4 py-3">{declarationTypeLabel(d.declaration_type)}</td>
+                  <td className="px-4 py-3">
+                    {canDeclUpdate ? (
+                      <select
+                        value={d.status}
+                        onChange={(e) => {
+                          void supervisorsService
+                            .updateDeclaration(d.id, { status: e.target.value })
+                            .then(() => load());
+                        }}
+                        className="border border-slate-200 rounded px-2 py-1 text-xs"
+                      >
+                        <option value="pendiente">Pendiente</option>
+                        <option value="en_elaboracion">En elaboración</option>
+                        <option value="en_revision">En revisión</option>
+                        <option value="observado">Observado</option>
+                        <option value="aprobado">Aprobado</option>
+                        <option value="presentado">Presentado</option>
+                        <option value="cerrado">Cerrado</option>
+                      </select>
+                    ) : (
+                      declarationStatusLabel(d.status)
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right space-x-2">
+                    {canDeclApprove ? (
+                      <button
+                        type="button"
+                        className="text-emerald-700 text-xs font-medium"
+                        onClick={() => {
+                          void supervisorsService.approveDeclaration(d.id).then(() => load());
+                        }}
+                      >
+                        Aprobar
+                      </button>
+                    ) : null}
+                    {canDeclObserve ? (
+                      <button
+                        type="button"
+                        className="text-amber-700 text-xs font-medium"
+                        onClick={() => {
+                          const notes = window.prompt('Observación:') ?? '';
+                          void supervisorsService.observeDeclaration(d.id, notes).then(() => load());
+                        }}
+                      >
+                        Observar
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {tab === 'liq' && canLiqView ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+          {liquidation ? (
+            <>
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <label>
+                  IGV
+                  <input
+                    type="number"
+                    step="0.01"
+                    disabled={!canLiqUpdate}
+                    value={liqForm.igv}
+                    onChange={(e) => setLiqForm((f) => ({ ...f, igv: Number(e.target.value) }))}
+                    className="block w-full border border-slate-200 rounded-lg px-2 py-1 mt-1"
+                  />
+                </label>
+                <label>
+                  Renta mensual
+                  <input
+                    type="number"
+                    step="0.01"
+                    disabled={!canLiqUpdate}
+                    value={liqForm.renta_mensual}
+                    onChange={(e) => setLiqForm((f) => ({ ...f, renta_mensual: Number(e.target.value) }))}
+                    className="block w-full border border-slate-200 rounded-lg px-2 py-1 mt-1"
+                  />
+                </label>
+                <label>
+                  Otros tributos
+                  <input
+                    type="number"
+                    step="0.01"
+                    disabled={!canLiqUpdate}
+                    value={liqForm.otros_tributos}
+                    onChange={(e) => setLiqForm((f) => ({ ...f, otros_tributos: Number(e.target.value) }))}
+                    className="block w-full border border-slate-200 rounded-lg px-2 py-1 mt-1"
+                  />
+                </label>
+              </div>
+              <p className="text-sm font-semibold text-slate-800">
+                Total a pagar: S/ {liquidation.total_pagar.toFixed(2)}
+                <span className="text-xs font-normal text-slate-500 ml-2">(calculado automáticamente)</span>
+              </p>
+              {liquidation.calculated_at ? (
+                <p className="text-xs text-slate-500">
+                  Último cálculo: {new Date(liquidation.calculated_at).toLocaleString()}
+                </p>
+              ) : null}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <label>
+                  Responsable liquidación
+                  {canLiqUpdate && canPickUsers ? (
+                    <div className="mt-1">
+                      <SearchableSelect
+                        value={liqForm.responsible_user_id}
+                        onChange={(v) => setLiqForm((f) => ({ ...f, responsible_user_id: v }))}
+                        options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                        placeholder="Responsable"
+                        disabled={!canLiqUpdate}
+                      />
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-slate-600">
+                      {liquidation.responsible?.full_name ||
+                        liquidation.responsible?.username ||
+                        'Sin asignar'}
+                    </p>
+                  )}
+                </label>
+                <label>
+                  Supervisor aprobador
+                  {canLiqUpdate && canPickUsers ? (
+                    <div className="mt-1">
+                      <SearchableSelect
+                        value={liqForm.approver_user_id}
+                        onChange={(v) => setLiqForm((f) => ({ ...f, approver_user_id: v }))}
+                        options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                        placeholder="Aprobador"
+                        disabled={!canLiqUpdate}
+                      />
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-slate-600">
+                      {liquidation.approver?.full_name || liquidation.approver?.username || 'Sin asignar'}
+                    </p>
+                  )}
+                </label>
+                <label>
+                  Estado de validación
+                  {canLiqUpdate ? (
+                    <select
+                      value={liqForm.validation_status}
+                      onChange={(e) => setLiqForm((f) => ({ ...f, validation_status: e.target.value }))}
+                      className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                    >
+                      <option value="pendiente">Pendiente</option>
+                      <option value="aprobada">Aprobada</option>
+                      <option value="observada">Observada</option>
+                    </select>
+                  ) : (
+                    <p className="mt-1 text-slate-600">{liquidationValidationLabel(liquidation.validation_status)}</p>
+                  )}
+                </label>
+                <label className="md:col-span-2">
+                  Notas
+                  <textarea
+                    value={liqForm.notes}
+                    disabled={!canLiqUpdate}
+                    onChange={(e) => setLiqForm((f) => ({ ...f, notes: e.target.value }))}
+                    rows={2}
+                    className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {canLiqUpdate ? (
+                  <button
+                    type="button"
+                    onClick={() => void saveLiquidation()}
+                    className="px-4 py-2 rounded-full bg-primary-600 text-white text-sm"
+                  >
+                    Guardar liquidación
+                  </button>
+                ) : null}
+                {canLiqApprove ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void supervisorsService.approveLiquidation(controlId).then(() => load());
+                    }}
+                    className="px-4 py-2 rounded-full border border-emerald-600 text-emerald-700 text-sm"
+                  >
+                    Aprobar liquidación
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">Sin liquidación (se crea al generar el control del período).</p>
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'nps' && canNpsView ? (
+        <div className="space-y-4">
+          {canNpsCreate ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 flex flex-wrap gap-3 items-end">
+              <label className="text-sm">
+                Tributo
+                <input
+                  value={newNps.tributo}
+                  onChange={(e) => setNewNps((n) => ({ ...n, tributo: e.target.value }))}
+                  className="block mt-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-sm">
+                Importe
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newNps.importe}
+                  onChange={(e) => setNewNps((n) => ({ ...n, importe: Number(e.target.value) }))}
+                  className="block mt-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void addNps()}
+                className="px-4 py-2 rounded-full bg-primary-600 text-white text-sm"
+              >
+                Agregar NPS
+              </button>
+            </div>
+          ) : null}
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="text-left px-4 py-3">Tributo</th>
+                  <th className="text-left px-4 py-3">Importe</th>
+                  <th className="text-left px-4 py-3">Estado</th>
+                  <th className="text-left px-4 py-3">Código</th>
+                  <th className="text-right px-4 py-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {npsList.map((n) => (
+                  <tr key={n.id}>
+                    <td className="px-4 py-3">{n.tributo}</td>
+                    <td className="px-4 py-3">S/ {n.importe.toFixed(2)}</td>
+                    <td className="px-4 py-3">{npsStatusLabel(n.payment_status)}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{n.codigo_nps || '—'}</td>
+                    <td className="px-4 py-3 text-right space-x-2">
+                      {canNpsGenerate ? (
+                        <button
+                          type="button"
+                          className="text-primary-700 text-xs font-medium"
+                          onClick={() => {
+                            void supervisorsService.generateNPS(n.id).then(() => load());
+                          }}
+                        >
+                          Generar
+                        </button>
+                      ) : null}
+                      {canNpsPay && n.payment_status !== 'pagado' ? (
+                        <button
+                          type="button"
+                          className="text-emerald-700 text-xs font-medium"
+                          onClick={() => {
+                            void supervisorsService.registerNPSPayment(n.id).then(() => load());
+                          }}
+                        >
+                          Marcar pagado
+                        </button>
+                      ) : null}
+                      {canNpsDelete ? (
+                        <button
+                          type="button"
+                          className="text-red-600 text-xs font-medium"
+                          onClick={() => {
+                            void supervisorsService.deleteNPS(n.id).then(() => load());
+                          }}
+                        >
+                          Eliminar
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'audit' ? (
+        <div className="space-y-6">
+          {canObsView ? (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-800">Observaciones</h3>
+              <ul className="space-y-2 text-sm">
+                {observations.length === 0 ? (
+                  <li className="text-slate-500">Sin observaciones registradas.</li>
+                ) : (
+                  observations.map((o) => (
+                    <li key={o.id} className="border-b border-slate-100 pb-2">
+                      <p>{o.body}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {o.user?.name || o.user?.username || 'Usuario'} ·{' '}
+                        {new Date(o.created_at).toLocaleString()}
+                      </p>
+                    </li>
+                  ))
+                )}
+              </ul>
+              {canObsCreate ? (
+                <div className="flex gap-2">
+                  <input
+                    value={newObservation}
+                    onChange={(e) => setNewObservation(e.target.value)}
+                    placeholder="Nueva observación…"
+                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addObservation()}
+                    className="px-4 py-2 rounded-full bg-primary-600 text-white text-sm"
+                  >
+                    Agregar
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {canHistory ? (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-800">Historial de cambios</h3>
+              <ul className="space-y-2 text-sm max-h-64 overflow-y-auto">
+                {history.length === 0 ? (
+                  <li className="text-slate-500">Sin cambios registrados.</li>
+                ) : (
+                  history.map((h) => (
+                    <li key={h.id} className="text-slate-700">
+                      <span className="font-medium">{h.field_name}</span>: {h.old_value || '—'} → {h.new_value || '—'}
+                      <span className="block text-xs text-slate-400">
+                        {h.user?.name || h.user?.username || `#${h.user_id}`} ·{' '}
+                        {new Date(h.created_at).toLocaleString()}
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </section>
+          ) : null}
+
+          {(canObsView || canAttach) && (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-800">Adjuntos</h3>
+              <ul className="space-y-1 text-sm">
+                {attachments.map((a) => (
+                  <li key={a.id}>
+                    <a
+                      href={resolveBackendUrl(a.file_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary-700 hover:underline"
+                    >
+                      {a.file_name}
+                    </a>
+                    <span className="text-xs text-slate-400 ml-2">
+                      {new Date(a.created_at).toLocaleDateString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {canAttach ? (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void uploadFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 rounded-full border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Subir archivo
+                  </button>
+                </>
+              ) : null}
+            </section>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+export default SupervisorControlDetail;
+
