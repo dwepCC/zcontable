@@ -33,7 +33,7 @@ export type SidebarFlatLink = {
 export type SidebarModuleEntry = SidebarGroup | SidebarFlatLink;
 
 /** IDs estables para permisos / telemetría futura */
-export type OperationalModuleId = 'finance' | 'supervisors' | 'module3' | 'module4' | 'module5';
+export type OperationalModuleId = 'finance' | 'supervisors' | 'assistant' | 'module3' | 'module4' | 'module5';
 
 export type OperationalModuleConfig = {
   id: OperationalModuleId;
@@ -65,7 +65,7 @@ export const PLACEHOLDER_PAGE_COPY: Record<ComingSoonModuleSlug, { title: string
 
 /** Mapeo estable id operativo → slug URL (p. ej. permisos o analytics) */
 export const COMING_SOON_BY_OPERATIONAL_ID: Record<
-  Exclude<OperationalModuleId, 'finance' | 'supervisors'>,
+  Exclude<OperationalModuleId, 'finance' | 'supervisors' | 'assistant'>,
   { slug: ComingSoonModuleSlug }
 > = {
   module3: { slug: 'module-3' },
@@ -89,6 +89,7 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
           { to: '/tax-settlements', icon: 'fas fa-file-signature', label: 'Liquidaciones', permission: P.taxSettlementsList },
           { to: '/comprobantes', icon: 'fas fa-file-invoice', label: 'Comprobantes', permission: P.tukifacFiscalReceiptsList },
           { to: '/payments', icon: 'fas fa-wallet', label: 'Pagos', permission: P.paymentsView },
+          { to: '/finance/calendar', icon: 'fas fa-calendar-days', label: 'Calendario', permission: P.financeCalendarView },
         ],
       },
       {
@@ -147,6 +148,44 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
             icon: 'fas fa-bell',
             label: 'Notificaciones',
             permission: P.supervisorsNotificationsView,
+          },
+          {
+            to: '/finance/calendar',
+            icon: 'fas fa-calendar-days',
+            label: 'Calendario global',
+            permission: P.financeCalendarView,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'assistant',
+    label: 'Asistente',
+    icon: 'fas fa-user-pen',
+    entries: [
+      {
+        type: 'group',
+        label: 'Operación',
+        items: [
+          {
+            to: '/assistant',
+            icon: 'fas fa-th-large',
+            label: 'Mi panel',
+            exact: true,
+            permission: P.supervisorsControlsView,
+          },
+          {
+            to: '/assistant/controls',
+            icon: 'fas fa-tasks',
+            label: 'Mis tareas',
+            permission: P.supervisorsControlsView,
+          },
+          {
+            to: '/finance/calendar',
+            icon: 'fas fa-calendar-days',
+            label: 'Calendario',
+            permission: P.financeCalendarView,
           },
         ],
       },

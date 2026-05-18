@@ -43,17 +43,22 @@ type SupervisorAlert struct {
 }
 
 type SupervisorDashboard struct {
-	TotalActiveCompanies int64            `json:"total_active_companies"`
-	ControlsAlDia        int64            `json:"controls_al_dia"`
-	ControlsPendiente    int64            `json:"controls_pendiente"`
-	ControlsVencido      int64            `json:"controls_vencido"`
-	ControlsObservado    int64            `json:"controls_observado"`
-	DeclarationsObserved int64            `json:"declarations_observed"`
-	NPSPending           int64            `json:"nps_pending"`
-	PaymentsPending      int64            `json:"payments_pending"`
-	MonthlyCompliancePct float64          `json:"monthly_compliance_pct"`
-	ByStatus             map[string]int64 `json:"by_status"`
-	Alerts               []SupervisorAlert `json:"alerts"`
+	TotalActiveCompanies   int64                       `json:"total_active_companies"`
+	CompaniesAlDia         int64                       `json:"companies_al_dia"`
+	CompaniesPendiente     int64                       `json:"companies_pendiente"`
+	CompaniesVencido       int64                       `json:"companies_vencido"`
+	CompaniesWithoutControl int64                      `json:"companies_without_control"`
+	ControlsAlDia          int64                       `json:"controls_al_dia"`
+	ControlsPendiente      int64                       `json:"controls_pendiente"`
+	ControlsVencido        int64                       `json:"controls_vencido"`
+	ControlsObservado      int64                       `json:"controls_observado"`
+	DeclarationsObserved   int64                       `json:"declarations_observed"`
+	NPSPending             int64                       `json:"nps_pending"`
+	PaymentsPending        int64                       `json:"payments_pending"`
+	MonthlyCompliancePct   float64                     `json:"monthly_compliance_pct"`
+	ByStatus               map[string]int64            `json:"by_status"`
+	Alerts                 []SupervisorAlert           `json:"alerts"`
+	Productivity           []SupervisorProductivityRow `json:"productivity"`
 }
 
 type SupervisorBootstrapResult struct {
@@ -90,6 +95,33 @@ func (s *SupervisorService) CanAccessCompany(userID uint, companyID uint, studio
 	return s.access.CanAccessCompany(userID, companyID)
 }
 
+// ControlIDForDeclaration devuelve el control mensual de una declaración.
+func (s *SupervisorService) ControlIDForDeclaration(declarationID uint) (uint, error) {
+	var d models.SupervisorDeclaration
+	if err := database.DB.Select("monthly_control_id").First(&d, declarationID).Error; err != nil {
+		return 0, err
+	}
+	return d.MonthlyControlID, nil
+}
+
+// ControlIDForNPS devuelve el control mensual de un registro NPS.
+func (s *SupervisorService) ControlIDForNPS(npsID uint) (uint, error) {
+	var nps models.SupervisorNPS
+	if err := database.DB.Select("monthly_control_id").First(&nps, npsID).Error; err != nil {
+		return 0, err
+	}
+	return nps.MonthlyControlID, nil
+}
+
+// CompanyIDForControl devuelve la empresa asociada a un control mensual.
+func (s *SupervisorService) CompanyIDForControl(controlID uint) (uint, error) {
+	var ctrl models.SupervisorMonthlyControl
+	if err := database.DB.Select("company_id").First(&ctrl, controlID).Error; err != nil {
+		return 0, err
+	}
+	return ctrl.CompanyID, nil
+}
+
 func (s *SupervisorService) ensureControlAccess(controlID uint, userID uint, studio bool) (*models.SupervisorMonthlyControl, error) {
 	var ctrl models.SupervisorMonthlyControl
 	if err := database.DB.First(&ctrl, controlID).Error; err != nil {
@@ -117,6 +149,7 @@ func (s *SupervisorService) bootstrapControlChildren(tx *gorm.DB, controlID uint
 			MonthlyControlID: controlID,
 			DeclarationType:  t,
 			Status:           models.SupervisorDeclPendiente,
+			Priority:         models.SupervisorPriorityMedia,
 		}
 		if err := tx.Create(&d).Error; err != nil {
 			return err
@@ -255,6 +288,27 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	countStatus(models.SupervisorControlVencido, &out.ControlsVencido)
 	countStatus(models.SupervisorControlObservado, &out.ControlsObservado)
 
+	countDistinctCompanies := func(status string, dest *int64) {
+		q := s.dashboardControlsQuery(p)
+		if status != "" {
+			q = q.Where("general_status = ?", status)
+		}
+		_ = q.Select("COUNT(DISTINCT company_id)").Scan(dest).Error
+	}
+	countDistinctCompanies(models.SupervisorControlAlDia, &out.CompaniesAlDia)
+	var companiesCerrado int64
+	countDistinctCompanies(models.SupervisorControlCerrado, &companiesCerrado)
+	out.CompaniesAlDia += companiesCerrado
+	countDistinctCompanies(models.SupervisorControlPendiente, &out.CompaniesPendiente)
+	countDistinctCompanies(models.SupervisorControlVencido, &out.CompaniesVencido)
+
+	subCtrl := database.DB.Model(&models.SupervisorMonthlyControl{}).Select("company_id").Where("period_ym = ?", p.PeriodYM)
+	subCtrl = s.applyCompanyScope(subCtrl, p.AllowedCompanyIDs)
+	if p.CompanyID > 0 {
+		subCtrl = subCtrl.Where("company_id = ?", p.CompanyID)
+	}
+	_ = qCompanies.Where("id NOT IN (?)", subCtrl).Count(&out.CompaniesWithoutControl).Error
+
 	var controlsCerrado int64
 	countStatus(models.SupervisorControlCerrado, &controlsCerrado)
 	out.ByStatus[models.SupervisorControlCerrado] = controlsCerrado
@@ -295,6 +349,12 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	out.ByStatus[models.SupervisorControlVencido] = out.ControlsVencido
 	out.ByStatus[models.SupervisorControlObservado] = out.ControlsObservado
 	s.buildDashboardAlerts(p.PeriodYM, p.AllowedCompanyIDs, out)
+	if prod, err := s.ReportProductivity(p.PeriodYM, p.AllowedCompanyIDs); err == nil {
+		out.Productivity = prod
+	}
+	if out.Productivity == nil {
+		out.Productivity = []SupervisorProductivityRow{}
+	}
 	return out, nil
 }
 
@@ -658,43 +718,114 @@ func (s *SupervisorService) ListDeclarations(controlID uint) ([]models.Superviso
 	return rows, err
 }
 
-func (s *SupervisorService) UpdateDeclaration(id uint, status string, notes string, responsibleID, approverID *uint, userID uint) (*models.SupervisorDeclaration, error) {
+type SupervisorDeclarationInput struct {
+	Status            string
+	Notes             string
+	ResponsibleUserID *uint
+	ApproverUserID    *uint
+	ProgressPct       *int
+	Priority          string
+	DueDate           *time.Time
+}
+
+func declarationProgressFromStatus(status string) int {
+	switch status {
+	case models.SupervisorDeclPendiente:
+		return 0
+	case models.SupervisorDeclEnElaboracion:
+		return 35
+	case models.SupervisorDeclEnRevision:
+		return 65
+	case models.SupervisorDeclObservado:
+		return 40
+	case models.SupervisorDeclAprobado:
+		return 85
+	case models.SupervisorDeclPresentado, models.SupervisorDeclCerrado:
+		return 100
+	default:
+		return 0
+	}
+}
+
+func (s *SupervisorService) UpdateDeclaration(id uint, in SupervisorDeclarationInput, userID uint) (*models.SupervisorDeclaration, error) {
 	var d models.SupervisorDeclaration
 	if err := database.DB.First(&d, id).Error; err != nil {
 		return nil, err
 	}
 	oldStatus := d.Status
-	if status != "" {
-		d.Status = status
+	if in.Status != "" {
+		d.Status = in.Status
+		if in.ProgressPct == nil {
+			d.ProgressPct = declarationProgressFromStatus(in.Status)
+		}
 	}
-	d.Notes = strings.TrimSpace(notes)
-	if responsibleID != nil {
-		d.ResponsibleUserID = responsibleID
+	if in.Notes != "" {
+		d.Notes = strings.TrimSpace(in.Notes)
 	}
-	if approverID != nil {
-		d.ApproverUserID = approverID
+	if in.ResponsibleUserID != nil {
+		if *in.ResponsibleUserID == 0 {
+			d.ResponsibleUserID = nil
+		} else {
+			d.ResponsibleUserID = in.ResponsibleUserID
+		}
+	}
+	if in.ApproverUserID != nil {
+		if *in.ApproverUserID == 0 {
+			d.ApproverUserID = nil
+		} else {
+			d.ApproverUserID = in.ApproverUserID
+		}
+	}
+	if in.ProgressPct != nil {
+		pct := *in.ProgressPct
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		d.ProgressPct = pct
+	}
+	if in.Priority != "" {
+		d.Priority = in.Priority
+	}
+	if in.DueDate != nil {
+		d.DueDate = in.DueDate
 	}
 	if err := database.DB.Save(&d).Error; err != nil {
 		return nil, err
 	}
-	if userID > 0 && status != "" && status != oldStatus {
-		s.LogChange("declaration", id, "status", oldStatus, status, userID)
+	if userID > 0 && in.Status != "" && in.Status != oldStatus {
+		s.LogChange("declaration", id, "status", oldStatus, in.Status, userID)
+	}
+	if userID > 0 && in.ProgressPct != nil {
+		s.LogChange("declaration", id, "progress_pct", fmt.Sprintf("%d", declarationProgressFromStatus(oldStatus)), fmt.Sprintf("%d", d.ProgressPct), userID)
 	}
 	return &d, nil
 }
 
 func (s *SupervisorService) ApproveDeclaration(id uint, approverID uint) (*models.SupervisorDeclaration, error) {
-	return s.UpdateDeclaration(id, models.SupervisorDeclAprobado, "", nil, &approverID, approverID)
+	pct := 85
+	return s.UpdateDeclaration(id, SupervisorDeclarationInput{
+		Status: models.SupervisorDeclAprobado, ApproverUserID: &approverID, ProgressPct: &pct,
+	}, approverID)
 }
 
 func (s *SupervisorService) ObserveDeclaration(id uint, approverID uint, notes string) (*models.SupervisorDeclaration, error) {
-	d, err := s.UpdateDeclaration(id, models.SupervisorDeclObservado, notes, nil, &approverID, approverID)
+	pct := 40
+	d, err := s.UpdateDeclaration(id, SupervisorDeclarationInput{
+		Status: models.SupervisorDeclObservado, Notes: notes, ApproverUserID: &approverID, ProgressPct: &pct,
+	}, approverID)
 	if err != nil {
 		return nil, err
 	}
 	_ = database.DB.Model(&models.SupervisorMonthlyControl{}).
 		Where("id = ?", d.MonthlyControlID).
 		Update("general_status", models.SupervisorControlObservado).Error
+	if strings.TrimSpace(notes) != "" {
+		did := id
+		_, _ = s.CreateObservation(d.MonthlyControlID, did, approverID, notes)
+	}
 	return d, nil
 }
 
@@ -776,6 +907,28 @@ func (s *SupervisorService) ApproveLiquidation(controlID uint, approverID uint) 
 	return liq, nil
 }
 
+func (s *SupervisorService) ObserveLiquidation(controlID uint, approverID uint, notes string) (*models.SupervisorTaxLiquidation, error) {
+	liq, err := s.GetLiquidationByControl(controlID)
+	if err != nil {
+		return nil, err
+	}
+	liq.ValidationStatus = models.SupervisorLiqObservada
+	liq.ApproverUserID = &approverID
+	if notes != "" {
+		liq.Notes = strings.TrimSpace(notes)
+	}
+	if err := database.DB.Save(liq).Error; err != nil {
+		return nil, err
+	}
+	_ = database.DB.Model(&models.SupervisorMonthlyControl{}).
+		Where("id = ?", controlID).
+		Update("general_status", models.SupervisorControlObservado).Error
+	if strings.TrimSpace(notes) != "" {
+		_, _ = s.CreateObservation(controlID, 0, approverID, notes)
+	}
+	return liq, nil
+}
+
 // ---- NPS ----
 
 func (s *SupervisorService) ListNPS(controlID uint) ([]models.SupervisorNPS, error) {
@@ -853,7 +1006,84 @@ func (s *SupervisorService) GenerateNPS(id uint) (*models.SupervisorNPS, error) 
 	if err := database.DB.Save(&nps).Error; err != nil {
 		return nil, err
 	}
+	var ctrl models.SupervisorMonthlyControl
+	if err := database.DB.First(&ctrl, nps.MonthlyControlID).Error; err == nil {
+		uid := notifyUserIDForControl(&ctrl)
+		cid := ctrl.ID
+		s.notifyIfNew(uid, "nps_ready", "NPS generado",
+			fmt.Sprintf("Código %s (%s) listo para gestión de pago", nps.CodigoNPS, strings.TrimSpace(nps.Tributo)),
+			ctrl.PeriodYM, &cid)
+	}
 	return &nps, nil
+}
+
+// SyncOverdueNPS marca como vencidos los NPS con fecha límite pasada y aún no pagados.
+func (s *SupervisorService) SyncOverdueNPS(periodYM string) (int64, error) {
+	if !validPeriodYM(periodYM) {
+		return 0, nil
+	}
+	today := time.Now()
+	controlIDs := database.DB.Model(&models.SupervisorMonthlyControl{}).
+		Select("id").Where("period_ym = ?", periodYM)
+	res := database.DB.Model(&models.SupervisorNPS{}).
+		Where("monthly_control_id IN (?)", controlIDs).
+		Where("payment_due_date IS NOT NULL AND payment_due_date < ?", today).
+		Where("payment_status IN ?", []string{
+			models.SupervisorNPSPendientePago,
+			models.SupervisorNPSEnviadoCliente,
+			models.SupervisorNPSGenerado,
+		}).
+		Update("payment_status", models.SupervisorNPSVencido)
+	return res.RowsAffected, res.Error
+}
+
+// EnsureMonthlyPeriodOpen crea el período del mes si no existe (automatización).
+func (s *SupervisorService) EnsureMonthlyPeriodOpen(periodYM string) (*models.SupervisorPeriod, error) {
+	periodYM = strings.TrimSpace(periodYM)
+	if !validPeriodYM(periodYM) {
+		return nil, errors.New("período inválido")
+	}
+	var p models.SupervisorPeriod
+	err := database.DB.Where("period_ym = ?", periodYM).First(&p).Error
+	if err == nil {
+		return &p, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return s.CreatePeriod(periodYM, "Período abierto automáticamente")
+	}
+	return nil, err
+}
+
+// RunMonthlyAutomations asegura período abierto, controles faltantes, vencidos y notificaciones.
+func (s *SupervisorService) RunMonthlyAutomations(periodYM string) error {
+	if !validPeriodYM(periodYM) {
+		return nil
+	}
+	p, err := s.EnsureMonthlyPeriodOpen(periodYM)
+	if err != nil {
+		return err
+	}
+	if p.Status == models.SupervisorPeriodOpen {
+		if _, err := s.BootstrapControlsForPeriod(periodYM, nil); err != nil {
+			return err
+		}
+	}
+	_, _ = s.SyncOverdueControls(periodYM, nil)
+	_, _ = s.SyncOverdueNPS(periodYM)
+	return s.RunAutomations(periodYM)
+}
+
+func notifyUserIDForControl(ctrl *models.SupervisorMonthlyControl) uint {
+	if ctrl == nil {
+		return 0
+	}
+	if ctrl.SupervisorUserID != nil && *ctrl.SupervisorUserID > 0 {
+		return *ctrl.SupervisorUserID
+	}
+	if ctrl.ResponsibleUserID != nil && *ctrl.ResponsibleUserID > 0 {
+		return *ctrl.ResponsibleUserID
+	}
+	return 0
 }
 
 func (s *SupervisorService) DeleteNPS(id uint) error {
@@ -868,9 +1098,11 @@ type SupervisorReportRow struct {
 	PeriodYM         string  `json:"period_ym"`
 	GeneralStatus    string  `json:"general_status"`
 	RiskLevel        string  `json:"risk_level"`
+	CompliancePct    float64 `json:"compliance_pct"`
 	TotalPagar       float64 `json:"total_pagar"`
 	NPSPending       int64   `json:"nps_pending"`
 	PaymentsPending  int64   `json:"payments_pending"`
+	ControlID        uint    `json:"control_id,omitempty"`
 }
 
 type SupervisorReportListParams struct {
@@ -884,10 +1116,13 @@ type SupervisorReportListParams struct {
 func (s *SupervisorService) reportMonthlyQuery(p SupervisorReportListParams) *gorm.DB {
 	npsPendingSQL := `(SELECT COUNT(*) FROM supervisor_nps sn WHERE sn.monthly_control_id = supervisor_monthly_controls.id AND sn.deleted_at IS NULL AND sn.payment_status IN ('pendiente_generar','generado','enviado_cliente'))`
 	paymentsPendingSQL := `(SELECT COUNT(*) FROM supervisor_nps sn WHERE sn.monthly_control_id = supervisor_monthly_controls.id AND sn.deleted_at IS NULL AND sn.payment_status IN ('pendiente_pago','vencido'))`
+	declAvgSQL := `(SELECT COALESCE(AVG(sd.progress_pct), 0) FROM supervisor_declarations sd WHERE sd.monthly_control_id = supervisor_monthly_controls.id AND sd.deleted_at IS NULL)`
 	q := database.DB.Table("supervisor_monthly_controls").
 		Select(`companies.business_name AS company_name, companies.ruc AS company_ruc,
 			supervisor_monthly_controls.period_ym, supervisor_monthly_controls.general_status,
 			supervisor_monthly_controls.risk_level,
+			supervisor_monthly_controls.id AS control_id,
+			`+declAvgSQL+` AS compliance_pct,
 			COALESCE(supervisor_tax_liquidations.total_pagar, 0) AS total_pagar,
 			`+npsPendingSQL+` AS nps_pending,
 			`+paymentsPendingSQL+` AS payments_pending`).
@@ -924,7 +1159,36 @@ func (s *SupervisorService) ReportMonthly(p SupervisorReportListParams) ([]Super
 	err := base.Order("companies.business_name ASC").
 		Limit(p.PerPage).Offset((p.Page - 1) * p.PerPage).
 		Scan(&rows).Error
-	return rows, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	applyComplianceToReportRows(rows)
+	return rows, total, nil
+}
+
+func applyComplianceToReportRows(rows []SupervisorReportRow) {
+	for i := range rows {
+		if rows[i].CompliancePct <= 0 {
+			rows[i].CompliancePct = compliancePctFromControlStatus(rows[i].GeneralStatus)
+		} else {
+			rows[i].CompliancePct = math.Round(rows[i].CompliancePct*10) / 10
+		}
+	}
+}
+
+func compliancePctFromControlStatus(st string) float64 {
+	switch st {
+	case models.SupervisorControlAlDia, models.SupervisorControlCerrado:
+		return 100
+	case models.SupervisorControlPendiente:
+		return 55
+	case models.SupervisorControlObservado:
+		return 35
+	case models.SupervisorControlVencido:
+		return 15
+	default:
+		return 0
+	}
 }
 
 func (s *SupervisorService) ReportList(kind string, p SupervisorReportListParams) ([]SupervisorReportRow, int64, error) {
@@ -978,7 +1242,11 @@ func (s *SupervisorService) ReportList(kind string, p SupervisorReportListParams
 	}
 	var rows []SupervisorReportRow
 	err := base.Order("companies.business_name ASC").Limit(p.PerPage).Offset((p.Page - 1) * p.PerPage).Scan(&rows).Error
-	return rows, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	applyComplianceToReportRows(rows)
+	return rows, total, nil
 }
 
 func (s *SupervisorService) ReportProductivity(periodYM string, allowed []uint) ([]SupervisorProductivityRow, error) {

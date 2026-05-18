@@ -22,6 +22,9 @@ const SupervisorPeriods = () => {
   const [bootstrapOnCreate, setBootstrapOnCreate] = useState(true);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [bootstrapLoadingId, setBootstrapLoadingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editNotes, setEditNotes] = useState('');
+  const [savingNotesId, setSavingNotesId] = useState<number | null>(null);
   const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
@@ -91,6 +94,31 @@ const SupervisorPeriods = () => {
     }
   };
 
+  const startEditNotes = (p: SupervisorPeriod) => {
+    setEditingId(p.id);
+    setEditNotes(p.notes ?? '');
+  };
+
+  const cancelEditNotes = () => {
+    setEditingId(null);
+    setEditNotes('');
+  };
+
+  const saveNotes = async (id: number) => {
+    try {
+      setSavingNotesId(id);
+      await supervisorsService.updatePeriod(id, editNotes);
+      setEditingId(null);
+      setEditNotes('');
+      setMsg('Notas actualizadas.');
+      void load();
+    } catch {
+      setMsg('No se pudieron guardar las notas');
+    } finally {
+      setSavingNotesId(null);
+    }
+  };
+
   if (!canView) {
     return <p className="p-6 text-center text-slate-600">Sin permiso para ver períodos.</p>;
   }
@@ -103,7 +131,9 @@ const SupervisorPeriods = () => {
       </div>
 
       {msg ? (
-        <p className={`text-sm ${msg.startsWith('Período') || msg.includes('generados') ? 'text-emerald-700' : 'text-red-600'}`}>
+        <p
+          className={`text-sm ${msg.startsWith('Período') || msg.includes('generados') || msg.includes('Notas') ? 'text-emerald-700' : 'text-red-600'}`}
+        >
           {msg}
         </p>
       ) : null}
@@ -165,8 +195,29 @@ const SupervisorPeriods = () => {
                 <tr key={p.id}>
                   <td className="px-4 py-3 font-mono">{p.period_ym}</td>
                   <td className="px-4 py-3 capitalize">{p.status}</td>
-                  <td className="px-4 py-3 text-slate-600">{p.notes || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 min-w-[200px]">
+                    {editingId === p.id ? (
+                      <NotesEditInline
+                        value={editNotes}
+                        onChange={setEditNotes}
+                        onSave={() => void saveNotes(p.id)}
+                        onCancel={cancelEditNotes}
+                        saving={savingNotesId === p.id}
+                      />
+                    ) : (
+                      <span>{p.notes || '—'}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right space-x-2">
+                    {canUpdate && p.status === 'abierto' && editingId !== p.id ? (
+                      <button
+                        type="button"
+                        onClick={() => startEditNotes(p)}
+                        className="text-slate-600 text-xs font-medium"
+                      >
+                        Editar notas
+                      </button>
+                    ) : null}
                     {canBootstrap && p.status === 'abierto' ? (
                       <button
                         type="button"
@@ -194,9 +245,6 @@ const SupervisorPeriods = () => {
                       >
                         Eliminar
                       </button>
-                    ) : null}
-                    {canUpdate && p.status === 'abierto' ? (
-                      <span className="text-slate-400 text-xs">Editable en API</span>
                     ) : null}
                   </td>
                 </tr>
@@ -226,5 +274,43 @@ const SupervisorPeriods = () => {
     </div>
   );
 };
+
+function NotesEditInline({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={2}
+        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onSave}
+          className="text-xs text-primary-700 font-medium disabled:opacity-50"
+        >
+          {saving ? 'Guardando…' : 'Guardar'}
+        </button>
+        <button type="button" onClick={onCancel} className="text-xs text-slate-500">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default SupervisorPeriods;

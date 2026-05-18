@@ -8,7 +8,12 @@ import CompanySearchInput from '../../components/CompanySearchInput';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { controlStatusLabel, currentPeriodYM, riskLevelLabel } from '../../utils/supervisorLabels';
 
-const SupervisorControls = () => {
+type SupervisorControlsProps = {
+  /** Ruta base para enlazar al detalle (p. ej. /assistant/controls). */
+  detailBasePath?: string;
+};
+
+const SupervisorControls = ({ detailBasePath = '/supervisors/controls' }: SupervisorControlsProps) => {
   const canView = useMemo(() => auth.hasPermission(P.supervisorsControlsView), []);
   const canCreate = useMemo(() => auth.hasPermission(P.supervisorsControlsCreate), []);
   const canDelete = useMemo(() => auth.hasPermission(P.supervisorsControlsDelete), []);
@@ -186,13 +191,16 @@ const SupervisorControls = () => {
                 <th className="text-left px-4 py-3">Período</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Riesgo</th>
+                <th className="text-left px-4 py-3">Responsable</th>
+                <th className="text-left px-4 py-3">Supervisor</th>
+                <th className="text-left px-4 py-3">Vencimiento</th>
                 <th className="text-right px-4 py-3">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {list.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
                     No hay controles para este período o filtros. Cree un período y genere controles, o agregue uno manualmente.
                   </td>
                 </tr>
@@ -206,8 +214,17 @@ const SupervisorControls = () => {
                   <td className="px-4 py-3 font-mono text-xs">{row.period_ym}</td>
                   <td className="px-4 py-3">{controlStatusLabel(row.general_status)}</td>
                   <td className="px-4 py-3">{riskLevelLabel(row.risk_level)}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {row.responsible?.full_name || row.responsible?.username || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {row.supervisor?.full_name || row.supervisor?.username || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600 font-mono text-xs">
+                    {row.due_date ? new Date(row.due_date).toLocaleDateString() : '—'}
+                  </td>
                   <td className="px-4 py-3 text-right space-x-2">
-                    <Link to={`/supervisors/controls/${row.id}`} className="text-primary-700 text-xs font-medium">
+                    <Link to={`${detailBasePath}/${row.id}`} className="text-primary-700 text-xs font-medium">
                       Detalle
                     </Link>
                     {canDelete ? (

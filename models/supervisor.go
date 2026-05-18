@@ -22,10 +22,18 @@ const (
 )
 
 const (
-	SupervisorRiskBajo   = "bajo"
-	SupervisorRiskMedio  = "medio"
-	SupervisorRiskAlto   = "alto"
+	SupervisorRiskBajo    = "bajo"
+	SupervisorRiskMedio   = "medio"
+	SupervisorRiskAlto    = "alto"
 	SupervisorRiskCritico = "critico"
+)
+
+// Prioridad de tarea/declaración (equivalente tareas_contables).
+const (
+	SupervisorPriorityBaja    = "baja"
+	SupervisorPriorityMedia   = "media"
+	SupervisorPriorityAlta    = "alta"
+	SupervisorPriorityCritica = "critica"
 )
 
 // Declaraciones tributarias.
@@ -108,6 +116,9 @@ type SupervisorDeclaration struct {
 	MonthlyControlID  uint           `gorm:"not null;index:idx_sup_decl_ctrl_type,unique" json:"monthly_control_id"`
 	DeclarationType   string         `gorm:"size:30;not null;index:idx_sup_decl_ctrl_type,unique" json:"declaration_type"`
 	Status            string         `gorm:"size:30;not null;default:'pendiente'" json:"status"`
+	ProgressPct       int            `gorm:"not null;default:0" json:"progress_pct"`
+	Priority          string         `gorm:"size:20;not null;default:'media'" json:"priority"`
+	DueDate           *time.Time     `gorm:"type:date" json:"due_date,omitempty"`
 	ResponsibleUserID *uint          `gorm:"index" json:"responsible_user_id,omitempty"`
 	ApproverUserID    *uint          `gorm:"index" json:"approver_user_id,omitempty"`
 	Notes             string         `gorm:"type:text" json:"notes,omitempty"`

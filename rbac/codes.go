@@ -139,6 +139,9 @@ const (
 	SupervisorsAttachmentsUpload  = "supervisors.attachments_upload"
 	SupervisorsNotificationsView  = "supervisors.notifications_view"
 	SupervisorsNPSRegisterPayment = "supervisors.nps_register_payment"
+
+	FinanceCalendarView   = "finance.calendar_view"
+	FinanceCalendarManage = "finance.calendar_manage"
 )
 
 // AllPermissionCodes lista completa para seed y tests.
@@ -170,4 +173,5 @@ var AllPermissionCodes = []string{
 	SupervisorsReportsView,
 	SupervisorsObservationsView, SupervisorsObservationsCreate, SupervisorsHistoryView,
 	SupervisorsAttachmentsUpload, SupervisorsNotificationsView, SupervisorsNPSRegisterPayment,
+	FinanceCalendarView, FinanceCalendarManage,
 }

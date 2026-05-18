@@ -32,6 +32,16 @@ export function declarationStatusLabel(s: string): string {
   return m[s] ?? s;
 }
 
+export function priorityLabel(p: string): string {
+  const m: Record<string, string> = {
+    baja: 'Baja',
+    media: 'Media',
+    alta: 'Alta',
+    critica: 'Crítica',
+  };
+  return m[p] ?? p;
+}
+
 export function riskLevelLabel(r: string): string {
   const m: Record<string, string> = {
     bajo: 'Bajo',

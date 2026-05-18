@@ -34,6 +34,9 @@ func (ctrl *SupervisorController) allowedCompanyIDs(c fiber.Ctx) ([]uint, error)
 }
 
 func (ctrl *SupervisorController) ensureControlCompany(c fiber.Ctx, controlID uint) error {
+	if controlID == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "control requerido")
+	}
 	ctrlRow, err := ctrl.svc.GetControl(controlID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Control no encontrado")
@@ -53,6 +56,45 @@ func (ctrl *SupervisorController) ensureControlCompany(c fiber.Ctx, controlID ui
 		return fiber.NewError(fiber.StatusForbidden, "Sin acceso a esta empresa")
 	}
 	return nil
+}
+
+func (ctrl *SupervisorController) ensureDeclarationCompany(c fiber.Ctx, declarationID uint) error {
+	controlID, err := ctrl.svc.ControlIDForDeclaration(declarationID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Declaración no encontrada")
+	}
+	return ctrl.ensureControlCompany(c, controlID)
+}
+
+func (ctrl *SupervisorController) ensureNPSCompany(c fiber.Ctx, npsID uint) error {
+	controlID, err := ctrl.svc.ControlIDForNPS(npsID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "NPS no encontrado")
+	}
+	return ctrl.ensureControlCompany(c, controlID)
+}
+
+func (ctrl *SupervisorController) ensureHistoryEntityAccess(c fiber.Ctx, entityType string, entityID uint) error {
+	switch entityType {
+	case "monthly_control", "control":
+		return ctrl.ensureControlCompany(c, entityID)
+	case "declaration":
+		return ctrl.ensureDeclarationCompany(c, entityID)
+	case "nps":
+		return ctrl.ensureNPSCompany(c, entityID)
+	default:
+		return fiber.NewError(fiber.StatusBadRequest, "entity_type no soportado")
+	}
+}
+
+func (ctrl *SupervisorController) ensureObservationScope(c fiber.Ctx, controlID, declarationID uint) error {
+	if controlID > 0 {
+		return ctrl.ensureControlCompany(c, controlID)
+	}
+	if declarationID > 0 {
+		return ctrl.ensureDeclarationCompany(c, declarationID)
+	}
+	return fiber.NewError(fiber.StatusBadRequest, "control_id o declaration_id requerido")
 }
 
 func parseDatePtr(raw string) (*time.Time, error) {
@@ -430,16 +472,37 @@ func (ctrl *SupervisorController) UpdateDeclarationAPI(c fiber.Ctx) error {
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
+	if err := ctrl.ensureDeclarationCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	var body struct {
-		Status            string `json:"status"`
-		Notes             string `json:"notes"`
-		ResponsibleUserID *uint  `json:"responsible_user_id"`
+		Status            string  `json:"status"`
+		Notes             string  `json:"notes"`
+		ResponsibleUserID *uint   `json:"responsible_user_id"`
+		ApproverUserID    *uint   `json:"approver_user_id"`
+		ProgressPct       *int    `json:"progress_pct"`
+		Priority          string  `json:"priority"`
+		DueDate           *string `json:"due_date"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON inválido"})
 	}
+	in := services.SupervisorDeclarationInput{
+		Status: body.Status, Notes: body.Notes,
+		ResponsibleUserID: body.ResponsibleUserID, ApproverUserID: body.ApproverUserID,
+		ProgressPct: body.ProgressPct, Priority: body.Priority,
+	}
+	if body.DueDate != nil {
+		t, e := parseDatePtr(*body.DueDate)
+		if e != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "fecha inválida"})
+		}
+		in.DueDate = t
+	}
 	uid, _ := getUserID(c)
-	row, err := ctrl.svc.UpdateDeclaration(uint(id), body.Status, body.Notes, body.ResponsibleUserID, nil, uid)
+	row, err := ctrl.svc.UpdateDeclaration(uint(id), in, uid)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -450,6 +513,11 @@ func (ctrl *SupervisorController) ApproveDeclarationAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	if err := ctrl.ensureDeclarationCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	uid, err := getUserID(c)
 	if err != nil {
@@ -466,6 +534,11 @@ func (ctrl *SupervisorController) ObserveDeclarationAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	if err := ctrl.ensureDeclarationCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	var body struct {
 		Notes string `json:"notes"`
@@ -486,6 +559,11 @@ func (ctrl *SupervisorController) DeleteDeclarationAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	if err := ctrl.ensureDeclarationCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	if err := ctrl.svc.DeleteDeclaration(uint(id)); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -566,6 +644,31 @@ func (ctrl *SupervisorController) ApproveLiquidationAPI(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": row})
 }
 
+func (ctrl *SupervisorController) ObserveLiquidationAPI(c fiber.Ctx) error {
+	cid, err := strconv.ParseUint(c.Params("controlId"), 10, 32)
+	if err != nil || cid == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "controlId inválido"})
+	}
+	if err := ctrl.ensureControlCompany(c, uint(cid)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
+	var body struct {
+		Notes string `json:"notes"`
+	}
+	_ = c.Bind().Body(&body)
+	uid, err := getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
+	}
+	row, err := ctrl.svc.ObserveLiquidation(uint(cid), uid, body.Notes)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": row})
+}
+
 // NPS
 func (ctrl *SupervisorController) ListNPSAPI(c fiber.Ctx) error {
 	cid, err := strconv.ParseUint(c.Params("controlId"), 10, 32)
@@ -629,6 +732,11 @@ func (ctrl *SupervisorController) UpdateNPSAPI(c fiber.Ctx) error {
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
+	if err := ctrl.ensureNPSCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	var body struct {
 		Tributo        string  `json:"tributo"`
 		Importe        float64 `json:"importe"`
@@ -663,6 +771,11 @@ func (ctrl *SupervisorController) GenerateNPSAPI(c fiber.Ctx) error {
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
+	if err := ctrl.ensureNPSCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	row, err := ctrl.svc.GenerateNPS(uint(id))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -674,6 +787,11 @@ func (ctrl *SupervisorController) DeleteNPSAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	if err := ctrl.ensureNPSCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	if err := ctrl.svc.DeleteNPS(uint(id)); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -754,6 +872,11 @@ func (ctrl *SupervisorController) ListHistoryAPI(c fiber.Ctx) error {
 	if entityType == "" || err != nil || eid == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "entity_type y entity_id requeridos"})
 	}
+	if err := ctrl.ensureHistoryEntityAccess(c, entityType, uint(eid)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	rows, err := ctrl.svc.ListChangeHistory(entityType, uint(eid))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -764,6 +887,11 @@ func (ctrl *SupervisorController) ListHistoryAPI(c fiber.Ctx) error {
 func (ctrl *SupervisorController) ListObservationsAPI(c fiber.Ctx) error {
 	cid, _ := strconv.ParseUint(c.Query("control_id", "0"), 10, 32)
 	did, _ := strconv.ParseUint(c.Query("declaration_id", "0"), 10, 32)
+	if err := ctrl.ensureObservationScope(c, uint(cid), uint(did)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	rows, err := ctrl.svc.ListObservations(uint(cid), uint(did))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -780,6 +908,11 @@ func (ctrl *SupervisorController) CreateObservationAPI(c fiber.Ctx) error {
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON inválido"})
 	}
+	if err := ctrl.ensureObservationScope(c, body.MonthlyControlID, body.DeclarationID); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	uid, err := getUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
@@ -794,6 +927,11 @@ func (ctrl *SupervisorController) CreateObservationAPI(c fiber.Ctx) error {
 func (ctrl *SupervisorController) ListAttachmentsAPI(c fiber.Ctx) error {
 	cid, _ := strconv.ParseUint(c.Query("control_id", "0"), 10, 32)
 	did, _ := strconv.ParseUint(c.Query("declaration_id", "0"), 10, 32)
+	if err := ctrl.ensureObservationScope(c, uint(cid), uint(did)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+	}
 	rows, err := ctrl.svc.ListAttachments(uint(cid), uint(did))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -814,6 +952,11 @@ func (ctrl *SupervisorController) UploadAttachmentAPI(c fiber.Ctx) error {
 	did, _ := strconv.ParseUint(c.FormValue("declaration_id", "0"), 10, 32)
 	if cid == 0 && did == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "control_id o declaration_id requerido"})
+	}
+	if err := ctrl.ensureObservationScope(c, uint(cid), uint(did)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	if fh.Size > 10*1024*1024 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "archivo máximo 10 MB"})
@@ -870,6 +1013,11 @@ func (ctrl *SupervisorController) RegisterNPSPaymentAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	if err := ctrl.ensureNPSCompany(c, uint(id)); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
 	}
 	uid, err := getUserID(c)
 	if err != nil {

@@ -50,9 +50,14 @@ export interface SupervisorDeclaration {
   monthly_control_id: number;
   declaration_type: string;
   status: string;
+  progress_pct?: number;
+  priority?: string;
+  due_date?: string;
   responsible_user_id?: number;
   approver_user_id?: number;
   notes?: string;
+  responsible?: SupervisorUserRef;
+  approver?: SupervisorUserRef;
 }
 
 export interface SupervisorTaxLiquidation {
@@ -93,6 +98,10 @@ export interface SupervisorAlert {
 
 export interface SupervisorDashboardData {
   total_active_companies: number;
+  companies_al_dia: number;
+  companies_pendiente: number;
+  companies_vencido: number;
+  companies_without_control: number;
   controls_al_dia: number;
   controls_pendiente: number;
   controls_vencido: number;
@@ -103,6 +112,7 @@ export interface SupervisorDashboardData {
   monthly_compliance_pct: number;
   by_status: Record<string, number>;
   alerts?: SupervisorAlert[];
+  productivity?: SupervisorProductivityRow[];
 }
 
 export interface SupervisorBootstrapResult {
@@ -116,6 +126,7 @@ export interface SupervisorReportRow {
   period_ym: string;
   general_status: string;
   risk_level: string;
+  compliance_pct: number;
   total_pagar: number;
   nps_pending: number;
   payments_pending: number;
@@ -228,7 +239,18 @@ export const supervisorsService = {
     return res.data.data;
   },
 
-  async updateDeclaration(id: number, body: { status?: string; notes?: string }): Promise<SupervisorDeclaration> {
+  async updateDeclaration(
+    id: number,
+    body: {
+      status?: string;
+      notes?: string;
+      responsible_user_id?: number | null;
+      approver_user_id?: number | null;
+      progress_pct?: number;
+      priority?: string;
+      due_date?: string | null;
+    },
+  ): Promise<SupervisorDeclaration> {
     const res = await client.put<{ data: SupervisorDeclaration }>(`/supervisors/declarations/${id}`, body);
     return unwrap(res);
   },
@@ -274,6 +296,14 @@ export const supervisorsService = {
   async approveLiquidation(controlId: number): Promise<SupervisorTaxLiquidation> {
     const res = await client.post<{ data: SupervisorTaxLiquidation }>(
       `/supervisors/controls/${controlId}/liquidation/approve`,
+    );
+    return unwrap(res);
+  },
+
+  async observeLiquidation(controlId: number, notes: string): Promise<SupervisorTaxLiquidation> {
+    const res = await client.post<{ data: SupervisorTaxLiquidation }>(
+      `/supervisors/controls/${controlId}/liquidation/observe`,
+      { notes },
     );
     return unwrap(res);
   },
@@ -419,6 +449,7 @@ export interface SupervisorAttachment {
   id: number;
   file_name: string;
   file_url: string;
+  declaration_id?: number;
   created_at: string;
 }
 

@@ -87,6 +87,7 @@ const SupervisorReports = () => {
   const showSearch = kind !== 'productivity';
   const showNpsCountCol = kind === 'nps_pending' || kind === 'monthly';
   const showPaymentsCountCol = kind === 'payments_pending' || kind === 'monthly';
+  const showComplianceCol = kind !== 'productivity' && kind !== 'observations';
 
   useEffect(() => {
     setQuery(qApplied);
@@ -245,6 +246,7 @@ const SupervisorReports = () => {
           { header: 'RUC', key: 'ruc', width: 14 },
           { header: 'Estado', key: 'estado', width: 14 },
           { header: 'Riesgo', key: 'riesgo', width: 12 },
+          { header: 'Cumplimiento %', key: 'cumplimiento', width: 14 },
           { header: 'NPS pend.', key: 'nps', width: 10 },
           { header: 'Pagos pend.', key: 'pagos', width: 10 },
           { header: 'Total a pagar', key: 'total', width: 14 },
@@ -256,6 +258,7 @@ const SupervisorReports = () => {
             ruc: r.company_ruc,
             estado: controlStatusLabel(r.general_status),
             riesgo: riskLevelLabel(r.risk_level),
+            cumplimiento: r.compliance_pct ?? 0,
             nps: r.nps_pending ?? 0,
             pagos: r.payments_pending ?? 0,
             total: r.total_pagar,
@@ -321,6 +324,7 @@ const SupervisorReports = () => {
                   <Text style={pdfStyles.cell}>Empresa</Text>
                   <Text style={pdfStyles.cell}>RUC</Text>
                   <Text style={pdfStyles.cell}>Estado</Text>
+                  <Text style={pdfStyles.cell}>Cumpl. %</Text>
                   <Text style={pdfStyles.cell}>Total</Text>
                 </View>
                 {(exportRows as SupervisorReportRow[]).map((r, i) => (
@@ -328,6 +332,7 @@ const SupervisorReports = () => {
                     <Text style={pdfStyles.cell}>{r.company_name}</Text>
                     <Text style={pdfStyles.cell}>{r.company_ruc}</Text>
                     <Text style={pdfStyles.cell}>{controlStatusLabel(r.general_status)}</Text>
+                    <Text style={pdfStyles.cell}>{r.compliance_pct ?? 0}%</Text>
                     <Text style={pdfStyles.cell}>S/ {r.total_pagar.toFixed(2)}</Text>
                   </View>
                 ))}
@@ -510,6 +515,9 @@ const SupervisorReports = () => {
                     <th className="text-left px-4 py-3">RUC</th>
                     <th className="text-left px-4 py-3">Estado</th>
                     <th className="text-left px-4 py-3">Riesgo</th>
+                    {showComplianceCol ? (
+                      <th className="text-right px-4 py-3">Cumplimiento %</th>
+                    ) : null}
                     {showNpsCountCol ? (
                       <th className="text-right px-4 py-3">NPS pend.</th>
                     ) : null}
@@ -523,7 +531,12 @@ const SupervisorReports = () => {
                   {rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={5 + (showNpsCountCol ? 1 : 0) + (showPaymentsCountCol ? 1 : 0)}
+                        colSpan={
+                          5 +
+                          (showComplianceCol ? 1 : 0) +
+                          (showNpsCountCol ? 1 : 0) +
+                          (showPaymentsCountCol ? 1 : 0)
+                        }
                         className="px-4 py-8 text-center text-slate-500"
                       >
                         No hay registros para este período o búsqueda.
@@ -536,6 +549,9 @@ const SupervisorReports = () => {
                         <td className="px-4 py-3 font-mono text-xs">{r.company_ruc}</td>
                         <td className="px-4 py-3">{controlStatusLabel(r.general_status)}</td>
                         <td className="px-4 py-3">{riskLevelLabel(r.risk_level)}</td>
+                        {showComplianceCol ? (
+                          <td className="px-4 py-3 text-right">{r.compliance_pct ?? 0}%</td>
+                        ) : null}
                         {showNpsCountCol ? (
                           <td className="px-4 py-3 text-right text-amber-700">{r.nps_pending ?? 0}</td>
                         ) : null}

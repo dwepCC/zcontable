@@ -181,6 +181,23 @@ func (s *SupervisorService) createNotification(userID uint, kind, title, message
 	_ = database.DB.Create(&n).Error
 }
 
+// notifyIfNew evita duplicar alertas no leídas del mismo tipo, período y control.
+func (s *SupervisorService) notifyIfNew(userID uint, kind, title, message, periodYM string, controlID *uint) {
+	if userID == 0 {
+		return
+	}
+	q := database.DB.Model(&models.SupervisorNotification{}).
+		Where("user_id = ? AND kind = ? AND period_ym = ? AND read_at IS NULL", userID, kind, periodYM)
+	if controlID != nil && *controlID > 0 {
+		q = q.Where("monthly_control_id = ?", *controlID)
+	}
+	var existing int64
+	if err := q.Count(&existing).Error; err != nil || existing > 0 {
+		return
+	}
+	s.createNotification(userID, kind, title, message, periodYM, controlID)
+}
+
 func (s *SupervisorService) validatePeriodCloseReady(periodYM string) error {
 	var controls []models.SupervisorMonthlyControl
 	if err := database.DB.Where("period_ym = ?", periodYM).Find(&controls).Error; err != nil {
@@ -262,42 +279,36 @@ type SupervisorObservationReportRow struct {
 	MonthlyControlID uint      `json:"monthly_control_id,omitempty"`
 }
 
-// RunAutomations sincroniza vencidos y genera notificaciones para supervisores.
+// RunAutomations sincroniza vencidos y genera notificaciones para supervisores (sin duplicar no leídas).
 func (s *SupervisorService) RunAutomations(periodYM string) error {
 	if !validPeriodYM(periodYM) {
 		return nil
 	}
 	_, _ = s.SyncOverdueControls(periodYM, nil)
+	_, _ = s.SyncOverdueNPS(periodYM)
 
 	var controls []models.SupervisorMonthlyControl
-	q := database.DB.Where("period_ym = ?", periodYM).Preload("Supervisor")
-	if err := q.Find(&controls).Error; err != nil {
+	if err := database.DB.Where("period_ym = ?", periodYM).Find(&controls).Error; err != nil {
 		return err
 	}
 	now := time.Now()
 	warnBefore := now.AddDate(0, 0, 3)
 	for _, c := range controls {
-		uid := uint(0)
-		if c.SupervisorUserID != nil {
-			uid = *c.SupervisorUserID
-		}
-		if uid == 0 && c.ResponsibleUserID != nil {
-			uid = *c.ResponsibleUserID
-		}
+		uid := notifyUserIDForControl(&c)
 		cid := c.ID
 		if c.GeneralStatus == models.SupervisorControlVencido {
-			s.createNotification(uid, "overdue", "Control vencido",
+			s.notifyIfNew(uid, "overdue", "Control vencido",
 				fmt.Sprintf("Control empresa %d período %s vencido", c.CompanyID, periodYM), periodYM, &cid)
 		}
-		if c.DueDate != nil && c.DueDate.Before(warnBefore) && c.DueDate.After(now) {
-			s.createNotification(uid, "due_soon", "Vencimiento próximo",
+		if c.DueDate != nil && !c.DueDate.Before(now) && !c.DueDate.After(warnBefore) {
+			s.notifyIfNew(uid, "due_soon", "Vencimiento próximo",
 				fmt.Sprintf("Vence el %s", c.DueDate.Format("2006-01-02")), periodYM, &cid)
 		}
 		var obs int64
 		_ = database.DB.Model(&models.SupervisorDeclaration{}).
 			Where("monthly_control_id = ? AND status = ?", c.ID, models.SupervisorDeclObservado).Count(&obs).Error
 		if obs > 0 {
-			s.createNotification(uid, "declaration_observed", "Declaración observada",
+			s.notifyIfNew(uid, "declaration_observed", "Declaración observada",
 				fmt.Sprintf("Hay declaraciones observadas en control %d", c.ID), periodYM, &cid)
 		}
 	}
@@ -311,7 +322,7 @@ func StartSupervisorAutomationLoop() {
 		svc := NewSupervisorService()
 		run := func() {
 			ym := time.Now().Format("2006-01")
-			if err := svc.RunAutomations(ym); err != nil {
+			if err := svc.RunMonthlyAutomations(ym); err != nil {
 				return
 			}
 		}

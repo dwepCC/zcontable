@@ -14,8 +14,16 @@ const SupervisorDashboard = () => {
   const canPickCompanies = useMemo(() => auth.hasPermission(P.companiesView), []);
   const canPickUsers = useMemo(() => auth.hasPermission(P.usersView), []);
 
+  const isAnalistaScope = useMemo(
+    () =>
+      auth.hasPermission(P.supervisorsControlsUpdate) &&
+      !auth.hasPermission(P.supervisorsDeclarationsApprove),
+    [],
+  );
+
   const [periodYm, setPeriodYm] = useState(currentPeriodYM());
   const [generalStatus, setGeneralStatus] = useState('');
+  const [riskLevel, setRiskLevel] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [supervisorUserId, setSupervisorUserId] = useState('');
@@ -24,6 +32,14 @@ const SupervisorDashboard = () => {
   const [data, setData] = useState<SupervisorDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!allowed || !isAnalistaScope) return;
+    const u = auth.getUser();
+    if (u?.id && !responsibleUserId) {
+      setResponsibleUserId(String(u.id));
+    }
+  }, [allowed, isAnalistaScope, responsibleUserId]);
 
   useEffect(() => {
     if (!allowed) return;
@@ -67,6 +83,7 @@ const SupervisorDashboard = () => {
         await supervisorsService.dashboard({
           period_ym: periodYm,
           general_status: generalStatus || undefined,
+          risk_level: riskLevel || undefined,
           company_id: companyId ? Number(companyId) : undefined,
           responsible_user_id: responsibleUserId ? Number(responsibleUserId) : undefined,
           supervisor_user_id: supervisorUserId ? Number(supervisorUserId) : undefined,
@@ -78,7 +95,7 @@ const SupervisorDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [periodYm, generalStatus, companyId, responsibleUserId, supervisorUserId]);
+  }, [periodYm, generalStatus, riskLevel, companyId, responsibleUserId, supervisorUserId]);
 
   useEffect(() => {
     if (allowed) void load();
@@ -138,7 +155,24 @@ const SupervisorDashboard = () => {
                 <option value="observado">Observado</option>
               </select>
             </label>
+            <label className="text-sm text-slate-600 flex items-center gap-2">
+              Riesgo
+              <select
+                value={riskLevel}
+                onChange={(e) => setRiskLevel(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+              >
+                <option value="">Todos</option>
+                <option value="bajo">Bajo</option>
+                <option value="medio">Medio</option>
+                <option value="alto">Alto</option>
+                <option value="critico">Crítico</option>
+              </select>
+            </label>
           </div>
+          {isAnalistaScope ? (
+            <p className="text-xs text-slate-500 text-right">Vista filtrada a sus controles asignados como responsable.</p>
+          ) : null}
           {(canPickCompanies || canPickUsers) && (
             <div className="flex flex-wrap gap-3 items-end justify-end">
               {canPickCompanies ? (
@@ -200,9 +234,15 @@ const SupervisorDashboard = () => {
         <p className="text-sm text-red-600">{error}</p>
       ) : data ? (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <StatCard label="Empresas activas" value={data.total_active_companies} icon="fas fa-building" />
+            <StatCard label="Empresas al día" value={data.companies_al_dia ?? 0} icon="fas fa-check-circle" />
+            <StatCard label="Empresas pendientes" value={data.companies_pendiente ?? 0} icon="fas fa-clock" />
+            <StatCard label="Empresas vencidas" value={data.companies_vencido ?? 0} icon="fas fa-exclamation-circle" />
+            <StatCard label="Sin control en período" value={data.companies_without_control ?? 0} icon="fas fa-plus-circle" />
             <StatCard label="Cumplimiento %" value={`${data.monthly_compliance_pct}%`} icon="fas fa-percent" />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <StatCard label="Declaraciones observadas" value={data.declarations_observed} icon="fas fa-exclamation-triangle" />
             <StatCard label="NPS pendientes" value={data.nps_pending} icon="fas fa-receipt" />
             <StatCard label="Pagos pendientes" value={data.payments_pending} icon="fas fa-wallet" />
@@ -255,6 +295,31 @@ const SupervisorDashboard = () => {
                   </li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+          {(data.productivity?.length ?? 0) > 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
+              <p className="text-sm font-medium text-slate-700 px-4 pt-4">Productividad por responsable</p>
+              <table className="min-w-full text-sm mt-2">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="text-left px-4 py-3">Responsable</th>
+                    <th className="text-right px-4 py-3">Controles</th>
+                    <th className="text-right px-4 py-3">Al día</th>
+                    <th className="text-right px-4 py-3">Cumplimiento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.productivity!.map((r) => (
+                    <tr key={r.user_id}>
+                      <td className="px-4 py-3 font-medium">{r.user_name}</td>
+                      <td className="px-4 py-3 text-right">{r.total}</td>
+                      <td className="px-4 py-3 text-right">{r.al_dia}</td>
+                      <td className="px-4 py-3 text-right">{r.compliance_pct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : null}
           <div className="flex flex-wrap gap-3 text-sm">

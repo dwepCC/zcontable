@@ -20,6 +20,7 @@ const (
 	seedRoleContador      = "Contador"
 	seedRoleAsistente     = "Asistente"
 	seedRoleAnalista      = "Analista"
+	seedRoleGerencia      = "Gerencia"
 )
 
 // SeedRBAC crea módulos, permisos, roles del sistema, matriz role↔permiso y asigna roles por defecto a usuarios sin user_roles.
@@ -43,6 +44,9 @@ func SeedRBAC(db *gorm.DB) error {
 		}
 	}
 	if err := RunRBACMigrations(db); err != nil {
+		return err
+	}
+	if err := ensureFinanceCalendarRolePermissions(db); err != nil {
 		return err
 	}
 	if err := ensureRBACUserRoleAssignments(db); err != nil {
@@ -71,6 +75,7 @@ func seedRBACModules(db *gorm.DB) error {
 		{Code: "tax_settlements", Name: "Liquidaciones de impuestos", Icon: "fas fa-file-signature", SortOrder: 140, Active: true},
 		{Code: "rbac", Name: "Roles y permisos", Icon: "fas fa-user-shield", SortOrder: 150, Active: true},
 		{Code: "supervisors", Name: "Supervisores contables", Icon: "fas fa-user-check", SortOrder: 155, Active: true},
+		{Code: "finance", Name: "Calendario y finanzas operativas", Icon: "fas fa-calendar-days", SortOrder: 45, Active: true},
 	}
 	for i := range rows {
 		r := rows[i]
@@ -230,6 +235,9 @@ func seedRBACPermissions(db *gorm.DB) error {
 		rbac.SupervisorsAttachmentsUpload:  {Mod: "supervisors", Name: "Subir adjuntos supervisores"},
 		rbac.SupervisorsNotificationsView:  {Mod: "supervisors", Name: "Ver notificaciones supervisores"},
 		rbac.SupervisorsNPSRegisterPayment: {Mod: "supervisors", Name: "Registrar pago NPS"},
+
+		rbac.FinanceCalendarView:   {Mod: "finance", Name: "Ver calendario contable global"},
+		rbac.FinanceCalendarManage: {Mod: "finance", Name: "Gestionar calendario contable global"},
 	}
 
 	for _, code := range rbac.AllPermissionCodes {
@@ -268,6 +276,7 @@ func seedRBACSystemRoles(db *gorm.DB) error {
 		{Code: seedRoleContador, Name: "Contador", Description: "Gestión contable y fiscal", IsSystem: true},
 		{Code: seedRoleAsistente, Name: "Asistente", Description: "Apoyo operativo", IsSystem: true},
 		{Code: seedRoleAnalista, Name: "Analista", Description: "Analista contable (avance y liquidaciones)", IsSystem: true},
+		{Code: seedRoleGerencia, Name: "Gerencia", Description: "Gerencia — supervisión y cierre (mismo alcance que supervisor)", IsSystem: true},
 	}
 	for i := range system {
 		r := system[i]
@@ -304,6 +313,62 @@ func permissionIDsByCodes(db *gorm.DB, codes []string) ([]uint, error) {
 	return ids, nil
 }
 
+// ensureFinanceCalendarRolePermissions enlaza permisos de calendario en roles del sistema (idempotente en cada arranque).
+func ensureFinanceCalendarRolePermissions(db *gorm.DB) error {
+	var viewP, manageP models.Permission
+	if err := db.Where("code = ?", rbac.FinanceCalendarView).First(&viewP).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if err := db.Where("code = ?", rbac.FinanceCalendarManage).First(&manageP).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	link := func(roleCode string, permIDs ...uint) error {
+		var role models.Role
+		if err := db.Where("code = ?", roleCode).First(&role).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		for _, pid := range permIDs {
+			var cnt int64
+			if err := db.Model(&models.RolePermission{}).
+				Where("role_id = ? AND permission_id = ?", role.ID, pid).
+				Count(&cnt).Error; err != nil {
+				return err
+			}
+			if cnt > 0 {
+				continue
+			}
+			if err := db.Create(&models.RolePermission{RoleID: role.ID, PermissionID: pid}).Error; err != nil {
+				return fmt.Errorf("rol %s permiso %d: %w", roleCode, pid, err)
+			}
+		}
+		return nil
+	}
+	viewRoles := []string{
+		seedRoleSuperusuario, seedRoleContador, seedRoleSupervisor, seedRoleAdministrador,
+		seedRoleGerencia, seedRoleAsistente, seedRoleAnalista,
+	}
+	for _, rc := range viewRoles {
+		if err := link(rc, viewP.ID); err != nil {
+			return err
+		}
+	}
+	for _, rc := range []string{seedRoleSuperusuario, seedRoleContador} {
+		if err := link(rc, manageP.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func permissionCodesExcept(excl map[string]struct{}) []string {
 	out := make([]string, 0, len(rbac.AllPermissionCodes))
 	for _, c := range rbac.AllPermissionCodes {
@@ -324,23 +389,25 @@ func supervisorPermissionCodes() []string {
 		rbac.SettingsFirmUploadBankLogo: {}, rbac.SettingsFirmUploadPaymentQR: {},
 		rbac.CompaniesDelete: {}, rbac.SubscriptionPlansDelete: {}, rbac.PlanCategoriesDelete: {},
 		rbac.PaymentsDelete: {},
+		rbac.FinanceCalendarManage: {},
 	}
 	return permissionCodesExcept(exclSupervisor)
 }
 
-// analistaPermissionCodes permisos del analista contable (sin aprobar/cerrar período ni bootstrap).
+// analistaPermissionCodes permisos del analista: actualizar avance, sin asignar ni aprobar.
 func analistaPermissionCodes() []string {
 	return []string{
 		rbac.SupervisorsDashboardView,
 		rbac.SupervisorsPeriodsView,
-		rbac.SupervisorsControlsView, rbac.SupervisorsControlsCreate, rbac.SupervisorsControlsUpdate,
+		rbac.SupervisorsControlsView, rbac.SupervisorsControlsUpdate,
 		rbac.SupervisorsDeclarationsView, rbac.SupervisorsDeclarationsUpdate,
 		rbac.SupervisorsLiquidationsView, rbac.SupervisorsLiquidationsUpdate,
-		rbac.SupervisorsNPSView, rbac.SupervisorsNPSCreate, rbac.SupervisorsNPSUpdate, rbac.SupervisorsNPSGenerate,
+		rbac.SupervisorsNPSView, rbac.SupervisorsNPSUpdate,
 		rbac.SupervisorsReportsView,
 		rbac.SupervisorsObservationsView, rbac.SupervisorsObservationsCreate,
 		rbac.SupervisorsHistoryView, rbac.SupervisorsAttachmentsUpload,
-		rbac.SupervisorsNotificationsView, rbac.SupervisorsNPSRegisterPayment,
+		rbac.SupervisorsNotificationsView,
+		rbac.FinanceCalendarView,
 	}
 }
 
@@ -377,6 +444,16 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 		rbac.TukifacFiscalReceiptsList, rbac.TukifacFiscalCreatePayment, rbac.TukifacFiscalLinkPayment, rbac.TukifacSellnowItems,
 		rbac.TaxSettlementsPreview, rbac.TaxSettlementsList, rbac.TaxSettlementsView, rbac.TaxSettlementsPaymentSuggestions,
 		rbac.CompaniesAssignAssistant,
+		rbac.FinanceCalendarView,
+		rbac.SupervisorsDashboardView,
+		rbac.SupervisorsPeriodsView,
+		rbac.SupervisorsControlsView, rbac.SupervisorsControlsUpdate,
+		rbac.SupervisorsDeclarationsView, rbac.SupervisorsDeclarationsUpdate,
+		rbac.SupervisorsLiquidationsView, rbac.SupervisorsLiquidationsUpdate,
+		rbac.SupervisorsNPSView, rbac.SupervisorsNPSUpdate,
+		rbac.SupervisorsObservationsView, rbac.SupervisorsObservationsCreate,
+		rbac.SupervisorsHistoryView, rbac.SupervisorsAttachmentsUpload,
+		rbac.SupervisorsNotificationsView,
 	}
 
 	allIDs, err := permissionIDsAll(db)
@@ -405,6 +482,7 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 	binds := []roleBind{
 		{roleCode: seedRoleSuperusuario, codes: rbac.AllPermissionCodes},
 		{roleCode: seedRoleAdministrador, codes: supervisorCodes},
+		{roleCode: seedRoleGerencia, codes: supervisorCodes},
 		{roleCode: seedRoleSupervisor, codes: supervisorCodes},
 		{roleCode: seedRoleContador, codes: contadorCodes},
 		{roleCode: seedRoleAsistente, codes: asistenteAllow},
@@ -420,7 +498,7 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 		switch b.roleCode {
 		case seedRoleSuperusuario:
 			ids = allIDs
-		case seedRoleAdministrador, seedRoleSupervisor:
+		case seedRoleAdministrador, seedRoleGerencia, seedRoleSupervisor:
 			ids = supervisorIDs
 		case seedRoleContador:
 			ids = contadorIDs

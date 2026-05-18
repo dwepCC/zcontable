@@ -28,6 +28,7 @@ func Setup(app *fiber.App) {
 	productCatCtrl := controllers.NewProductCategoryController()
 	taxSettleCtrl := controllers.NewTaxSettlementController()
 	supervisorCtrl := controllers.NewSupervisorController()
+	calendarCtrl := controllers.NewFinanceCalendarController()
 
 	app.Post("/api/login", authCtrl.LoginAPI)
 
@@ -176,6 +177,7 @@ func Setup(app *fiber.App) {
 	sup.Get("/controls/:controlId/liquidation", middleware.RequirePermission(rbac.SupervisorsLiquidationsView), supervisorCtrl.GetLiquidationAPI)
 	sup.Put("/controls/:controlId/liquidation", middleware.RequirePermission(rbac.SupervisorsLiquidationsUpdate), supervisorCtrl.UpdateLiquidationAPI)
 	sup.Post("/controls/:controlId/liquidation/approve", middleware.RequirePermission(rbac.SupervisorsLiquidationsApprove), supervisorCtrl.ApproveLiquidationAPI)
+	sup.Post("/controls/:controlId/liquidation/observe", middleware.RequirePermission(rbac.SupervisorsLiquidationsApprove), supervisorCtrl.ObserveLiquidationAPI)
 	sup.Get("/controls/:controlId/nps", middleware.RequirePermission(rbac.SupervisorsNPSView), supervisorCtrl.ListNPSAPI)
 	sup.Post("/nps", middleware.RequirePermission(rbac.SupervisorsNPSCreate), supervisorCtrl.CreateNPSAPI)
 	sup.Put("/nps/:id", middleware.RequirePermission(rbac.SupervisorsNPSUpdate), supervisorCtrl.UpdateNPSAPI)
@@ -190,4 +192,19 @@ func Setup(app *fiber.App) {
 	sup.Get("/notifications", middleware.RequirePermission(rbac.SupervisorsNotificationsView), supervisorCtrl.ListNotificationsAPI)
 	sup.Post("/notifications/:id/read", middleware.RequirePermission(rbac.SupervisorsNotificationsView), supervisorCtrl.MarkNotificationReadAPI)
 	sup.Post("/nps/:id/register-payment", middleware.RequirePermission(rbac.SupervisorsNPSRegisterPayment), supervisorCtrl.RegisterNPSPaymentAPI)
+
+	// Calendario contable global (Finanzas)
+	cal := api.Group("/finance/calendar")
+	cal.Get("/", middleware.RequirePermission(rbac.FinanceCalendarView), calendarCtrl.ListAPI)
+	cal.Get("/activities/:activityId/compliance", middleware.RequirePermission(rbac.FinanceCalendarView), calendarCtrl.ComplianceAPI)
+	cal.Post("/duplicate", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DuplicateAPI)
+	cal.Post("/", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CreateAPI)
+	cal.Put("/months/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.UpdateAPI)
+	cal.Delete("/months/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteAPI)
+	cal.Post("/months/:calendarId/marks", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CreateMarkAPI)
+	cal.Delete("/marks/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteMarkAPI)
+	cal.Post("/months/:calendarId/activities", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CreateActivityAPI)
+	cal.Put("/activities/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.UpdateActivityAPI)
+	cal.Delete("/activities/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteActivityAPI)
+	cal.Get("/:periodYm", middleware.RequirePermission(rbac.FinanceCalendarView), calendarCtrl.GetAPI)
 }

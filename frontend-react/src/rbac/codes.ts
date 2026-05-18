@@ -98,4 +98,6 @@ export const P = {
   supervisorsAttachmentsUpload: 'supervisors.attachments_upload',
   supervisorsNotificationsView: 'supervisors.notifications_view',
   supervisorsNPSRegisterPayment: 'supervisors.nps_register_payment',
+  financeCalendarView: 'finance.calendar_view',
+  financeCalendarManage: 'finance.calendar_manage',
 } as const;

@@ -37,6 +37,9 @@ import SupervisorControls from './pages/supervisors/SupervisorControls';
 import SupervisorControlDetail from './pages/supervisors/SupervisorControlDetail';
 import SupervisorReports from './pages/supervisors/SupervisorReports';
 import SupervisorNotifications from './pages/supervisors/SupervisorNotifications';
+import FinanceCalendar from './pages/finance/FinanceCalendar';
+import AssistantWorkspace from './pages/assistant/AssistantWorkspace';
+import AssistantControls from './pages/assistant/AssistantControls';
 import ProtectedRoute from './components/ProtectedRoute';
 import { auth } from './services/auth';
 
@@ -101,6 +104,10 @@ function App() {
             <Route path="supervisors/controls/:id" element={<SupervisorControlDetail />} />
             <Route path="supervisors/reports" element={<SupervisorReports />} />
             <Route path="supervisors/notifications" element={<SupervisorNotifications />} />
+            <Route path="finance/calendar" element={<FinanceCalendar />} />
+            <Route path="assistant" element={<AssistantWorkspace />} />
+            <Route path="assistant/controls" element={<AssistantControls />} />
+            <Route path="assistant/controls/:id" element={<SupervisorControlDetail />} />
             <Route path="settings/firm" element={<Settings />} />
             <Route path="users" element={<Users />} />
             <Route path="users/roles" element={<RolePermissions />} />

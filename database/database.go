@@ -68,5 +68,8 @@ func AutoMigrate() error {
 		&models.SupervisorObservation{},
 		&models.SupervisorAttachment{},
 		&models.SupervisorNotification{},
+		&models.FinanceCalendar{},
+		&models.FinanceCalendarMark{},
+		&models.FinanceCalendarActivity{},
 	)
 }

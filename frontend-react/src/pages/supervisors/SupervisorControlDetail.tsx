@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { resolveBackendUrl } from '../../api/client';
 import SearchableSelect from '../../components/SearchableSelect';
@@ -22,8 +22,13 @@ import {
   declarationTypeLabel,
   liquidationValidationLabel,
   npsStatusLabel,
+  priorityLabel,
   riskLevelLabel,
 } from '../../utils/supervisorLabels';
+
+function supervisorUserLabel(u?: { full_name?: string; username?: string }): string {
+  return u?.full_name || u?.username || '—';
+}
 
 const SupervisorControlDetail = () => {
   const { id } = useParams();
@@ -38,6 +43,7 @@ const SupervisorControlDetail = () => {
   const canLiqApprove = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsApprove), []);
   const canNpsView = useMemo(() => auth.hasPermission(P.supervisorsNPSView), []);
   const canNpsCreate = useMemo(() => auth.hasPermission(P.supervisorsNPSCreate), []);
+  const canNpsUpdate = useMemo(() => auth.hasPermission(P.supervisorsNPSUpdate), []);
   const canNpsGenerate = useMemo(() => auth.hasPermission(P.supervisorsNPSGenerate), []);
   const canNpsDelete = useMemo(() => auth.hasPermission(P.supervisorsNPSDelete), []);
   const canNpsPay = useMemo(() => auth.hasPermission(P.supervisorsNPSRegisterPayment), []);
@@ -46,6 +52,19 @@ const SupervisorControlDetail = () => {
   const canHistory = useMemo(() => auth.hasPermission(P.supervisorsHistoryView), []);
   const canAttach = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
   const canPickUsers = useMemo(() => auth.hasPermission(P.usersView), []);
+  /** Asistente: ejecuta sin aprobar. Supervisor: revisa/aprueba. */
+  const isOperatorOnly = useMemo(
+    () =>
+      canDeclUpdate &&
+      !canDeclApprove &&
+      !canDeclObserve &&
+      !canLiqApprove,
+    [canDeclUpdate, canDeclApprove, canDeclObserve, canLiqApprove],
+  );
+  const isReviewer = useMemo(
+    () => canDeclApprove || canDeclObserve || canLiqApprove,
+    [canDeclApprove, canDeclObserve, canLiqApprove],
+  );
 
   const [control, setControl] = useState<SupervisorMonthlyControl | null>(null);
   const [declarations, setDeclarations] = useState<SupervisorDeclaration[]>([]);
@@ -55,6 +74,7 @@ const SupervisorControlDetail = () => {
   const [observations, setObservations] = useState<SupervisorObservation[]>([]);
   const [history, setHistory] = useState<SupervisorChangeLog[]>([]);
   const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
+  const [declAttachments, setDeclAttachments] = useState<Record<number, SupervisorAttachment[]>>({});
   const [newObservation, setNewObservation] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'decl' | 'liq' | 'nps' | 'audit'>('decl');
@@ -68,7 +88,16 @@ const SupervisorControlDetail = () => {
     approver_user_id: '',
     validation_status: 'pendiente',
   });
-  const [newNps, setNewNps] = useState({ tributo: 'IGV', importe: 0 });
+  const [newNps, setNewNps] = useState({ tributo: 'IGV', importe: 0, payment_due_date: '' });
+  const [editingNpsId, setEditingNpsId] = useState<number | null>(null);
+  const [npsEdit, setNpsEdit] = useState({
+    tributo: '',
+    importe: 0,
+    codigo_nps: '',
+    payment_due_date: '',
+    payment_status: 'pendiente_generar',
+    notes: '',
+  });
 
   const userOptions = useMemo(
     () =>
@@ -89,6 +118,22 @@ const SupervisorControlDetail = () => {
       ]);
       setControl(ctrl);
       setDeclarations(decls);
+      if (canAttach || canObsView) {
+        try {
+          const allAtt = await supervisorsService.listAttachments(controlId);
+          const byDecl: Record<number, SupervisorAttachment[]> = {};
+          for (const a of allAtt) {
+            if (a.declaration_id) {
+              const did = a.declaration_id;
+              if (!byDecl[did]) byDecl[did] = [];
+              byDecl[did].push(a);
+            }
+          }
+          setDeclAttachments(byDecl);
+        } catch {
+          setDeclAttachments({});
+        }
+      }
       if (canLiqView) {
         try {
           const liq = await supervisorsService.getLiquidation(controlId);
@@ -113,16 +158,16 @@ const SupervisorControlDetail = () => {
     } catch {
       setMsg('No se pudo cargar el control');
     }
-  }, [controlId, canLiqView, canNpsView]);
+  }, [controlId, canLiqView, canNpsView, canAttach, canObsView]);
 
   useEffect(() => {
     if (canView && controlId) void load();
   }, [canView, controlId, load]);
 
   useEffect(() => {
-    if ((!canUpdateControl && !canLiqUpdate) || !canPickUsers) return;
+    if ((!canUpdateControl && !canLiqUpdate && !canDeclUpdate) || !canPickUsers) return;
     void usersService.list().then(setUsers).catch(() => setUsers([]));
-  }, [canUpdateControl, canLiqUpdate, canPickUsers]);
+  }, [canUpdateControl, canLiqUpdate, canDeclUpdate, canPickUsers]);
 
   const loadAudit = useCallback(async () => {
     if (!controlId) return;
@@ -174,13 +219,26 @@ const SupervisorControlDetail = () => {
     }
   };
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = async (file: File, declarationId = 0) => {
     if (!controlId) return;
     try {
-      await supervisorsService.uploadAttachment(controlId, 0, file);
-      await loadAudit();
+      await supervisorsService.uploadAttachment(controlId, declarationId, file);
+      if (declarationId > 0) {
+        await load();
+      } else {
+        await loadAudit();
+      }
     } catch {
       setMsg('Error al subir el archivo');
+    }
+  };
+
+  const patchDeclaration = async (id: number, body: Parameters<typeof supervisorsService.updateDeclaration>[1]) => {
+    try {
+      await supervisorsService.updateDeclaration(id, body);
+      await load();
+    } catch {
+      setMsg('No se pudo actualizar la declaración');
     }
   };
 
@@ -210,10 +268,43 @@ const SupervisorControlDetail = () => {
         monthly_control_id: controlId,
         tributo: newNps.tributo,
         importe: newNps.importe,
+        payment_due_date: newNps.payment_due_date || undefined,
       });
+      setNewNps({ tributo: 'IGV', importe: 0, payment_due_date: '' });
       setNpsList(await supervisorsService.listNPS(controlId));
     } catch {
       setMsg('Error al crear NPS');
+    }
+  };
+
+  const startEditNps = (n: SupervisorNPS) => {
+    setEditingNpsId(n.id);
+    setNpsEdit({
+      tributo: n.tributo,
+      importe: n.importe,
+      codigo_nps: n.codigo_nps ?? '',
+      payment_due_date: n.payment_due_date?.slice(0, 10) ?? '',
+      payment_status: n.payment_status,
+      notes: n.notes ?? '',
+    });
+  };
+
+  const saveNpsEdit = async () => {
+    if (!editingNpsId || !controlId) return;
+    try {
+      await supervisorsService.updateNPS(editingNpsId, {
+        tributo: npsEdit.tributo,
+        importe: npsEdit.importe,
+        codigo_nps: npsEdit.codigo_nps,
+        payment_status: npsEdit.payment_status,
+        payment_due_date: npsEdit.payment_due_date || null,
+        notes: npsEdit.notes,
+      });
+      setEditingNpsId(null);
+      setNpsList(await supervisorsService.listNPS(controlId));
+      setMsg('NPS actualizado.');
+    } catch {
+      setMsg('Error al actualizar NPS');
     }
   };
 
@@ -228,9 +319,17 @@ const SupervisorControlDetail = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
-        <Link to="/supervisors/controls" className="text-sm text-primary-700">
+        <Link
+          to={window.location.pathname.includes('/assistant/') ? '/assistant/controls' : '/supervisors/controls'}
+          className="text-sm text-primary-700"
+        >
           ← Volver a controles
         </Link>
+        {isReviewer && !isOperatorOnly ? (
+          <p className="text-xs text-slate-500 mt-1">Modo revisión: apruebe u observe el trabajo del asistente.</p>
+        ) : isOperatorOnly ? (
+          <p className="text-xs text-slate-500 mt-1">Modo operación: registre avance y documentos; el supervisor revisará.</p>
+        ) : null}
         <h2 className="text-xl font-semibold text-slate-800 mt-2">
           {control.company?.business_name ?? `Empresa #${control.company_id}`}
         </h2>
@@ -383,12 +482,18 @@ const SupervisorControlDetail = () => {
       </div>
 
       {tab === 'decl' ? (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
                 <th className="text-left px-4 py-3">Tipo</th>
                 <th className="text-left px-4 py-3">Estado</th>
+                <th className="text-right px-4 py-3">Avance %</th>
+                <th className="text-left px-4 py-3">Prioridad</th>
+                <th className="text-left px-4 py-3">Vence</th>
+                <th className="text-left px-4 py-3">Responsable</th>
+                <th className="text-left px-4 py-3">Aprobador</th>
+                <th className="text-left px-4 py-3">Adjuntos</th>
                 <th className="text-right px-4 py-3">Acciones</th>
               </tr>
             </thead>
@@ -400,11 +505,7 @@ const SupervisorControlDetail = () => {
                     {canDeclUpdate ? (
                       <select
                         value={d.status}
-                        onChange={(e) => {
-                          void supervisorsService
-                            .updateDeclaration(d.id, { status: e.target.value })
-                            .then(() => load());
-                        }}
+                        onChange={(e) => void patchDeclaration(d.id, { status: e.target.value })}
                         className="border border-slate-200 rounded px-2 py-1 text-xs"
                       >
                         <option value="pendiente">Pendiente</option>
@@ -419,25 +520,135 @@ const SupervisorControlDetail = () => {
                       declarationStatusLabel(d.status)
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    {canDeclApprove ? (
+                  <td className="px-4 py-3 text-right">
+                    {canDeclUpdate ? (
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        defaultValue={d.progress_pct ?? 0}
+                        onBlur={(e) =>
+                          void patchDeclaration(d.id, { progress_pct: Number(e.target.value) })
+                        }
+                        className="w-16 border border-slate-200 rounded px-2 py-1 text-xs text-right"
+                      />
+                    ) : (
+                      `${d.progress_pct ?? 0}%`
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {canDeclUpdate ? (
+                      <select
+                        value={d.priority || 'media'}
+                        onChange={(e) => void patchDeclaration(d.id, { priority: e.target.value })}
+                        className="border border-slate-200 rounded px-2 py-1 text-xs"
+                      >
+                        <option value="baja">Baja</option>
+                        <option value="media">Media</option>
+                        <option value="alta">Alta</option>
+                        <option value="critica">Crítica</option>
+                      </select>
+                    ) : (
+                      priorityLabel(d.priority || 'media')
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {canDeclUpdate ? (
+                      <input
+                        type="date"
+                        value={d.due_date ? d.due_date.slice(0, 10) : ''}
+                        onChange={(e) =>
+                          void patchDeclaration(d.id, { due_date: e.target.value || null })
+                        }
+                        className="border border-slate-200 rounded px-2 py-1 text-xs"
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-600">
+                        {d.due_date ? new Date(d.due_date).toLocaleDateString() : '—'}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 min-w-[140px]">
+                    {canDeclUpdate && canPickUsers ? (
+                      <SearchableSelect
+                        value={d.responsible_user_id ? String(d.responsible_user_id) : ''}
+                        onChange={(v) =>
+                          void patchDeclaration(d.id, {
+                            responsible_user_id: v ? Number(v) : null,
+                          })
+                        }
+                        options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                        placeholder="Responsable"
+                      />
+                    ) : (
+                      supervisorUserLabel(d.responsible)
+                    )}
+                  </td>
+                  <td className="px-4 py-3 min-w-[140px]">
+                    {canDeclUpdate && canPickUsers ? (
+                      <SearchableSelect
+                        value={d.approver_user_id ? String(d.approver_user_id) : ''}
+                        onChange={(v) =>
+                          void patchDeclaration(d.id, {
+                            approver_user_id: v ? Number(v) : null,
+                          })
+                        }
+                        options={[{ value: '', label: 'Sin asignar' }, ...userOptions]}
+                        placeholder="Aprobador"
+                      />
+                    ) : (
+                      supervisorUserLabel(d.approver)
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <ul className="space-y-1 text-xs">
+                      {(declAttachments[d.id] ?? []).map((a) => (
+                        <li key={a.id}>
+                          <a
+                            href={resolveBackendUrl(a.file_url)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary-700 hover:underline"
+                          >
+                            {a.file_name}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    {canAttach ? (
+                      <label className="inline-block mt-1 text-xs text-primary-700 cursor-pointer">
+                        <input
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void uploadFile(f, d.id);
+                            e.target.value = '';
+                          }}
+                        />
+                        Subir
+                      </label>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                    {canDeclApprove && !isOperatorOnly ? (
                       <button
                         type="button"
                         className="text-emerald-700 text-xs font-medium"
-                        onClick={() => {
-                          void supervisorsService.approveDeclaration(d.id).then(() => load());
-                        }}
+                        onClick={() => void supervisorsService.approveDeclaration(d.id).then(() => load())}
                       >
                         Aprobar
                       </button>
                     ) : null}
-                    {canDeclObserve ? (
+                    {canDeclObserve && !isOperatorOnly ? (
                       <button
                         type="button"
                         className="text-amber-700 text-xs font-medium"
                         onClick={() => {
                           const notes = window.prompt('Observación:') ?? '';
-                          void supervisorsService.observeDeclaration(d.id, notes).then(() => load());
+                          if (notes.trim()) {
+                            void supervisorsService.observeDeclaration(d.id, notes.trim()).then(() => load());
+                          }
                         }}
                       >
                         Observar
@@ -575,16 +786,30 @@ const SupervisorControlDetail = () => {
                     Guardar liquidación
                   </button>
                 ) : null}
-                {canLiqApprove ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void supervisorsService.approveLiquidation(controlId).then(() => load());
-                    }}
-                    className="px-4 py-2 rounded-full border border-emerald-600 text-emerald-700 text-sm"
-                  >
-                    Aprobar liquidación
-                  </button>
+                {canLiqApprove && !isOperatorOnly ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void supervisorsService.approveLiquidation(controlId).then(() => load());
+                      }}
+                      className="px-4 py-2 rounded-full border border-emerald-600 text-emerald-700 text-sm"
+                    >
+                      Aprobar liquidación
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const notes = window.prompt('Observación de liquidación:') ?? '';
+                        if (notes.trim()) {
+                          void supervisorsService.observeLiquidation(controlId, notes.trim()).then(() => load());
+                        }
+                      }}
+                      className="px-4 py-2 rounded-full border border-amber-600 text-amber-700 text-sm"
+                    >
+                      Observar liquidación
+                    </button>
+                  </>
                 ) : null}
               </div>
             </>
@@ -616,6 +841,15 @@ const SupervisorControlDetail = () => {
                   className="block mt-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
                 />
               </label>
+              <label className="text-sm">
+                Vencimiento pago
+                <input
+                  type="date"
+                  value={newNps.payment_due_date}
+                  onChange={(e) => setNewNps((n) => ({ ...n, payment_due_date: e.target.value }))}
+                  className="block mt-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => void addNps()}
@@ -633,52 +867,155 @@ const SupervisorControlDetail = () => {
                   <th className="text-left px-4 py-3">Importe</th>
                   <th className="text-left px-4 py-3">Estado</th>
                   <th className="text-left px-4 py-3">Código</th>
+                  <th className="text-left px-4 py-3">Vence</th>
                   <th className="text-right px-4 py-3">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {npsList.map((n) => (
-                  <tr key={n.id}>
-                    <td className="px-4 py-3">{n.tributo}</td>
-                    <td className="px-4 py-3">S/ {n.importe.toFixed(2)}</td>
-                    <td className="px-4 py-3">{npsStatusLabel(n.payment_status)}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{n.codigo_nps || '—'}</td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {canNpsGenerate ? (
-                        <button
-                          type="button"
-                          className="text-primary-700 text-xs font-medium"
-                          onClick={() => {
-                            void supervisorsService.generateNPS(n.id).then(() => load());
-                          }}
-                        >
-                          Generar
-                        </button>
-                      ) : null}
-                      {canNpsPay && n.payment_status !== 'pagado' ? (
-                        <button
-                          type="button"
-                          className="text-emerald-700 text-xs font-medium"
-                          onClick={() => {
-                            void supervisorsService.registerNPSPayment(n.id).then(() => load());
-                          }}
-                        >
-                          Marcar pagado
-                        </button>
-                      ) : null}
-                      {canNpsDelete ? (
-                        <button
-                          type="button"
-                          className="text-red-600 text-xs font-medium"
-                          onClick={() => {
-                            void supervisorsService.deleteNPS(n.id).then(() => load());
-                          }}
-                        >
-                          Eliminar
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
+                  <Fragment key={n.id}>
+                    <tr>
+                      <td className="px-4 py-3">{n.tributo}</td>
+                      <td className="px-4 py-3">S/ {n.importe.toFixed(2)}</td>
+                      <td className="px-4 py-3">{npsStatusLabel(n.payment_status)}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{n.codigo_nps || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {n.payment_due_date ? n.payment_due_date.slice(0, 10) : '—'}
+                        {n.generated_at ? (
+                          <span className="block text-slate-400">
+                            Gen: {new Date(n.generated_at).toLocaleDateString()}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-2">
+                        {canNpsUpdate ? (
+                          <button
+                            type="button"
+                            className="text-slate-600 text-xs font-medium"
+                            onClick={() => startEditNps(n)}
+                          >
+                            Editar
+                          </button>
+                        ) : null}
+                        {canNpsGenerate && n.payment_status === 'pendiente_generar' ? (
+                          <button
+                            type="button"
+                            className="text-primary-700 text-xs font-medium"
+                            onClick={() => {
+                              void supervisorsService.generateNPS(n.id).then(() => load());
+                            }}
+                          >
+                            Generar
+                          </button>
+                        ) : null}
+                        {canNpsPay &&
+                        ['pendiente_pago', 'vencido', 'generado', 'enviado_cliente'].includes(n.payment_status) ? (
+                          <button
+                            type="button"
+                            className="text-emerald-700 text-xs font-medium"
+                            onClick={() => {
+                              void supervisorsService.registerNPSPayment(n.id).then(() => load());
+                            }}
+                          >
+                            Marcar pagado
+                          </button>
+                        ) : null}
+                        {canNpsDelete ? (
+                          <button
+                            type="button"
+                            className="text-red-600 text-xs font-medium"
+                            onClick={() => {
+                              void supervisorsService.deleteNPS(n.id).then(() => load());
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {editingNpsId === n.id && canNpsUpdate ? (
+                      <tr key={`${n.id}-edit`}>
+                        <td colSpan={6} className="px-4 py-3 bg-slate-50">
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                            <label>
+                              Tributo
+                              <input
+                                value={npsEdit.tributo}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, tributo: e.target.value }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                              />
+                            </label>
+                            <label>
+                              Importe
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={npsEdit.importe}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, importe: Number(e.target.value) }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                              />
+                            </label>
+                            <label>
+                              Código NPS
+                              <input
+                                value={npsEdit.codigo_nps}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, codigo_nps: e.target.value }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1 font-mono text-xs"
+                              />
+                            </label>
+                            <label>
+                              Vencimiento pago
+                              <input
+                                type="date"
+                                value={npsEdit.payment_due_date}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, payment_due_date: e.target.value }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                              />
+                            </label>
+                            <label>
+                              Estado
+                              <select
+                                value={npsEdit.payment_status}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, payment_status: e.target.value }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                              >
+                                <option value="pendiente_generar">Pendiente generar</option>
+                                <option value="generado">Generado</option>
+                                <option value="enviado_cliente">Enviado al cliente</option>
+                                <option value="pendiente_pago">Pendiente de pago</option>
+                                <option value="pagado">Pagado</option>
+                                <option value="vencido">Vencido</option>
+                              </select>
+                            </label>
+                            <label className="md:col-span-3">
+                              Notas
+                              <input
+                                value={npsEdit.notes}
+                                onChange={(e) => setNpsEdit((f) => ({ ...f, notes: e.target.value }))}
+                                className="block w-full mt-1 border border-slate-200 rounded-lg px-2 py-1"
+                              />
+                            </label>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              type="button"
+                              onClick={() => void saveNpsEdit()}
+                              className="px-3 py-1.5 rounded-full bg-primary-600 text-white text-xs"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingNpsId(null)}
+                              className="text-xs text-slate-600"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
