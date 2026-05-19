@@ -31,6 +31,8 @@ type FinanceCalendar struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	PeriodYM  string         `gorm:"size:7;not null;uniqueIndex" json:"period_ym"`
 	Notes     string         `gorm:"type:text" json:"notes,omitempty"`
+	IsClosed  bool           `gorm:"not null;default:false" json:"is_closed"`
+	ClosedAt  *time.Time     `json:"closed_at,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
@@ -55,15 +57,25 @@ type FinanceCalendarMark struct {
 
 func (FinanceCalendarMark) TableName() string { return "finance_calendar_marks" }
 
-// FinanceCalendarActivity actividad operativa global con día límite en el mes.
+// Estados iniciales de actividad en calendario global.
+const (
+	CalendarActivityStatusPending    = "pendiente"
+	CalendarActivityStatusInProgress = "en_progreso"
+	CalendarActivityStatusDone       = "completada"
+)
+
+// FinanceCalendarActivity actividad operativa global con rango de días en el mes.
 type FinanceCalendarActivity struct {
 	ID           uint           `gorm:"primaryKey" json:"id"`
 	CalendarID   uint           `gorm:"not null;index" json:"calendar_id"`
 	Name         string         `gorm:"size:200;not null" json:"name"`
 	Description  string         `gorm:"type:text" json:"description,omitempty"`
+	StartDay     int            `gorm:"not null" json:"start_day"`
+	EndDay       int            `gorm:"not null" json:"end_day"`
 	DueDay       int            `gorm:"not null" json:"due_day"`
 	ActivityKind string         `gorm:"size:30;not null;default:'other'" json:"activity_kind"`
 	Priority     string         `gorm:"size:20;not null;default:'media'" json:"priority"`
+	Status       string         `gorm:"size:20;not null;default:'pendiente'" json:"status"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`

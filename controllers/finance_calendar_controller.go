@@ -71,6 +71,24 @@ func (ctrl *FinanceCalendarController) CreateAPI(c fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"data": row})
 }
 
+func (ctrl *FinanceCalendarController) CloseAPI(c fiber.Ctx) error {
+	id, _ := strconv.ParseUint(c.Params("id"), 10, 32)
+	row, err := ctrl.svc.CloseCalendar(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": row})
+}
+
+func (ctrl *FinanceCalendarController) ReopenAPI(c fiber.Ctx) error {
+	id, _ := strconv.ParseUint(c.Params("id"), 10, 32)
+	row, err := ctrl.svc.ReopenCalendar(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": row})
+}
+
 func (ctrl *FinanceCalendarController) UpdateAPI(c fiber.Ctx) error {
 	id, _ := strconv.ParseUint(c.Params("id"), 10, 32)
 	var body struct {
@@ -96,13 +114,32 @@ func (ctrl *FinanceCalendarController) DeleteAPI(c fiber.Ctx) error {
 
 func (ctrl *FinanceCalendarController) DuplicateAPI(c fiber.Ctx) error {
 	var body struct {
-		FromPeriodYM string `json:"from_period_ym"`
-		ToPeriodYM   string `json:"to_period_ym"`
+		FromPeriodYM    string `json:"from_period_ym"`
+		ToPeriodYM      string `json:"to_period_ym"`
+		CopyActivities  *bool  `json:"copy_activities"`
+		CopyMarks       *bool  `json:"copy_marks"`
+		CopyNotes       *bool  `json:"copy_notes"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON inválido"})
 	}
-	row, err := ctrl.svc.DuplicateCalendar(body.FromPeriodYM, body.ToPeriodYM)
+	copyActs := true
+	copyMarks := true
+	copyNotes := true
+	if body.CopyActivities != nil {
+		copyActs = *body.CopyActivities
+	}
+	if body.CopyMarks != nil {
+		copyMarks = *body.CopyMarks
+	}
+	if body.CopyNotes != nil {
+		copyNotes = *body.CopyNotes
+	}
+	row, err := ctrl.svc.DuplicateCalendar(body.FromPeriodYM, body.ToPeriodYM, services.DuplicateCalendarOptions{
+		CopyActivities: copyActs,
+		CopyMarks:      copyMarks,
+		CopyNotes:      copyNotes,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -145,16 +182,20 @@ func (ctrl *FinanceCalendarController) CreateActivityAPI(c fiber.Ctx) error {
 	var body struct {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		StartDay     int    `json:"start_day"`
+		EndDay       int    `json:"end_day"`
 		DueDay       int    `json:"due_day"`
 		ActivityKind string `json:"activity_kind"`
 		Priority     string `json:"priority"`
+		Status       string `json:"status"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON inválido"})
 	}
 	row, err := ctrl.svc.CreateActivity(uint(cid), services.CalendarActivityInput{
-		Name: body.Name, Description: body.Description, DueDay: body.DueDay,
-		ActivityKind: body.ActivityKind, Priority: body.Priority,
+		Name: body.Name, Description: body.Description,
+		StartDay: body.StartDay, EndDay: body.EndDay, DueDay: body.DueDay,
+		ActivityKind: body.ActivityKind, Priority: body.Priority, Status: body.Status,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -167,16 +208,20 @@ func (ctrl *FinanceCalendarController) UpdateActivityAPI(c fiber.Ctx) error {
 	var body struct {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		StartDay     int    `json:"start_day"`
+		EndDay       int    `json:"end_day"`
 		DueDay       int    `json:"due_day"`
 		ActivityKind string `json:"activity_kind"`
 		Priority     string `json:"priority"`
+		Status       string `json:"status"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON inválido"})
 	}
 	row, err := ctrl.svc.UpdateActivity(uint(id), services.CalendarActivityInput{
-		Name: body.Name, Description: body.Description, DueDay: body.DueDay,
-		ActivityKind: body.ActivityKind, Priority: body.Priority,
+		Name: body.Name, Description: body.Description,
+		StartDay: body.StartDay, EndDay: body.EndDay, DueDay: body.DueDay,
+		ActivityKind: body.ActivityKind, Priority: body.Priority, Status: body.Status,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})

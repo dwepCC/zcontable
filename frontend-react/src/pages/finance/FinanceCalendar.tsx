@@ -1,44 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { saveAs } from 'file-saver';
+import { buildFinanceCalendarPdf, financeCalendarPdfFilename } from '../../pdf/financeCalendarPdfBuild';
 import {
   financeCalendarService,
   type CalendarComplianceSummary,
   type FinanceCalendarActivity,
   type FinanceCalendarDetail,
-  type FinanceCalendarMark,
 } from '../../services/financeCalendar';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
+import ConfirmDialog from '../../components/ConfirmDialog';
+import CalendarHeader from './calendar/CalendarHeader';
+import CalendarGrid from './calendar/CalendarGrid';
+import CalendarMetrics from './calendar/CalendarMetrics';
+import DaySidePanel from './calendar/DaySidePanel';
+import ActivityModal, { type ActivityFormData } from './calendar/ActivityModal';
+import DuplicateMonthModal from './calendar/DuplicateMonthModal';
+import CreateCalendarModal from './calendar/CreateCalendarModal';
+import {
+  activitiesForDay,
+  applyActivityDatePatch,
+  currentPeriodYM,
+  type ActivityDatePatch,
+  type CalendarCell,
+} from './calendar/calendarUtils';
 
-const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-
-const ACTIVITY_KINDS = [
-  { value: 'nps', label: 'Generación NPS' },
-  { value: 'pdt_601', label: 'PDT 601' },
-  { value: 'pdt_621', label: 'PDT 621' },
-  { value: 'sire', label: 'SIRE' },
-  { value: 'payment', label: 'Pagos' },
-  { value: 'liquidation', label: 'Liquidación' },
-  { value: 'closing', label: 'Cierre contable' },
-  { value: 'other', label: 'Otra' },
-];
-
-function currentPeriodYM(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function trafficDot(tl: string): string {
-  if (tl === 'rojo') return 'bg-red-500';
-  if (tl === 'amarillo') return 'bg-amber-400';
-  return 'bg-emerald-500';
-}
-
-function markBg(kind: string): string {
-  if (kind === 'feriado') return 'bg-red-50 border-red-200';
-  if (kind === 'festividad') return 'bg-purple-50 border-purple-200';
-  return 'bg-sky-50 border-sky-200';
-}
+const emptyActivityForm = (day: number): ActivityFormData => ({
+  name: '',
+  description: '',
+  activity_kind: 'nps',
+  start_day: day,
+  end_day: day,
+  due_day: day,
+  priority: 'media',
+  status: 'pendiente',
+});
 
 const FinanceCalendar = () => {
   const canView = useMemo(() => auth.hasPermission(P.financeCalendarView), []);
@@ -48,12 +44,44 @@ const FinanceCalendar = () => {
   const [detail, setDetail] = useState<FinanceCalendarDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState<'info' | 'error' | 'success'>('info');
+
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [sideOpen, setSideOpen] = useState(false);
+
   const [compliance, setCompliance] = useState<CalendarComplianceSummary | null>(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
-  const [newMonth, setNewMonth] = useState('');
-  const [dupFrom, setDupFrom] = useState('');
-  const [dupTo, setDupTo] = useState('');
-  const [actForm, setActForm] = useState({ name: '', due_day: 5, activity_kind: 'nps', priority: 'media' });
+  const [selectedActivityId, setSelectedActivityId] = useState<number | null>(null);
+
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [pendingCompanies, setPendingCompanies] = useState<number | null>(null);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [activityModal, setActivityModal] = useState<{ open: boolean; edit?: FinanceCalendarActivity }>({ open: false });
+  const [saving, setSaving] = useState(false);
+
+  const [confirmDeleteCal, setConfirmDeleteCal] = useState(false);
+  const [confirmDeleteAct, setConfirmDeleteAct] = useState<FinanceCalendarActivity | null>(null);
+  const [confirmCloseCal, setConfirmCloseCal] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const isClosed = !!detail?.is_closed;
+  const canEdit = canManage && !isClosed;
+
+  const lastDayOfMonth = useMemo(() => {
+    const [y, m] = periodYm.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }, [periodYm]);
+
+  const [activities, setActivities] = useState<FinanceCalendarActivity[]>([]);
+  const marks = detail?.marks ?? [];
+
+  useEffect(() => {
+    setActivities(detail?.activities ?? []);
+  }, [detail?.activities]);
+
   const loadDetail = useCallback(async () => {
     if (!periodYm) return;
     try {
@@ -62,7 +90,8 @@ const FinanceCalendar = () => {
       setMsg('');
     } catch {
       setDetail(null);
-      setMsg('No hay calendario para este mes. Finanzas puede crearlo.');
+      setMsg('No hay calendario para este mes. Finanzas puede crear uno con «Nuevo calendario».');
+      setMsgType('info');
     } finally {
       setLoading(false);
     }
@@ -72,207 +101,471 @@ const FinanceCalendar = () => {
     if (canView) void loadDetail();
   }, [canView, loadDetail]);
 
-  const grid = useMemo(() => {
-    const [ys, ms] = periodYm.split('-').map(Number);
-    const first = new Date(ys, ms - 1, 1);
-    const last = new Date(ys, ms, 0);
-    let startPad = first.getDay() - 1;
-    if (startPad < 0) startPad = 6;
-    const cells: { date: Date; inMonth: boolean }[] = [];
-    for (let i = 0; i < startPad; i++) {
-      cells.push({ date: new Date(ys, ms - 1, 1 - (startPad - i)), inMonth: false });
-    }
-    for (let day = 1; day <= last.getDate(); day++) {
-      cells.push({ date: new Date(ys, ms - 1, day), inMonth: true });
-    }
-    while (cells.length % 7 !== 0) {
-      const d = new Date(cells[cells.length - 1].date);
-      d.setDate(d.getDate() + 1);
-      cells.push({ date: d, inMonth: false });
-    }
-    return cells;
-  }, [periodYm]);
+  useEffect(() => {
+    if (msgType !== 'success' || !msg) return;
+    const t = window.setTimeout(() => setMsg(''), 4000);
+    return () => window.clearTimeout(t);
+  }, [msg, msgType]);
 
-  const marksByDay = useMemo(() => {
-    const map = new Map<string, FinanceCalendarMark[]>();
-    for (const m of detail?.marks ?? []) {
-      const key = m.mark_date.slice(0, 10);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(m);
-    }
-    return map;
-  }, [detail?.marks]);
+  const handleActivityDatesChange = useCallback(
+    async (activityId: number, patch: ActivityDatePatch, _origin: ActivityDatePatch) => {
+      const snapshot = activities;
+      setActivities((prev) =>
+        prev.map((a) => (a.id === activityId ? applyActivityDatePatch(a, patch, periodYm) : a)),
+      );
 
-  const activitiesByDay = useMemo(() => {
-    const map = new Map<number, FinanceCalendarActivity[]>();
-    for (const a of detail?.activities ?? []) {
-      if (!map.has(a.due_day)) map.set(a.due_day, []);
-      map.get(a.due_day)!.push(a);
+      try {
+        await financeCalendarService.updateActivity(activityId, patch);
+        setDetail((d) =>
+          d
+            ? {
+                ...d,
+                activities: (d.activities ?? []).map((a) =>
+                  a.id === activityId ? applyActivityDatePatch(a, patch, periodYm) : a,
+                ),
+              }
+            : d,
+        );
+        setMsg('Actividad reprogramada correctamente');
+        setMsgType('success');
+      } catch {
+        setActivities(snapshot);
+        setMsg('No se pudo reprogramar. Se restauró la posición anterior.');
+        setMsgType('error');
+      }
+    },
+    [activities, periodYm],
+  );
+
+  const loadMetrics = useCallback(async () => {
+    if (!detail?.activities?.length) {
+      setPendingCompanies(0);
+      return;
     }
-    return map;
-  }, [detail?.activities]);
+    setMetricsLoading(true);
+    try {
+      let pending = 0;
+      const results = await Promise.all(
+        detail.activities.map((a) => financeCalendarService.compliance(a.id, periodYm).catch(() => null)),
+      );
+      for (const r of results) {
+        if (r) pending += r.pending + r.overdue;
+      }
+      setPendingCompanies(pending);
+    } catch {
+      setPendingCompanies(null);
+    } finally {
+      setMetricsLoading(false);
+    }
+  }, [detail?.activities, periodYm]);
+
+  useEffect(() => {
+    if (detail?.activities?.length) void loadMetrics();
+    else setPendingCompanies(0);
+  }, [detail?.activities, loadMetrics]);
+
+  const metrics = useMemo(() => {
+    const acts = detail?.activities ?? [];
+    return {
+      total: acts.length,
+      completed: acts.filter((a) => a.traffic_light === 'verde').length,
+      upcoming: acts.filter((a) => a.traffic_light === 'amarillo').length,
+      overdue: acts.filter((a) => a.traffic_light === 'rojo').length,
+      pendingCompanies,
+      loading: metricsLoading,
+    };
+  }, [detail?.activities, pendingCompanies, metricsLoading]);
 
   const openCompliance = async (activityId: number) => {
     try {
       setComplianceLoading(true);
+      setSelectedActivityId(activityId);
       setCompliance(await financeCalendarService.compliance(activityId, periodYm));
     } catch {
       setMsg('No se pudo cargar el cumplimiento');
+      setMsgType('error');
     } finally {
       setComplianceLoading(false);
     }
   };
 
+  const isToday = (cell: CalendarCell) => {
+    const t = new Date();
+    return (
+      cell.inMonth &&
+      cell.date.getDate() === t.getDate() &&
+      cell.date.getMonth() === t.getMonth() &&
+      cell.date.getFullYear() === t.getFullYear()
+    );
+  };
+
+  const handleDayClick = (dayNum: number, date: Date) => {
+    setSelectedDay(dayNum);
+    setSelectedDate(date);
+    setSideOpen(true);
+    setSelectedActivityId(null);
+    setCompliance(null);
+    if (canEdit) {
+      setActivityModal({ open: true, edit: undefined });
+    }
+  };
+
+  const handleActivityClick = (a: FinanceCalendarActivity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedActivityId(a.id);
+    setSideOpen(true);
+    const { start } = a.start_day > 0 ? { start: a.start_day } : { start: a.due_day };
+    setSelectedDay(start);
+    const [y, m] = periodYm.split('-').map(Number);
+    setSelectedDate(new Date(y, m - 1, start));
+    void openCompliance(a.id);
+  };
+
+  const handleOverflow = (dayNum: number) => {
+    const [y, m] = periodYm.split('-').map(Number);
+    setSelectedDay(dayNum);
+    setSelectedDate(new Date(y, m - 1, dayNum));
+    setSideOpen(true);
+  };
+
+  const dayActivities = selectedDay != null ? activitiesForDay(activities, selectedDay) : [];
+
+  const saveActivity = async (data: ActivityFormData) => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      if (activityModal.edit) {
+        await financeCalendarService.updateActivity(activityModal.edit.id, data);
+      } else {
+        await financeCalendarService.addActivity(detail.id, data);
+      }
+      setActivityModal({ open: false });
+      await loadDetail();
+      setMsg(activityModal.edit ? 'Actividad actualizada' : 'Actividad creada');
+      setMsgType('success');
+    } catch {
+      setMsg('No se pudo guardar la actividad');
+      setMsgType('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!detail) return;
+    setPdfLoading(true);
+    try {
+      const bytes = await buildFinanceCalendarPdf(detail);
+      const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
+      saveAs(blob, financeCalendarPdfFilename(detail.period_ym));
+      setMsg('PDF generado correctamente');
+      setMsgType('success');
+    } catch {
+      setMsg('No se pudo generar el PDF');
+      setMsgType('error');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleCloseCalendar = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await financeCalendarService.close(detail.id);
+      setConfirmCloseCal(false);
+      await loadDetail();
+      setMsg('Calendario cerrado. Ya no se puede editar hasta abrirlo de nuevo.');
+      setMsgType('success');
+    } catch {
+      setMsg('No se pudo cerrar el calendario');
+      setMsgType('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReopenCalendar = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await financeCalendarService.reopen(detail.id);
+      await loadDetail();
+      setMsg('Calendario abierto. Puede editarlo nuevamente.');
+      setMsgType('success');
+    } catch {
+      setMsg('No se pudo abrir el calendario');
+      setMsgType('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditNotes = async () => {
+    if (!detail) return;
+    const notes = window.prompt('Notas del calendario:', detail.notes ?? '');
+    if (notes === null) return;
+    try {
+      await financeCalendarService.updateNotes(detail.id, notes);
+      await loadDetail();
+      setMsg('Notas actualizadas');
+      setMsgType('success');
+    } catch {
+      setMsg('No se pudieron guardar las notas');
+      setMsgType('error');
+    }
+  };
+
   if (!canView) {
-    return <p className="p-6 text-center text-slate-600">Sin permiso para ver el calendario contable.</p>;
+    return (
+      <div className="max-w-lg mx-auto p-12 text-center">
+        <i className="fas fa-lock text-3xl text-slate-300 mb-4" aria-hidden />
+        <p className="text-slate-600">Sin permiso para ver el calendario contable.</p>
+      </div>
+    );
   }
 
+  const activityInitial: ActivityFormData = activityModal.edit
+    ? {
+        name: activityModal.edit.name,
+        description: activityModal.edit.description ?? '',
+        activity_kind: activityModal.edit.activity_kind,
+        start_day: activityModal.edit.start_day || activityModal.edit.due_day,
+        end_day: activityModal.edit.end_day || activityModal.edit.due_day,
+        due_day: activityModal.edit.due_day,
+        priority: activityModal.edit.priority,
+        status: activityModal.edit.status || 'pendiente',
+      }
+    : emptyActivityForm(selectedDay ?? 1);
+
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">Calendario contable global</h2>
-          <p className="text-sm text-slate-500">
-            Guía de obligaciones del mes. Supervisor y asistente ven cumplimiento solo de sus empresas asignadas.
-          </p>
-        </div>
-        <label className="text-sm text-slate-600">
-          Mes
-          <input
-            type="month"
-            value={periodYm}
-            onChange={(e) => setPeriodYm(e.target.value)}
-            className="block mt-1 border border-slate-200 rounded-lg px-3 py-1.5"
-          />
-        </label>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-5 pb-10 print:max-w-none">
+      <CalendarHeader
+        periodYm={periodYm}
+        canManage={canManage}
+        canEdit={canEdit}
+        isClosed={isClosed}
+        hasCalendar={!!detail}
+        pdfLoading={pdfLoading}
+        onPeriodChange={setPeriodYm}
+        onNewCalendar={() => setCreateOpen(true)}
+        onDuplicate={() => setDuplicateOpen(true)}
+        onEditNotes={handleEditNotes}
+        onDelete={() => setConfirmDeleteCal(true)}
+        onExportPdf={() => void handleExportPdf()}
+        onCloseCalendar={() => setConfirmCloseCal(true)}
+        onReopenCalendar={() => void handleReopenCalendar()}
+      />
 
-      {msg ? <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{msg}</p> : null}
-
-      {canManage ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 flex flex-wrap gap-3 text-sm items-end">
-          <label>
-            Crear mes
-            <input type="month" value={newMonth} onChange={(e) => setNewMonth(e.target.value)} className="block mt-1 border rounded-lg px-2 py-1" />
-          </label>
-          <button type="button" onClick={() => void financeCalendarService.create(newMonth).then(() => loadDetail())} className="px-3 py-2 rounded-full bg-primary-600 text-white text-xs">
-            Crear
-          </button>
-          <input type="month" value={dupFrom} onChange={(e) => setDupFrom(e.target.value)} className="border rounded-lg px-2 py-1" />
-          <span>→</span>
-          <input type="month" value={dupTo} onChange={(e) => setDupTo(e.target.value)} className="border rounded-lg px-2 py-1" />
-          <button type="button" onClick={() => void financeCalendarService.duplicate(dupFrom, dupTo).then(() => { setPeriodYm(dupTo); loadDetail(); })} className="px-3 py-2 rounded-full border text-xs">
-            Duplicar
-          </button>
-        </div>
+      {msg ? (
+        <p
+          className={`text-sm rounded-xl px-4 py-2.5 border ${
+            msgType === 'error'
+              ? 'text-red-800 bg-red-50 border-red-200'
+              : msgType === 'success'
+                ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                : 'text-amber-800 bg-amber-50 border-amber-200'
+          }`}
+        >
+          {msg}
+        </p>
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Cargando…</p>
+        <div className="rounded-xl border border-slate-200 bg-white p-8 animate-pulse space-y-4">
+          <div className="h-6 bg-slate-200 rounded w-1/3" />
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: 35 }).map((_, i) => (
+              <div key={i} className="h-24 bg-slate-100 rounded-lg" />
+            ))}
+          </div>
+        </div>
       ) : detail ? (
         <>
-          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-            <div className="grid grid-cols-7 bg-slate-50 border-b">
-              {WEEKDAYS.map((w) => (
-                <div key={w} className="text-center text-xs font-medium py-2 text-slate-600">
-                  {w}
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7">
-              {grid.map((cell) => {
-                const key = cell.date.toISOString().slice(0, 10);
-                const dayNum = cell.date.getDate();
-                const acts = cell.inMonth ? activitiesByDay.get(dayNum) ?? [] : [];
-                const marks = cell.inMonth ? marksByDay.get(key) ?? [] : [];
-                return (
-                  <div key={key} className={`min-h-[90px] border-b border-r p-1 text-xs ${cell.inMonth ? 'bg-white' : 'bg-slate-50 text-slate-300'}`}>
-                    <div className="font-medium mb-1">{dayNum}</div>
-                    {marks.map((m) => (
-                      <div key={m.id} className={`rounded px-1 mb-0.5 border ${markBg(m.kind)}`}>
-                        {m.label}
-                      </div>
-                    ))}
-                    {acts.map((a) => (
-                      <button key={a.id} type="button" onClick={() => void openCompliance(a.id)} className="w-full text-left rounded bg-slate-100 px-1 py-0.5 mb-0.5 flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full ${trafficDot(a.traffic_light || 'verde')}`} />
-                        <span className="truncate">{a.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                );
-              })}
+          {isClosed ? (
+            <p className="text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
+              <i className="fas fa-lock text-slate-500" aria-hidden />
+              Este calendario está cerrado. Solo lectura y exportación PDF. Use «Abrir calendario» para modificarlo.
+            </p>
+          ) : null}
+          <div className="flex flex-col xl:flex-row gap-4 xl:gap-5">
+            <div className="flex-1 min-w-0">
+              <CalendarGrid
+                periodYm={periodYm}
+                lastDayOfMonth={lastDayOfMonth}
+                marks={marks}
+                activities={activities}
+                canInteract={canEdit}
+                selectedDay={selectedDay}
+                isToday={isToday}
+                onDayClick={handleDayClick}
+                onActivityClick={handleActivityClick}
+                onOverflowClick={handleOverflow}
+                onActivityDatesChange={handleActivityDatesChange}
+              />
             </div>
           </div>
-          <section className="rounded-xl border bg-white p-4 text-sm mt-4">
-            <h3 className="font-semibold mb-2">Cumplimiento — mis empresas</h3>
-            {complianceLoading ? (
-              <p className="text-slate-500">Calculando…</p>
-            ) : compliance ? (
-              <>
-                <p className="font-medium">{compliance.activity_name}</p>
-                <p className="mt-1">
-                  <span className="text-emerald-700">{compliance.completed} completadas</span>
-                  {' · '}
-                  <span className="text-amber-700">{compliance.pending} pendientes</span>
-                  {' · '}
-                  <span className="text-red-700">{compliance.overdue} vencidas</span>
-                </p>
-                <ul className="mt-2 max-h-48 overflow-y-auto space-y-1">
-                  {compliance.companies.map((c) => (
-                    <li key={c.company_id} className="flex justify-between gap-2">
-                      <span>{c.company_name}</span>
-                      {c.control_id ? (
-                        <Link to={`/supervisors/controls/${c.control_id}`} className="text-primary-700 text-xs">
-                          Ver
-                        </Link>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p className="text-slate-500">Seleccione una actividad en el calendario.</p>
-            )}
-            {canManage ? (
-              <div className="mt-4 pt-3 border-t flex gap-2">
-                <input
-                  value={actForm.name}
-                  onChange={(e) => setActForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="Nueva actividad"
-                  className="flex-1 border rounded px-2 py-1"
-                />
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={actForm.due_day}
-                  onChange={(e) => setActForm((f) => ({ ...f, due_day: Number(e.target.value) }))}
-                  className="w-14 border rounded px-1"
-                />
-                <select
-                  value={actForm.activity_kind}
-                  onChange={(e) => setActForm((f) => ({ ...f, activity_kind: e.target.value }))}
-                  className="border rounded px-1"
-                >
-                  {ACTIVITY_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void financeCalendarService.addActivity(detail.id, actForm).then(() => loadDetail())}
-                  className="px-2 py-1 rounded-full bg-primary-600 text-white text-xs"
-                >
-                  +
-                </button>
-              </div>
-            ) : null}
-          </section>
+
+          <CalendarMetrics periodYm={periodYm} metrics={metrics} />
+
+          {detail.notes ? (
+            <p className="text-sm text-slate-600 bg-white rounded-xl border border-slate-200 px-4 py-3">
+              <span className="font-medium text-slate-700">Notas: </span>
+              {detail.notes}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-12 text-center">
+          <i className="fas fa-calendar-plus text-4xl text-slate-300 mb-4" aria-hidden />
+          <p className="text-slate-600 mb-4">Aún no existe calendario para este mes.</p>
+          {canManage ? (
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="px-5 py-2.5 rounded-full bg-primary-600 text-white text-sm font-medium hover:bg-primary-700"
+            >
+              Crear calendario
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      <DaySidePanel
+        open={sideOpen}
+        date={selectedDate}
+        dayNum={selectedDay}
+        activities={dayActivities}
+        canManage={canEdit}
+        compliance={compliance}
+        complianceLoading={complianceLoading}
+        selectedActivityId={selectedActivityId}
+        onClose={() => setSideOpen(false)}
+        onSelectActivity={(a) => void openCompliance(a.id)}
+        onEditActivity={(a) => setActivityModal({ open: true, edit: a })}
+        onDeleteActivity={(a) => setConfirmDeleteAct(a)}
+        onAddActivity={() => setActivityModal({ open: true, edit: undefined })}
+      />
+
+      {canEdit ? (
+        <>
+          <CreateCalendarModal
+            open={createOpen}
+            saving={saving}
+            onClose={() => setCreateOpen(false)}
+            onConfirm={async (ym, notes) => {
+              setSaving(true);
+              try {
+                await financeCalendarService.create(ym, notes);
+                setCreateOpen(false);
+                setPeriodYm(ym);
+                setMsg('Calendario creado');
+                setMsgType('success');
+              } catch (e: unknown) {
+                setMsg(e instanceof Error ? e.message : 'No se pudo crear el calendario');
+                setMsgType('error');
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+
+          <DuplicateMonthModal
+            open={duplicateOpen}
+            fromPeriodYm={periodYm}
+            saving={saving}
+            onClose={() => setDuplicateOpen(false)}
+            onConfirm={async (toYm, opts) => {
+              setSaving(true);
+              try {
+                await financeCalendarService.duplicate(periodYm, toYm, opts);
+                setDuplicateOpen(false);
+                setPeriodYm(toYm);
+                await loadDetail();
+                setMsg('Calendario duplicado correctamente');
+                setMsgType('success');
+              } catch {
+                setMsg('No se pudo duplicar el calendario');
+                setMsgType('error');
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+
+          <ActivityModal
+            open={activityModal.open}
+            title={activityModal.edit ? 'Editar actividad' : 'Nueva actividad'}
+            initial={activityInitial}
+            lastDayOfMonth={lastDayOfMonth}
+            saving={saving}
+            onClose={() => setActivityModal({ open: false })}
+            onSubmit={saveActivity}
+          />
         </>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmCloseCal}
+        title="Cerrar calendario"
+        message={`¿Cerrar el calendario de ${periodYm}? No se podrá editar hasta que lo abra de nuevo. Podrá seguir viéndolo y exportarlo a PDF.`}
+        confirmLabel="Cerrar calendario"
+        loading={saving}
+        onClose={() => setConfirmCloseCal(false)}
+        onConfirm={() => void handleCloseCalendar()}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteCal}
+        title="Eliminar calendario"
+        message={`¿Eliminar el calendario de ${periodYm}? Se borrarán actividades y fechas especiales.`}
+        danger
+        loading={saving}
+        confirmLabel="Eliminar"
+        onClose={() => setConfirmDeleteCal(false)}
+        onConfirm={async () => {
+          if (!detail) return;
+          setSaving(true);
+          try {
+            await financeCalendarService.remove(detail.id);
+            setConfirmDeleteCal(false);
+            setDetail(null);
+            setMsg('Calendario eliminado');
+            setMsgType('success');
+          } catch {
+            setMsg('No se pudo eliminar');
+            setMsgType('error');
+          } finally {
+            setSaving(false);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteAct}
+        title="Eliminar actividad"
+        message={confirmDeleteAct ? `¿Eliminar «${confirmDeleteAct.name}»?` : ''}
+        danger
+        loading={saving}
+        confirmLabel="Eliminar"
+        onClose={() => setConfirmDeleteAct(null)}
+        onConfirm={async () => {
+          if (!confirmDeleteAct) return;
+          setSaving(true);
+          try {
+            await financeCalendarService.removeActivity(confirmDeleteAct.id);
+            setConfirmDeleteAct(null);
+            await loadDetail();
+            setMsg('Actividad eliminada');
+            setMsgType('success');
+          } catch {
+            setMsg('No se pudo eliminar la actividad');
+            setMsgType('error');
+          } finally {
+            setSaving(false);
+          }
+        }}
+      />
     </div>
   );
 };

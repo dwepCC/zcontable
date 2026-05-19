@@ -200,6 +200,8 @@ func Setup(app *fiber.App) {
 	cal.Post("/duplicate", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DuplicateAPI)
 	cal.Post("/", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CreateAPI)
 	cal.Put("/months/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.UpdateAPI)
+	cal.Put("/months/:id/close", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CloseAPI)
+	cal.Put("/months/:id/reopen", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.ReopenAPI)
 	cal.Delete("/months/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteAPI)
 	cal.Post("/months/:calendarId/marks", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.CreateMarkAPI)
 	cal.Delete("/marks/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteMarkAPI)

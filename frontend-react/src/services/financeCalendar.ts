@@ -4,6 +4,8 @@ export interface FinanceCalendarMonth {
   id: number;
   period_ym: string;
   notes?: string;
+  is_closed?: boolean;
+  closed_at?: string;
 }
 
 export interface FinanceCalendarMark {
@@ -19,9 +21,14 @@ export interface FinanceCalendarActivity {
   calendar_id: number;
   name: string;
   description?: string;
+  start_day: number;
+  end_day: number;
   due_day: number;
   activity_kind: string;
   priority: string;
+  status: string;
+  start_date?: string;
+  end_date?: string;
   due_date?: string;
   traffic_light?: string;
 }
@@ -30,6 +37,8 @@ export interface FinanceCalendarDetail {
   id: number;
   period_ym: string;
   notes?: string;
+  is_closed?: boolean;
+  closed_at?: string;
   marks?: FinanceCalendarMark[];
   activities?: FinanceCalendarActivity[];
 }
@@ -54,6 +63,12 @@ export interface CalendarComplianceSummary {
   pending: number;
   overdue: number;
   companies: CalendarComplianceCompany[];
+}
+
+export interface DuplicateCalendarOptions {
+  copy_activities?: boolean;
+  copy_marks?: boolean;
+  copy_notes?: boolean;
 }
 
 function unwrap<T>(res: { data: { data: T } }): T {
@@ -81,14 +96,27 @@ export const financeCalendarService = {
     return unwrap(res);
   },
 
+  async close(id: number): Promise<FinanceCalendarMonth> {
+    const res = await client.put<{ data: FinanceCalendarMonth }>(`/finance/calendar/months/${id}/close`);
+    return unwrap(res);
+  },
+
+  async reopen(id: number): Promise<FinanceCalendarMonth> {
+    const res = await client.put<{ data: FinanceCalendarMonth }>(`/finance/calendar/months/${id}/reopen`);
+    return unwrap(res);
+  },
+
   async remove(id: number): Promise<void> {
     await client.delete(`/finance/calendar/months/${id}`);
   },
 
-  async duplicate(fromPeriodYm: string, toPeriodYm: string): Promise<FinanceCalendarMonth> {
+  async duplicate(fromPeriodYm: string, toPeriodYm: string, opts: DuplicateCalendarOptions = {}) {
     const res = await client.post<{ data: FinanceCalendarMonth }>('/finance/calendar/duplicate', {
       from_period_ym: fromPeriodYm,
       to_period_ym: toPeriodYm,
+      copy_activities: opts.copy_activities ?? true,
+      copy_marks: opts.copy_marks ?? true,
+      copy_notes: opts.copy_notes ?? true,
     });
     return unwrap(res);
   },
@@ -108,7 +136,16 @@ export const financeCalendarService = {
 
   async addActivity(
     calendarId: number,
-    body: { name: string; description?: string; due_day: number; activity_kind: string; priority: string },
+    body: {
+      name: string;
+      description?: string;
+      start_day: number;
+      end_day: number;
+      due_day: number;
+      activity_kind: string;
+      priority: string;
+      status?: string;
+    },
   ) {
     const res = await client.post<{ data: FinanceCalendarActivity }>(
       `/finance/calendar/months/${calendarId}/activities`,
@@ -119,7 +156,16 @@ export const financeCalendarService = {
 
   async updateActivity(
     id: number,
-    body: Partial<{ name: string; description: string; due_day: number; activity_kind: string; priority: string }>,
+    body: Partial<{
+      name: string;
+      description: string;
+      start_day: number;
+      end_day: number;
+      due_day: number;
+      activity_kind: string;
+      priority: string;
+      status: string;
+    }>,
   ) {
     const res = await client.put<{ data: FinanceCalendarActivity }>(`/finance/calendar/activities/${id}`, body);
     return unwrap(res);
