@@ -4,7 +4,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { dateInputToRFC3339MidnightPeru, peruDateInputFromApiDate } from '../utils/peruDates';
 import { companiesService } from '../services/companies';
 import { documentsService } from '../services/documents';
-import { paymentsService, type PaymentTukifacIssuePayload, type PaymentUpsertInput } from '../services/payments';
+import { paymentsService, type PaymentUpsertInput } from '../services/payments';
 import { taxSettlementsService, type SettlementPaymentSuggestion } from '../services/taxSettlements';
 import { auth } from '../services/auth';
 import { P } from '../rbac/codes';
@@ -152,7 +152,10 @@ const PaymentForm = () => {
   const canCreate = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
   const canEdit = useMemo(() => auth.hasPermission(P.paymentsUpdate), []);
   const canUpsert = isEdit ? canEdit : canCreate;
-  const canIssueTukifac = useMemo(() => auth.hasPermission(P.paymentsIssueTukifac), []);
+  const canIssueComprobante = useMemo(
+    () => auth.hasPermission(P.paymentsIssueComprobante) || auth.hasPermission(P.paymentsIssueTukifac),
+    [],
+  );
 
   const peruvianToday = useMemo(() => formatInTimeZone(new Date(), 'America/Lima', 'yyyy-MM-dd'), []);
 
@@ -186,8 +189,7 @@ const PaymentForm = () => {
   const lastSettlementParamRef = useRef<string | null>(null);
 
   const [tukifacKind, setTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
-  const [tukifacSerie, setTukifacSerie] = useState('');
-  const [tukifacSaleNoteSeriesId, setTukifacSaleNoteSeriesId] = useState('');
+  const [comprobanteSeriesId, setComprobanteSeriesId] = useState('');
   const [seriesRefresh, setSeriesRefresh] = useState(0);
   /** Tras emitir Tukifac desde este formulario, enlaces ticket / PDF antes de ir al listado. */
   const [tukifacPostSaveLinks, setTukifacPostSaveLinks] = useState<TukifacReceiptViewLinks | null>(null);
@@ -197,8 +199,8 @@ const PaymentForm = () => {
     : derivePaymentType(applyMode, documentId, manualAlloc);
 
   /** Nuevo pago desde liquidación emitida: siempre se emite comprobante en Tukifac tras guardar el pago. */
-  const showComprobanteTukifac =
-    !isEdit && Boolean(settlementLink) && effectivePaymentType === 'applied' && canIssueTukifac;
+  const showComprobanteEmision =
+    !isEdit && Boolean(settlementLink) && effectivePaymentType === 'applied' && canIssueComprobante;
 
   const isFromTaxSettlement = Boolean((taxSettlementIdFromUrl ?? '').trim());
   const hideCompanyField = isFromTaxSettlement && !isEdit;
@@ -469,7 +471,7 @@ const PaymentForm = () => {
   }, [companyId, settlementLink]);
 
   useEffect(() => {
-    if (!settlementLink || !canIssueTukifac || isEdit) return;
+    if (!settlementLink || !canIssueComprobante || isEdit) return;
     let cancelled = false;
     void ensureTukifacSeriesCached()
       .then(() => {
@@ -481,28 +483,21 @@ const PaymentForm = () => {
     return () => {
       cancelled = true;
     };
-  }, [settlementLink, canIssueTukifac, isEdit]);
+  }, [settlementLink, canIssueComprobante, isEdit]);
 
   useEffect(() => {
-    if (!settlementLink || isEdit || !canIssueTukifac || effectivePaymentType !== 'applied') return;
-    if (tukifacKind === 'sale_note') {
-      const rows = getCachedSaleNoteSeries();
-      const d = pickDefaultSeries(rows);
-      setTukifacSaleNoteSeriesId((prev) => {
-        if (prev && rows.some((r) => String(r.id) === prev)) return prev;
-        return d ? String(d.id) : '';
-      });
-      return;
-    }
-    const sunat = tukifacKind === 'factura' ? '01' : '03';
-    const rows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
+    if (!settlementLink || isEdit || !canIssueComprobante || effectivePaymentType !== 'applied') return;
+    const rows =
+      tukifacKind === 'sale_note' ? getCachedSaleNoteSeries() : getCachedDocumentSeries().filter((r) => {
+          const sunat = tukifacKind === 'factura' ? '01' : '03';
+          return (r.document_type_id ?? '').trim() === sunat;
+        });
     const d = pickDefaultSeries(rows);
-    setTukifacSerie((prev) => {
-      const ok = rows.some((r) => r.number === prev);
-      if (ok) return prev;
-      return d?.number ?? '';
+    setComprobanteSeriesId((prev) => {
+      if (prev && rows.some((r) => String(r.id) === prev)) return prev;
+      return d ? String(d.id) : '';
     });
-  }, [settlementLink, isEdit, canIssueTukifac, tukifacKind, seriesRefresh, effectivePaymentType]);
+  }, [settlementLink, isEdit, canIssueComprobante, tukifacKind, seriesRefresh, effectivePaymentType]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -561,24 +556,11 @@ const PaymentForm = () => {
       }
     }
 
-    const tryTukifacAfterCreate = showComprobanteTukifac;
-    if (tryTukifacAfterCreate && tukifacKind === 'sale_note') {
-      const sid = Number(tukifacSaleNoteSeriesId);
-      const nvRows = getCachedSaleNoteSeries();
+    const tryIssueAfterCreate = showComprobanteEmision;
+    if (tryIssueAfterCreate) {
+      const sid = Number(comprobanteSeriesId);
       if (!Number.isFinite(sid) || sid <= 0) {
-        setError(
-          nvRows.length
-            ? 'Seleccione la serie de nota de venta.'
-            : 'No hay series de nota de venta disponibles en Tukifac para este usuario.',
-        );
-        return;
-      }
-    }
-    if (tryTukifacAfterCreate && (tukifacKind === 'boleta' || tukifacKind === 'factura')) {
-      const sunat = tukifacKind === 'factura' ? '01' : '03';
-      const fbRows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
-      if (fbRows.length > 0 && !tukifacSerie.trim()) {
-        setError('Seleccione la serie del comprobante (factura o boleta).');
+        setError('Seleccione la serie del comprobante.');
         return;
       }
     }
@@ -628,22 +610,18 @@ const PaymentForm = () => {
             detail: { type: 'success', message: 'Pago registrado correctamente.' },
           }),
         );
-        if (tryTukifacAfterCreate) {
+        if (tryIssueAfterCreate) {
           try {
-            const tukBody: PaymentTukifacIssuePayload = {
+            const issueOut = await paymentsService.issueComprobanteFromPayment(created.id, {
               kind: tukifacKind,
-              serie_documento: tukifacSerie.trim() || undefined,
-              sale_note_series_id:
-                tukifacKind === 'sale_note' ? Number(tukifacSaleNoteSeriesId) : undefined,
-              /** SUNAT efectivo en Tukifac; el método real del pago queda guardado en el pago del sistema. */
+              series_id: Number(comprobanteSeriesId),
               payment_method_type_id: '01',
               payment_destination_id: 'cash',
               payment_reference: method.trim() || reference.trim() || 'Caja',
-            };
-            const issueOut = await paymentsService.issueTukifacFromPayment(created.id, tukBody);
+            });
             window.dispatchEvent(
               new CustomEvent('miweb:toast', {
-                detail: { type: 'success', message: 'Comprobante enviado a Tukifac correctamente.' },
+                detail: { type: 'success', message: `Comprobante ${issueOut.receipt.number} emitido correctamente.` },
               }),
             );
             const viewLinks = parseTukifacReceiptViewLinks(issueOut.receipt);
@@ -657,7 +635,7 @@ const PaymentForm = () => {
               new CustomEvent('miweb:toast', {
                 detail: {
                   type: 'error',
-                  message: `Pago guardado. No se pudo emitir en Tukifac: ${getTukifacErrorMessage(te)}`,
+                  message: `Pago guardado. No se pudo emitir el comprobante: ${getTukifacErrorMessage(te)}`,
                 },
               }),
             );
@@ -723,7 +701,7 @@ const PaymentForm = () => {
         </div>
       ) : (
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 sm:gap-5">
-        {showComprobanteTukifac ? (
+        {showComprobanteEmision ? (
           <section className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="px-3 py-4 sm:p-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-3 gap-x-3 sm:gap-x-4 items-start">
@@ -742,54 +720,31 @@ const PaymentForm = () => {
                     <option value="factura">Factura</option>
                   </select>
                 </div>
-                {tukifacKind === 'sale_note' ? (
-                  <div className="min-w-0">
-                    <label htmlFor="tukifac_nv_series" className="block text-sm font-medium text-slate-700 mb-1">
-                      Serie
-                    </label>
-                    <select
-                      id="tukifac_nv_series"
-                      value={tukifacSaleNoteSeriesId}
-                      onChange={(ev) => setTukifacSaleNoteSeriesId(ev.target.value)}
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                    >
-                      <option value="">Seleccione…</option>
-                      {getCachedSaleNoteSeries().map((r) => (
-                        <option key={r.id} value={String(r.id)}>
-                          {r.number}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div className="min-w-0">
-                    <label htmlFor="tukifac_serie" className="block text-sm font-medium text-slate-700 mb-1">
-                      Serie
-                    </label>
-                    <select
-                      id="tukifac_serie"
-                      value={tukifacSerie}
-                      onChange={(ev) => setTukifacSerie(ev.target.value)}
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                    >
-                      <option value="">
-                        {getCachedDocumentSeries().filter(
+                <div className="min-w-0">
+                  <label htmlFor="comprobante_series" className="block text-sm font-medium text-slate-700 mb-1">
+                    Serie
+                  </label>
+                  <select
+                    id="comprobante_series"
+                    value={comprobanteSeriesId}
+                    onChange={(ev) => setComprobanteSeriesId(ev.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                  >
+                    <option value="">Seleccione…</option>
+                    {(tukifacKind === 'sale_note'
+                      ? getCachedSaleNoteSeries()
+                      : getCachedDocumentSeries().filter(
                           (r) => (r.document_type_id ?? '').trim() === (tukifacKind === 'factura' ? '01' : '03'),
-                        ).length
-                          ? 'Seleccione…'
-                          : 'Sin series en caché (Tukifac)'}
+                        )
+                    ).map((r) => (
+                      <option key={r.id} value={String(r.id)}>
+                        {r.number}
+                        {r.next_number ? ` → próximo ${r.next_number}` : ''}
                       </option>
-                      {getCachedDocumentSeries()
-                        .filter((r) => (r.document_type_id ?? '').trim() === (tukifacKind === 'factura' ? '01' : '03'))
-                        .map((r) => (
-                          <option key={r.id} value={r.number}>
-                            {r.number}
-                          </option>
-                        ))}
-                    </select>
-                    <p className="text-xs text-slate-500 mt-1">El correlativo lo asigna Tukifac.</p>
-                  </div>
-                )}
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500 mt-1">El correlativo se asigna automáticamente al guardar.</p>
+                </div>
                 <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                   <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">
                     Fecha
@@ -968,7 +923,7 @@ const PaymentForm = () => {
 
           <section className="lg:col-span-6 rounded-xl sm:rounded-2xl border border-slate-200 bg-white shadow-sm overflow-visible flex flex-col min-w-0">
             <div className="px-3 py-4 sm:p-5 space-y-3 sm:space-y-4 flex-1 flex flex-col">
-              {!showComprobanteTukifac ? (
+              {!showComprobanteEmision ? (
                 <div>
                   <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">
                     Fecha del pago

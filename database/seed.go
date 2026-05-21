@@ -50,5 +50,9 @@ func Seed() error {
 		}
 	}
 
+	if err := SeedFiscalDocumentSeries(); err != nil {
+		return err
+	}
+
 	return nil
 }

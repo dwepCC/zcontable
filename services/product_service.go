@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"miappfiber/database"
 	"miappfiber/models"
@@ -37,30 +36,6 @@ func buildProductListQuery(params ProductListParams) *gorm.DB {
 		q = q.Where("active = ?", false)
 	}
 	return q
-}
-
-func parseTukifacProductDateTime(raw string) (time.Time, bool) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return time.Time{}, false
-	}
-	layouts := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05Z07:00",
-		time.RFC3339,
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
-			return t, true
-		}
-	}
-	if len(s) >= 10 {
-		if t, err := time.ParseInLocation("2006-01-02", s[:10], time.Local); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
 }
 
 func formatSaleUnitPriceString(price float64, symbol string) string {
@@ -304,125 +279,4 @@ func (s *ProductService) Delete(id uint) error {
 		return gorm.ErrRecordNotFound
 	}
 	return res.Error
-}
-
-func mapSellnowItemOntoProduct(item TukifacSellnowItem, target *models.Product) {
-	if item.ItemTypeID != nil {
-		if v := item.ItemTypeID.Int(); v > 0 {
-			u := uint(v)
-			target.TukifacItemTypeID = &u
-		}
-	}
-	target.UnitTypeID = strings.TrimSpace(item.UnitTypeID)
-	target.CategoryID = int64(item.CategoryID.Int())
-	target.Description = strings.TrimSpace(item.Description)
-	if target.Description == "" {
-		target.Description = "(sin descripción)"
-	}
-	target.Name = item.Name
-	target.SecondName = item.SecondName
-	target.WarehouseID = item.WarehouseID.Int()
-	intern := strings.TrimSpace(item.InternalID.String())
-	target.InternalID = intern
-	target.TukifacItemID = intern
-	target.Barcode = strings.TrimSpace(item.Barcode.String())
-	target.ItemCode = item.ItemCode
-	target.ItemCodeGS1 = item.ItemCodeGS1
-	target.Stock = strings.TrimSpace(item.Stock.String())
-	target.StockMin = strings.TrimSpace(item.StockMin.String())
-	target.CurrencyTypeID = strings.TrimSpace(item.CurrencyTypeID)
-	target.CurrencyTypeSymbol = strings.TrimSpace(item.CurrencyTypeSymbol)
-	target.SaleAffectationIGVTypeID = strings.TrimSpace(item.SaleAffectationIGVTypeID)
-	target.Price = item.Price.Float64()
-	target.CalculateQuantity = item.CalculateQuantity
-	target.HasIGV = item.HasIGV
-	target.Active = item.Active
-	target.SaleUnitPrice = strings.TrimSpace(item.SaleUnitPrice.String())
-	target.PurchaseUnitPrice = strings.TrimSpace(item.PurchaseUnitPrice.String())
-	target.ApplyStore = item.ApplyStore
-	target.ImageURL = strings.TrimSpace(item.ImageURL)
-	target.TrackInventory = true
-	target.PriceIncludesIGV = target.HasIGV && strings.TrimSpace(target.SaleAffectationIGVTypeID) == "10"
-	if t, ok := parseTukifacProductDateTime(item.CreatedAt); ok {
-		target.TukifacCreatedAt = &t
-	} else {
-		target.TukifacCreatedAt = nil
-	}
-	if t, ok := parseTukifacProductDateTime(item.UpdatedAt); ok {
-		target.TukifacUpdatedAt = &t
-	} else {
-		target.TukifacUpdatedAt = nil
-	}
-}
-
-// SyncFromTukifac crea o actualiza por codigo interno (internal_id / tukifac_item_id) o por código de barras si falta interno.
-func (s *ProductService) SyncFromTukifac(tukifac *TukifacService) (created int, updated int, err error) {
-	items, err := tukifac.FetchSellnowItems()
-	if err != nil {
-		return 0, 0, err
-	}
-	defCat := DefaultProductCategoryIDForSync()
-	for _, item := range items {
-		if item.ID.Int() <= 0 {
-			continue
-		}
-		intern := strings.TrimSpace(item.InternalID.String())
-		bc := strings.TrimSpace(item.Barcode.String())
-
-		var existing models.Product
-		var findErr error
-		if intern != "" {
-			findErr = database.DB.Unscoped().
-				Where("tukifac_item_id = ? OR internal_id = ?", intern, intern).
-				First(&existing).Error
-		} else if bc != "" {
-			findErr = database.DB.Unscoped().Where("barcode = ?", bc).First(&existing).Error
-		} else {
-			var p models.Product
-			p.ProductKind = "product"
-			mapSellnowItemOntoProduct(item, &p)
-			if defCat != nil {
-				p.ProductCategoryID = defCat
-			}
-			if err := database.DB.Create(&p).Error; err != nil {
-				continue
-			}
-			created++
-			continue
-		}
-
-		if findErr == nil {
-			kind := existing.ProductKind
-			if kind == "" {
-				kind = "product"
-			}
-			mapSellnowItemOntoProduct(item, &existing)
-			existing.ProductKind = kind
-			if existing.ProductCategoryID == nil && defCat != nil {
-				existing.ProductCategoryID = defCat
-			}
-			if existing.DeletedAt.Valid {
-				existing.DeletedAt = gorm.DeletedAt{}
-			}
-			if err := database.DB.Unscoped().Save(&existing).Error; err != nil {
-				continue
-			}
-			updated++
-			continue
-		}
-		if !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			continue
-		}
-		var p models.Product
-		p.ProductKind = "product"
-		mapSellnowItemOntoProduct(item, &p)
-		if defCat != nil {
-			p.ProductCategoryID = defCat
-		}
-		if err := database.DB.Create(&p).Error; err != nil {
-			continue
-		}
-		created++
-	}
-	return created, updated, nil
 }

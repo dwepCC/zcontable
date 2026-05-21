@@ -9,7 +9,7 @@ import type {
   CompanyDebtSummary,
   DocumentsListMode,
 } from '../services/documents';
-import { paymentsService, type PaymentTukifacIssuePayload } from '../services/payments';
+import { paymentsService } from '../services/payments';
 import {
   ensureTukifacSeriesCached,
   getCachedDocumentSeries,
@@ -305,8 +305,7 @@ const Documents = () => {
   const [payDescription, setPayDescription] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [payTukifacKind, setPayTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
-  const [payTukifacSerie, setPayTukifacSerie] = useState('');
-  const [payTukifacSaleNoteSeriesId, setPayTukifacSaleNoteSeriesId] = useState('');
+  const [payComprobanteSeriesId, setPayComprobanteSeriesId] = useState('');
   const [payTukifacSeriesRefresh, setPayTukifacSeriesRefresh] = useState(0);
   const [tukifacPostPayLinks, setTukifacPostPayLinks] = useState<TukifacReceiptViewLinks | null>(null);
 
@@ -688,7 +687,10 @@ const Documents = () => {
   );
   const canDelete = useMemo(() => auth.hasPermission(P.documentsDelete), []);
   const canCreatePayment = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
-  const canIssueTukifac = useMemo(() => auth.hasPermission(P.paymentsIssueTukifac), []);
+  const canIssueComprobante = useMemo(
+    () => auth.hasPermission(P.paymentsIssueComprobante) || auth.hasPermission(P.paymentsIssueTukifac),
+    [],
+  );
 
   const payMethodOptions = useMemo(() => {
     const base = [
@@ -716,7 +718,7 @@ const Documents = () => {
   }, [isPayModalOpen]);
 
   useEffect(() => {
-    if (!isPayModalOpen || !canIssueTukifac) return;
+    if (!isPayModalOpen || !canIssueComprobante) return;
     let cancelled = false;
     void ensureTukifacSeriesCached()
       .then(() => {
@@ -728,28 +730,22 @@ const Documents = () => {
     return () => {
       cancelled = true;
     };
-  }, [isPayModalOpen, canIssueTukifac]);
+  }, [isPayModalOpen, canIssueComprobante]);
 
   useEffect(() => {
-    if (!isPayModalOpen || !canIssueTukifac) return;
-    if (payTukifacKind === 'sale_note') {
-      const rows = getCachedSaleNoteSeries();
-      const d = pickDefaultSeries(rows);
-      setPayTukifacSaleNoteSeriesId((prev) => {
-        if (prev && rows.some((r) => String(r.id) === prev)) return prev;
-        return d ? String(d.id) : '';
-      });
-      return;
-    }
-    const sunat = payTukifacKind === 'factura' ? '01' : '03';
-    const rows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
+    if (!isPayModalOpen || !canIssueComprobante) return;
+    const rows =
+      payTukifacKind === 'sale_note'
+        ? getCachedSaleNoteSeries()
+        : getCachedDocumentSeries().filter(
+            (r) => (r.document_type_id ?? '').trim() === (payTukifacKind === 'factura' ? '01' : '03'),
+          );
     const d = pickDefaultSeries(rows);
-    setPayTukifacSerie((prev) => {
-      const ok = rows.some((r) => r.number === prev);
-      if (ok) return prev;
-      return d?.number ?? '';
+    setPayComprobanteSeriesId((prev) => {
+      if (prev && rows.some((r) => String(r.id) === prev)) return prev;
+      return d ? String(d.id) : '';
     });
-  }, [isPayModalOpen, canIssueTukifac, payTukifacKind, payTukifacSeriesRefresh]);
+  }, [isPayModalOpen, canIssueComprobante, payTukifacKind, payTukifacSeriesRefresh]);
 
   const openPayModal = async (doc: Document) => {
     setPayDoc(doc);
@@ -766,8 +762,7 @@ const Documents = () => {
     setPayDescription((doc.description ?? '').trim());
     setPayNotes('');
     setPayTukifacKind('sale_note');
-    setPayTukifacSerie('');
-    setPayTukifacSaleNoteSeriesId('');
+    setPayComprobanteSeriesId('');
     setIsPayModalOpen(true);
 
     try {
@@ -820,24 +815,11 @@ const Documents = () => {
       return;
     }
 
-    const tryTukifacAfterCreate = canIssueTukifac;
-    if (tryTukifacAfterCreate && payTukifacKind === 'sale_note') {
-      const sid = Number(payTukifacSaleNoteSeriesId);
-      const nvRows = getCachedSaleNoteSeries();
+    const tryIssueAfterCreate = canIssueComprobante;
+    if (tryIssueAfterCreate) {
+      const sid = Number(payComprobanteSeriesId);
       if (!Number.isFinite(sid) || sid <= 0) {
-        setPayError(
-          nvRows.length
-            ? 'Seleccione la serie de nota de venta para Tukifac.'
-            : 'No hay series de nota de venta disponibles en Tukifac para este usuario.',
-        );
-        return;
-      }
-    }
-    if (tryTukifacAfterCreate && (payTukifacKind === 'boleta' || payTukifacKind === 'factura')) {
-      const sunat = payTukifacKind === 'factura' ? '01' : '03';
-      const fbRows = getCachedDocumentSeries().filter((r) => (r.document_type_id ?? '').trim() === sunat);
-      if (fbRows.length > 0 && !payTukifacSerie.trim()) {
-        setPayError('Seleccione la serie del comprobante (factura o boleta) para Tukifac.');
+        setPayError('Seleccione la serie del comprobante.');
         return;
       }
     }
@@ -871,21 +853,18 @@ const Documents = () => {
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Pago registrado correctamente.' } }),
       );
-      if (tryTukifacAfterCreate) {
+      if (tryIssueAfterCreate) {
         try {
-          const tukBody: PaymentTukifacIssuePayload = {
+          const issueOut = await paymentsService.issueComprobanteFromPayment(created.id, {
             kind: payTukifacKind,
-            serie_documento: payTukifacSerie.trim() || undefined,
-            sale_note_series_id:
-              payTukifacKind === 'sale_note' ? Number(payTukifacSaleNoteSeriesId) : undefined,
+            series_id: Number(payComprobanteSeriesId),
             payment_method_type_id: '01',
             payment_destination_id: 'cash',
             payment_reference: payMethod.trim() || payReference.trim() || 'Caja',
-          };
-          const issueOut = await paymentsService.issueTukifacFromPayment(created.id, tukBody);
+          });
           window.dispatchEvent(
             new CustomEvent('miweb:toast', {
-              detail: { type: 'success', message: 'Comprobante enviado a Tukifac correctamente.' },
+              detail: { type: 'success', message: `Comprobante ${issueOut.receipt.number} emitido.` },
             }),
           );
           const viewLinks = parseTukifacReceiptViewLinks(issueOut.receipt);
@@ -901,7 +880,7 @@ const Documents = () => {
             new CustomEvent('miweb:toast', {
               detail: {
                 type: 'error',
-                message: `Pago guardado. No se pudo emitir en Tukifac: ${getTukifacErrorMessage(te)}`,
+                message: `Pago guardado. No se pudo emitir el comprobante: ${getTukifacErrorMessage(te)}`,
               },
             }),
           );
@@ -1233,7 +1212,7 @@ const Documents = () => {
             </div>
 
             <form onSubmit={handlePaySubmit} className="px-4 sm:px-6 py-4 sm:py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
-              {canIssueTukifac ? (
+              {canIssueComprobante ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="sm:col-span-2">
                     <p className="text-xs text-slate-500">
@@ -1257,51 +1236,32 @@ const Documents = () => {
                       <option value="factura">Factura</option>
                     </select>
                   </div>
-                  {payTukifacKind === 'sale_note' ? (
-                    <div>
-                      <label htmlFor="pay-tukifac-nv" className="block text-xs font-medium text-slate-500 mb-1">
-                        Serie (nota de venta)
-                      </label>
-                      <select
-                        id="pay-tukifac-nv"
-                        value={payTukifacSaleNoteSeriesId}
-                        onChange={(ev) => setPayTukifacSaleNoteSeriesId(ev.target.value)}
-                        className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                      >
-                        <option value="">Seleccione…</option>
-                        {getCachedSaleNoteSeries().map((r) => (
-                          <option key={r.id} value={String(r.id)}>
-                            {r.number}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <div>
-                      <label htmlFor="pay-tukifac-serie" className="block text-xs font-medium text-slate-500 mb-1">
-                        Serie (SUNAT)
-                      </label>
-                      <select
-                        id="pay-tukifac-serie"
-                        value={payTukifacSerie}
-                        onChange={(ev) => setPayTukifacSerie(ev.target.value)}
-                        className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                      >
-                        <option value="">Seleccione…</option>
-                        {getCachedDocumentSeries()
-                          .filter(
+                  <div>
+                    <label htmlFor="pay-comprobante-series" className="block text-xs font-medium text-slate-500 mb-1">
+                      Serie
+                    </label>
+                    <select
+                      id="pay-comprobante-series"
+                      value={payComprobanteSeriesId}
+                      onChange={(ev) => setPayComprobanteSeriesId(ev.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    >
+                      <option value="">Seleccione…</option>
+                      {(payTukifacKind === 'sale_note'
+                        ? getCachedSaleNoteSeries()
+                        : getCachedDocumentSeries().filter(
                             (r) =>
                               (r.document_type_id ?? '').trim() ===
                               (payTukifacKind === 'factura' ? '01' : '03'),
                           )
-                          .map((r) => (
-                            <option key={r.id} value={r.number}>
-                              {r.number}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  )}
+                      ).map((r) => (
+                        <option key={r.id} value={String(r.id)}>
+                          {r.number}
+                          {r.next_number ? ` → ${r.next_number}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               ) : null}
 

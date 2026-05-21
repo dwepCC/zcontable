@@ -20,7 +20,8 @@ const (
 	seedRoleContador      = "Contador"
 	seedRoleAsistente     = "Asistente"
 	seedRoleAnalista      = "Analista"
-	seedRoleGerencia      = "Gerencia"
+	seedRoleGerencia          = "Gerencia"
+	seedRoleEmisorComprobantes = "EmisorComprobantes"
 )
 
 // SeedRBAC crea módulos, permisos, roles del sistema, matriz role↔permiso y asigna roles por defecto a usuarios sin user_roles.
@@ -49,6 +50,12 @@ func SeedRBAC(db *gorm.DB) error {
 	if err := ensureFinanceCalendarRolePermissions(db); err != nil {
 		return err
 	}
+	if err := ensureFiscalComprobanteRolePermissions(db); err != nil {
+		return err
+	}
+	if err := ensureEmisorComprobantesRolePermissions(db); err != nil {
+		return err
+	}
 	if err := ensureRBACUserRoleAssignments(db); err != nil {
 		return err
 	}
@@ -66,7 +73,7 @@ func seedRBACModules(db *gorm.DB) error {
 		{Code: "payments", Name: "Pagos", Icon: "fas fa-wallet", SortOrder: 50, Active: true},
 		{Code: "users", Name: "Usuarios", Icon: "fas fa-users-cog", SortOrder: 60, Active: true},
 		{Code: "reports", Name: "Reportes", Icon: "fas fa-chart-line", SortOrder: 70, Active: true},
-		{Code: "tukifac", Name: "Tukifac", Icon: "fas fa-cloud", SortOrder: 80, Active: true},
+		{Code: "fiscal", Name: "Comprobantes fiscales", Icon: "fas fa-file-invoice", SortOrder: 80, Active: true},
 		{Code: "products", Name: "Productos", Icon: "fas fa-box-open", SortOrder: 90, Active: true},
 		{Code: "product_categories", Name: "Categorías de producto", Icon: "fas fa-tags", SortOrder: 100, Active: true},
 		{Code: "plan_categories", Name: "Categorías de plan", Icon: "fas fa-folder", SortOrder: 110, Active: true},
@@ -76,6 +83,7 @@ func seedRBACModules(db *gorm.DB) error {
 		{Code: "rbac", Name: "Roles y permisos", Icon: "fas fa-user-shield", SortOrder: 150, Active: true},
 		{Code: "supervisors", Name: "Supervisores contables", Icon: "fas fa-user-check", SortOrder: 155, Active: true},
 		{Code: "finance", Name: "Calendario y finanzas operativas", Icon: "fas fa-calendar-days", SortOrder: 45, Active: true},
+		{Code: "sales", Name: "Ventas / POS", Icon: "fas fa-cash-register", SortOrder: 25, Active: true},
 	}
 	for i := range rows {
 		r := rows[i]
@@ -132,13 +140,12 @@ func seedRBACPermissions(db *gorm.DB) error {
 		rbac.DocumentsCreate:      {Mod: "documents", Name: "Crear documento de deuda"},
 		rbac.DocumentsUpdate:      {Mod: "documents", Name: "Editar documento de deuda"},
 		rbac.DocumentsDelete:      {Mod: "documents", Name: "Eliminar documento de deuda"},
-		rbac.DocumentsSyncTukifac: {Mod: "documents", Name: "Sincronizar documentos con Tukifac"},
-
 		rbac.PaymentsView:             {Mod: "payments", Name: "Ver pagos"},
 		rbac.PaymentsCreate:           {Mod: "payments", Name: "Registrar pago"},
 		rbac.PaymentsUpdate:           {Mod: "payments", Name: "Editar pago"},
 		rbac.PaymentsDelete:           {Mod: "payments", Name: "Eliminar pago"},
-		rbac.PaymentsIssueTukifac:     {Mod: "payments", Name: "Emitir comprobante Tukifac desde pago"},
+		rbac.PaymentsIssueTukifac:     {Mod: "payments", Name: "Emitir comprobante (legacy)"},
+		rbac.PaymentsIssueComprobante: {Mod: "payments", Name: "Emitir comprobante desde pago"},
 		rbac.PaymentsUploadAttachment: {Mod: "payments", Name: "Subir adjunto de pago"},
 
 		rbac.UsersView:   {Mod: "users", Name: "Ver usuarios"},
@@ -148,23 +155,18 @@ func seedRBACPermissions(db *gorm.DB) error {
 
 		rbac.ReportsFinancialView: {Mod: "reports", Name: "Reporte financiero resumido"},
 
-		rbac.TukifacDocumentsList:       {Mod: "tukifac", Name: "Listar documentos Tukifac"},
-		rbac.TukifacDocumentSeries:      {Mod: "tukifac", Name: "Series de documentos"},
-		rbac.TukifacSaleNoteLists:       {Mod: "tukifac", Name: "Listar notas de venta"},
-		rbac.TukifacSaleNoteSync:        {Mod: "tukifac", Name: "Sincronizar notas de venta"},
-		rbac.TukifacFiscalReceiptsList:  {Mod: "tukifac", Name: "Comprobantes fiscales / conciliación"},
-		rbac.TukifacFiscalCreatePayment: {Mod: "tukifac", Name: "Crear pago desde comprobante"},
-		rbac.TukifacFiscalLinkPayment:   {Mod: "tukifac", Name: "Vincular pago a comprobante"},
-		rbac.TukifacFiscalPatchTax:      {Mod: "tukifac", Name: "Asociar liquidación a comprobante"},
-		rbac.TukifacFiscalDiscard:       {Mod: "tukifac", Name: "Descartar comprobante fiscal"},
-		rbac.TukifacSellnowItems:        {Mod: "tukifac", Name: "Sellnow items"},
+		rbac.FiscalSeriesView:            {Mod: "fiscal", Name: "Ver series y correlativos"},
+		rbac.FiscalSeriesManage:          {Mod: "fiscal", Name: "Gestionar series y correlativos"},
+		rbac.FiscalReceiptsList:          {Mod: "fiscal", Name: "Listar comprobantes fiscales"},
+		rbac.FiscalReceiptsCreatePayment: {Mod: "fiscal", Name: "Crear pago desde comprobante"},
+		rbac.FiscalReceiptsLinkPayment:   {Mod: "fiscal", Name: "Vincular pago a comprobante"},
+		rbac.FiscalReceiptsPatchTax:      {Mod: "fiscal", Name: "Asociar liquidación a comprobante"},
+		rbac.FiscalReceiptsDiscard:       {Mod: "fiscal", Name: "Descartar comprobante fiscal"},
 
 		rbac.ProductsView:        {Mod: "products", Name: "Ver productos"},
 		rbac.ProductsCreate:      {Mod: "products", Name: "Crear producto"},
 		rbac.ProductsUpdate:      {Mod: "products", Name: "Editar producto"},
 		rbac.ProductsDelete:      {Mod: "products", Name: "Eliminar producto"},
-		rbac.ProductsSyncTukifac: {Mod: "products", Name: "Sincronizar productos con Tukifac"},
-
 		rbac.ProductCategoriesView:   {Mod: "product_categories", Name: "Ver categorías de producto"},
 		rbac.ProductCategoriesCreate: {Mod: "product_categories", Name: "Crear categoría de producto"},
 
@@ -238,6 +240,12 @@ func seedRBACPermissions(db *gorm.DB) error {
 
 		rbac.FinanceCalendarView:   {Mod: "finance", Name: "Ver calendario contable global"},
 		rbac.FinanceCalendarManage: {Mod: "finance", Name: "Gestionar calendario contable global"},
+
+		rbac.SalesEmit:          {Mod: "sales", Name: "Emitir comprobante (venta rápida)"},
+		rbac.SalesHistory:       {Mod: "sales", Name: "Historial de ventas emitidas"},
+		rbac.SalesCatalogPick:   {Mod: "sales", Name: "Buscar productos en venta"},
+		rbac.SalesCompaniesPick: {Mod: "sales", Name: "Seleccionar cliente en venta"},
+		rbac.SalesLinePriceEdit: {Mod: "sales", Name: "Modificar precio al vender"},
 	}
 
 	for _, code := range rbac.AllPermissionCodes {
@@ -277,6 +285,7 @@ func seedRBACSystemRoles(db *gorm.DB) error {
 		{Code: seedRoleAsistente, Name: "Asistente", Description: "Apoyo operativo", IsSystem: true},
 		{Code: seedRoleAnalista, Name: "Analista", Description: "Analista contable (avance y liquidaciones)", IsSystem: true},
 		{Code: seedRoleGerencia, Name: "Gerencia", Description: "Gerencia — supervisión y cierre (mismo alcance que supervisor)", IsSystem: true},
+		{Code: seedRoleEmisorComprobantes, Name: "Emisor de Comprobantes", Description: "Emisión rápida de comprobantes (POS)", IsSystem: true},
 	}
 	for i := range system {
 		r := system[i]
@@ -369,6 +378,131 @@ func ensureFinanceCalendarRolePermissions(db *gorm.DB) error {
 	return nil
 }
 
+// ensureFiscalComprobanteRolePermissions asigna permisos de series/emisión local a roles operativos (idempotente).
+func ensureFiscalComprobanteRolePermissions(db *gorm.DB) error {
+	codes := []string{
+		rbac.FiscalSeriesView, rbac.FiscalSeriesManage,
+		rbac.FiscalReceiptsList, rbac.FiscalReceiptsCreatePayment, rbac.FiscalReceiptsLinkPayment,
+		rbac.FiscalReceiptsPatchTax, rbac.FiscalReceiptsDiscard,
+		rbac.PaymentsIssueComprobante,
+	}
+	var perms []models.Permission
+	if err := db.Where("code IN ?", codes).Find(&perms).Error; err != nil {
+		return err
+	}
+	if len(perms) == 0 {
+		return nil
+	}
+	permByCode := make(map[string]uint, len(perms))
+	for _, p := range perms {
+		permByCode[p.Code] = p.ID
+	}
+	link := func(roleCode string, permCodes ...string) error {
+		var role models.Role
+		if err := db.Where("code = ?", roleCode).First(&role).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		for _, pc := range permCodes {
+			pid, ok := permByCode[pc]
+			if !ok {
+				continue
+			}
+			var cnt int64
+			if err := db.Model(&models.RolePermission{}).Where("role_id = ? AND permission_id = ?", role.ID, pid).Count(&cnt).Error; err != nil {
+				return err
+			}
+			if cnt > 0 {
+				continue
+			}
+			if err := db.Create(&models.RolePermission{RoleID: role.ID, PermissionID: pid}).Error; err != nil {
+				return fmt.Errorf("rol %s permiso %s: %w", roleCode, pc, err)
+			}
+		}
+		return nil
+	}
+	viewOnly := []string{
+		rbac.FiscalSeriesView, rbac.FiscalReceiptsList, rbac.FiscalReceiptsLinkPayment,
+		rbac.FiscalReceiptsPatchTax, rbac.FiscalReceiptsDiscard,
+	}
+	manage := append(viewOnly, rbac.FiscalSeriesManage, rbac.FiscalReceiptsCreatePayment, rbac.PaymentsIssueComprobante)
+	for _, rc := range []string{seedRoleSuperusuario, seedRoleContador} {
+		if err := link(rc, manage...); err != nil {
+			return err
+		}
+	}
+	for _, rc := range []string{seedRoleSupervisor, seedRoleAdministrador, seedRoleGerencia, seedRoleAsistente, seedRoleAnalista} {
+		if err := link(rc, viewOnly...); err != nil {
+			return err
+		}
+		if err := link(rc, rbac.PaymentsIssueComprobante); err != nil {
+			return err
+		}
+	}
+	// Migrar roles que tenían payments.issue_tukifac → issue_comprobante
+	var legacyPerm models.Permission
+	if err := db.Where("code = ?", rbac.PaymentsIssueTukifac).First(&legacyPerm).Error; err == nil {
+		var roleIDs []uint
+		_ = db.Model(&models.RolePermission{}).Where("permission_id = ?", legacyPerm.ID).Distinct("role_id").Pluck("role_id", &roleIDs)
+		newID, ok := permByCode[rbac.PaymentsIssueComprobante]
+		if ok {
+			for _, rid := range roleIDs {
+				var cnt int64
+				_ = db.Model(&models.RolePermission{}).Where("role_id = ? AND permission_id = ?", rid, newID).Count(&cnt)
+				if cnt == 0 {
+					_ = db.Create(&models.RolePermission{RoleID: rid, PermissionID: newID}).Error
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ensureEmisorComprobantesRolePermissions asigna permisos mínimos al rol emisor POS (idempotente).
+func ensureEmisorComprobantesRolePermissions(db *gorm.DB) error {
+	codes := []string{
+		rbac.SalesEmit, rbac.SalesHistory, rbac.SalesCatalogPick, rbac.SalesCompaniesPick, rbac.SalesLinePriceEdit,
+		rbac.SettingsFirmBrandingView,
+	}
+	var perms []models.Permission
+	if err := db.Where("code IN ?", codes).Find(&perms).Error; err != nil {
+		return err
+	}
+	if len(perms) == 0 {
+		return nil
+	}
+	permByCode := make(map[string]uint, len(perms))
+	for _, p := range perms {
+		permByCode[p.Code] = p.ID
+	}
+	var role models.Role
+	if err := db.Where("code = ?", seedRoleEmisorComprobantes).First(&role).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	for _, pc := range codes {
+		pid, ok := permByCode[pc]
+		if !ok {
+			continue
+		}
+		var cnt int64
+		if err := db.Model(&models.RolePermission{}).Where("role_id = ? AND permission_id = ?", role.ID, pid).Count(&cnt).Error; err != nil {
+			return err
+		}
+		if cnt > 0 {
+			continue
+		}
+		if err := db.Create(&models.RolePermission{RoleID: role.ID, PermissionID: pid}).Error; err != nil {
+			return fmt.Errorf("emisor permiso %s: %w", pc, err)
+		}
+	}
+	return nil
+}
+
 func permissionCodesExcept(excl map[string]struct{}) []string {
 	out := make([]string, 0, len(rbac.AllPermissionCodes))
 	for _, c := range rbac.AllPermissionCodes {
@@ -435,13 +569,12 @@ func seedRBACRolePermissions(db *gorm.DB) error {
 		rbac.DashboardView,
 		rbac.CompaniesView,
 		rbac.ContactsView, rbac.ContactsCreate, rbac.ContactsUpdate, rbac.ContactsDelete,
-		rbac.DocumentsView, rbac.DocumentsSyncTukifac,
-		rbac.PaymentsView, rbac.PaymentsCreate, rbac.PaymentsUploadAttachment,
+		rbac.DocumentsView,
+		rbac.PaymentsView, rbac.PaymentsCreate, rbac.PaymentsIssueComprobante, rbac.PaymentsUploadAttachment,
 		rbac.ProductsView, rbac.ProductCategoriesView,
 		rbac.PlanCategoriesView,
 		rbac.SubscriptionPlansView,
-		rbac.TukifacDocumentsList, rbac.TukifacDocumentSeries, rbac.TukifacSaleNoteLists, rbac.TukifacSaleNoteSync,
-		rbac.TukifacFiscalReceiptsList, rbac.TukifacFiscalCreatePayment, rbac.TukifacFiscalLinkPayment, rbac.TukifacSellnowItems,
+		rbac.FiscalSeriesView, rbac.FiscalReceiptsList, rbac.FiscalReceiptsCreatePayment, rbac.FiscalReceiptsLinkPayment,
 		rbac.TaxSettlementsPreview, rbac.TaxSettlementsList, rbac.TaxSettlementsView, rbac.TaxSettlementsPaymentSuggestions,
 		rbac.CompaniesAssignAssistant,
 		rbac.FinanceCalendarView,

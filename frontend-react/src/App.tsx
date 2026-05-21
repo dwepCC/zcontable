@@ -8,7 +8,7 @@ import CompanyStatement from './pages/CompanyStatement';
 import CompanyContacts from './pages/CompanyContacts';
 import CompanyContactForm from './pages/CompanyContactForm';
 import Documents from './pages/Documents';
-import TukifacDocuments from './pages/TukifacDocuments';
+import FiscalDocumentSeries from './pages/FiscalDocumentSeries';
 import FiscalReceipts from './pages/FiscalReceipts';
 import TaxSettlements from './pages/TaxSettlements';
 import TaxSettlementNew from './pages/TaxSettlementNew';
@@ -41,6 +41,9 @@ import FinanceCalendar from './pages/finance/FinanceCalendar';
 import AssistantWorkspace from './pages/assistant/AssistantWorkspace';
 import AssistantControls from './pages/assistant/AssistantControls';
 import ProtectedRoute from './components/ProtectedRoute';
+import HomeRedirect from './components/HomeRedirect';
+import PosSale from './pages/pos/PosSale';
+import PosHistory from './pages/pos/PosHistory';
 import { auth } from './services/auth';
 
 const Logout = () => {
@@ -63,7 +66,7 @@ function App() {
         
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route index element={<HomeRedirect />} />
             <Route path="logout" element={<Logout />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="m/:slug" element={<ModuleComingSoon />} />
@@ -79,8 +82,8 @@ function App() {
             <Route path="tax-settlements/new" element={<TaxSettlementNew />} />
             <Route path="tax-settlements/:id" element={<TaxSettlementDetail />} />
             <Route path="comprobantes" element={<Comprobantes />} />
-            <Route path="tukifac/documentos" element={<TukifacDocuments />} />
-            <Route path="documents/tukifac" element={<Navigate to="/tukifac/documentos" replace />} />
+            <Route path="tukifac/documentos" element={<Navigate to="/comprobantes" replace />} />
+            <Route path="documents/tukifac" element={<Navigate to="/comprobantes" replace />} />
             <Route path="documents/fiscal-receipts" element={<FiscalReceipts />} />
             <Route path="fiscal-receipts" element={<Navigate to="/documents/fiscal-receipts" replace />} />
             <Route path="plan-categories" element={<PlanCategories />} />
@@ -108,7 +111,10 @@ function App() {
             <Route path="assistant" element={<AssistantWorkspace />} />
             <Route path="assistant/controls" element={<AssistantControls />} />
             <Route path="assistant/controls/:id" element={<SupervisorControlDetail />} />
+            <Route path="pos" element={<PosSale />} />
+            <Route path="pos/history" element={<PosHistory />} />
             <Route path="settings/firm" element={<Settings />} />
+            <Route path="settings/fiscal-series" element={<FiscalDocumentSeries />} />
             <Route path="users" element={<Users />} />
             <Route path="users/roles" element={<RolePermissions />} />
             <Route path="users/new" element={<UserForm />} />

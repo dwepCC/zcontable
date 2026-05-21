@@ -33,7 +33,7 @@ export type SidebarFlatLink = {
 export type SidebarModuleEntry = SidebarGroup | SidebarFlatLink;
 
 /** IDs estables para permisos / telemetría futura */
-export type OperationalModuleId = 'finance' | 'supervisors' | 'assistant' | 'module3' | 'module4' | 'module5';
+export type OperationalModuleId = 'finance' | 'supervisors' | 'assistant' | 'pos' | 'module4' | 'module5';
 
 export type OperationalModuleConfig = {
   id: OperationalModuleId;
@@ -44,15 +44,11 @@ export type OperationalModuleConfig = {
 };
 
 /** Rutas bajo `/m/:slug` para módulos aún sin implementar */
-export const COMING_SOON_MODULE_SLUGS = ['module-3', 'module-4', 'module-5'] as const;
+export const COMING_SOON_MODULE_SLUGS = ['module-4', 'module-5'] as const;
 export type ComingSoonModuleSlug = (typeof COMING_SOON_MODULE_SLUGS)[number];
 
 /** Textos de la vista "próximamente" por ruta `/m/:slug` */
 export const PLACEHOLDER_PAGE_COPY: Record<ComingSoonModuleSlug, { title: string; subtitle: string }> = {
-  'module-3': {
-    title: 'Módulo 3',
-    subtitle: 'Reservado para expansión del ERP.',
-  },
   'module-4': {
     title: 'Módulo 4',
     subtitle: 'Reservado para expansión del ERP.',
@@ -65,10 +61,9 @@ export const PLACEHOLDER_PAGE_COPY: Record<ComingSoonModuleSlug, { title: string
 
 /** Mapeo estable id operativo → slug URL (p. ej. permisos o analytics) */
 export const COMING_SOON_BY_OPERATIONAL_ID: Record<
-  Exclude<OperationalModuleId, 'finance' | 'supervisors' | 'assistant'>,
+  Exclude<OperationalModuleId, 'finance' | 'supervisors' | 'assistant' | 'pos'>,
   { slug: ComingSoonModuleSlug }
 > = {
-  module3: { slug: 'module-3' },
   module4: { slug: 'module-4' },
   module5: { slug: 'module-5' },
 };
@@ -98,8 +93,7 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
         items: [
           { to: '/subscription-plans', icon: 'fas fa-layer-group', label: 'Planes', permission: P.subscriptionPlansView },
           { to: '/products', icon: 'fas fa-box-open', label: 'Productos', permission: P.productsView },
-          { to: '/tukifac/documentos', icon: 'fas fa-cloud-download-alt', label: 'Documentos Tukifac', permission: P.tukifacDocumentsList },
-          { to: '/documents/fiscal-receipts', icon: 'fas fa-link', label: 'Conciliación Tukifac', permission: P.tukifacFiscalReceiptsList },
+          { to: '/documents/fiscal-receipts', icon: 'fas fa-link', label: 'Conciliación comprobantes', permission: P.fiscalReceiptsList },
         ],
       },
       {
@@ -192,10 +186,19 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
     ],
   },
   {
-    id: 'module3',
-    label: 'Módulo 3',
-    icon: 'fas fa-cube',
-    entries: [],
+    id: 'pos',
+    label: 'Ventas',
+    icon: 'fas fa-cash-register',
+    entries: [
+      {
+        type: 'group',
+        label: 'Punto de venta',
+        items: [
+          { to: '/pos', icon: 'fas fa-bolt', label: 'Nueva venta', exact: true, permission: P.salesEmit },
+          { to: '/pos/history', icon: 'fas fa-receipt', label: 'Mis comprobantes', permission: P.salesHistory },
+        ],
+      },
+    ],
   },
   {
     id: 'module4',
@@ -220,6 +223,12 @@ export const STUDIO_SECTION = {
     { to: '/settings/firm', icon: 'fas fa-gear', label: 'Configuración', permission: P.settingsFirmView },
     { to: '/users', icon: 'fas fa-users-cog', label: 'Usuarios', permission: P.usersView },
     { to: '/users/roles', icon: 'fas fa-user-shield', label: 'Roles y permisos', permission: P.rbacRolesView },
+    {
+      to: '/settings/fiscal-series',
+      icon: 'fas fa-list-ol',
+      label: 'Series y correlativos',
+      permission: P.fiscalSeriesView,
+    },
   ] satisfies SidebarLinkItem[],
 };
 
@@ -297,7 +306,6 @@ function collectNavPaths(): NavPathRow[] {
 const NAV_PATH_ROWS = collectNavPaths();
 
 const SLUG_PREFIX_TO_MODULE: Record<string, OperationalModuleId> = {
-  'module-3': 'module3',
   'module-4': 'module4',
   'module-5': 'module5',
 };

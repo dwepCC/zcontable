@@ -42,7 +42,8 @@ const (
 	PaymentsCreate           = "payments.create"
 	PaymentsUpdate           = "payments.update"
 	PaymentsDelete           = "payments.delete"
-	PaymentsIssueTukifac     = "payments.issue_tukifac"
+	PaymentsIssueTukifac     = "payments.issue_tukifac" // legacy (migrado a issue_comprobante)
+	PaymentsIssueComprobante = "payments.issue_comprobante"
 	PaymentsUploadAttachment = "payments.upload_attachment"
 
 	UsersView   = "users.view"
@@ -52,22 +53,25 @@ const (
 
 	ReportsFinancialView = "reports.financial_view"
 
-	TukifacDocumentsList        = "tukifac.documents_list"
-	TukifacDocumentSeries       = "tukifac.document_series"
-	TukifacSaleNoteLists        = "tukifac.sale_note_lists"
-	TukifacSaleNoteSync         = "tukifac.sale_note_sync"
-	TukifacFiscalReceiptsList   = "tukifac.fiscal_receipts_list"
-	TukifacFiscalCreatePayment  = "tukifac.fiscal_create_payment"
-	TukifacFiscalLinkPayment    = "tukifac.fiscal_link_payment"
-	TukifacFiscalPatchTax       = "tukifac.fiscal_patch_tax_settlement"
-	TukifacFiscalDiscard        = "tukifac.fiscal_discard"
-	TukifacSellnowItems         = "tukifac.sellnow_items"
+	FiscalSeriesView           = "fiscal.series_view"
+	FiscalSeriesManage         = "fiscal.series_manage"
+	FiscalReceiptsList         = "fiscal.receipts_list"
+	FiscalReceiptsCreatePayment  = "fiscal.receipts_create_payment"
+	FiscalReceiptsLinkPayment    = "fiscal.receipts_link_payment"
+	FiscalReceiptsPatchTax       = "fiscal.receipts_patch_tax_settlement"
+	FiscalReceiptsDiscard        = "fiscal.receipts_discard"
+
+	// Alias legacy (misma pantalla de comprobantes)
+	TukifacFiscalReceiptsList  = FiscalReceiptsList
+	TukifacFiscalCreatePayment = FiscalReceiptsCreatePayment
+	TukifacFiscalLinkPayment   = FiscalReceiptsLinkPayment
+	TukifacFiscalPatchTax      = FiscalReceiptsPatchTax
+	TukifacFiscalDiscard       = FiscalReceiptsDiscard
 
 	ProductsView        = "products.view"
 	ProductsCreate      = "products.create"
 	ProductsUpdate      = "products.update"
 	ProductsDelete      = "products.delete"
-	ProductsSyncTukifac = "products.sync_tukifac"
 
 	ProductCategoriesView   = "product_categories.view"
 	ProductCategoriesCreate = "product_categories.create"
@@ -142,6 +146,12 @@ const (
 
 	FinanceCalendarView   = "finance.calendar_view"
 	FinanceCalendarManage = "finance.calendar_manage"
+
+	SalesEmit           = "sales.emit"
+	SalesHistory        = "sales.history"
+	SalesCatalogPick    = "sales.catalog_pick"
+	SalesCompaniesPick  = "sales.companies_pick"
+	SalesLinePriceEdit  = "sales.line_price_edit"
 )
 
 // AllPermissionCodes lista completa para seed y tests.
@@ -152,12 +162,12 @@ var AllPermissionCodes = []string{
 	CompaniesValidateRUC, CompaniesNextCode, CompaniesImportTemplate, CompaniesImportSpreadsheet, CompaniesCreate, CompaniesUpdate, CompaniesStatus, CompaniesDelete, CompaniesView,
 	CompaniesAssignAccountant, CompaniesAssignSupervisor, CompaniesAssignAssistant,
 	ContactsView, ContactsCreate, ContactsUpdate, ContactsDelete,
-	DocumentsView, DocumentsCreate, DocumentsUpdate, DocumentsDelete, DocumentsSyncTukifac,
-	PaymentsView, PaymentsCreate, PaymentsUpdate, PaymentsDelete, PaymentsIssueTukifac, PaymentsUploadAttachment,
+	DocumentsView, DocumentsCreate, DocumentsUpdate, DocumentsDelete,
+	PaymentsView, PaymentsCreate, PaymentsUpdate, PaymentsDelete, PaymentsIssueTukifac, PaymentsIssueComprobante, PaymentsUploadAttachment,
 	UsersView, UsersCreate, UsersUpdate, UsersDelete,
 	ReportsFinancialView,
-	TukifacDocumentsList, TukifacDocumentSeries, TukifacSaleNoteLists, TukifacSaleNoteSync, TukifacFiscalReceiptsList, TukifacFiscalCreatePayment, TukifacFiscalLinkPayment, TukifacFiscalPatchTax, TukifacFiscalDiscard, TukifacSellnowItems,
-	ProductsView, ProductsCreate, ProductsUpdate, ProductsDelete, ProductsSyncTukifac,
+	FiscalSeriesView, FiscalSeriesManage, FiscalReceiptsList, FiscalReceiptsCreatePayment, FiscalReceiptsLinkPayment, FiscalReceiptsPatchTax, FiscalReceiptsDiscard,
+	ProductsView, ProductsCreate, ProductsUpdate, ProductsDelete,
 	ProductCategoriesView, ProductCategoriesCreate,
 	PlanCategoriesView, PlanCategoriesCreate, PlanCategoriesUpdate, PlanCategoriesDelete,
 	SubscriptionPlansView, SubscriptionPlansCreate, SubscriptionPlansUpdate, SubscriptionPlansTiers, SubscriptionPlansDelete,
@@ -174,4 +184,5 @@ var AllPermissionCodes = []string{
 	SupervisorsObservationsView, SupervisorsObservationsCreate, SupervisorsHistoryView,
 	SupervisorsAttachmentsUpload, SupervisorsNotificationsView, SupervisorsNPSRegisterPayment,
 	FinanceCalendarView, FinanceCalendarManage,
+	SalesEmit, SalesHistory, SalesCatalogPick, SalesCompaniesPick, SalesLinePriceEdit,
 }
