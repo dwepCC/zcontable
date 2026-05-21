@@ -42,6 +42,21 @@ func (ctrl *FiscalReceiptController) ensureCompanyAccess(c fiber.Ctx, companyID 
 	return nil
 }
 
+func (ctrl *FiscalReceiptController) GetAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil || id == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	rec, err := ctrl.svc.GetFiscalReceiptDetail(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Comprobante no encontrado"})
+	}
+	if err := ctrl.ensureCompanyAccess(c, rec.CompanyID); err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"data": rec})
+}
+
 func (ctrl *FiscalReceiptController) ListFiscalReceiptsAPI(c fiber.Ctx) error {
 	status := c.Query("status", "")
 	ruc := c.Query("ruc", "")

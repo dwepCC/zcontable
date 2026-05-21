@@ -304,7 +304,7 @@ const DocumentForm = () => {
         <div>
           <h2 className="text-xl font-semibold text-slate-800">{isEdit ? 'Editar deuda' : 'Nueva deuda'}</h2>
           <p className="text-sm text-slate-500">
-            Cargo interno en cuentas por cobrar. Las facturas y boletas oficiales se emiten en Tukifac y se concilian en la bandeja de comprobantes.
+            Cargo interno en cuentas por cobrar. Las facturas, boletas y notas de venta se emiten desde pagos, liquidaciones o el punto de venta.
           </p>
         </div>
         <Link
@@ -404,7 +404,7 @@ const DocumentForm = () => {
               autoComplete="off"
             />
             <p className="text-xs text-slate-500 mt-1">
-              Si lo deja vacío, el sistema asigna un código corto (6 dígitos). No es el número SUNAT de Tukifac.
+              Si lo deja vacío, el sistema asigna un código corto (6 dígitos). No es el número SUNAT del comprobante fiscal.
             </p>
           </div>
         ) : null}
@@ -413,7 +413,7 @@ const DocumentForm = () => {
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
             <span className="font-medium text-slate-600">Número interno: </span>
             <span className="font-mono text-xs">{displayNumber}</span>
-            <p className="text-xs text-slate-500 mt-1">Se asigna al crear; no es el número SUNAT de Tukifac.</p>
+            <p className="text-xs text-slate-500 mt-1">Se asigna al crear; no es el número SUNAT del comprobante fiscal.</p>
           </div>
         ) : null}
 

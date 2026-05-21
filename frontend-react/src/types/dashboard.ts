@@ -149,12 +149,13 @@ export interface Payment {
   document?: Document;
   allocations?: PaymentAllocation[];
   tax_settlement?: { id: number; number: string; status: string };
-  /** Presente si el pago tiene comprobante Tukifac vinculado (`linked_payment_id`). */
+  /** Comprobante fiscal vinculado al pago (`linked_payment_id`). */
   tukifac_fiscal_receipt?: {
     id: number;
     number: string;
     external_id: string;
     issue_date: string;
+    origin?: string;
     print_ticket_url?: string;
     pdf_url?: string;
   };
@@ -175,12 +176,14 @@ export interface TukifacFiscalReceipt {
   tax_settlement_id?: number | null;
   tax_settlement?: { id: number; number: string; status: string };
   state_type_description?: string;
-  /** tukifac_sync | issued_local */
+  /** tukifac_sync | issued_local | pos_sale */
   origin?: string;
-  /** URL impresión ticket (Tukifac) si se emitió desde este sistema. */
+  /** URL ticket legacy (sincronización externa). */
   print_ticket_url?: string;
-  /** URL descarga PDF A4 (Tukifac). */
+  /** URL PDF legacy (sincronización externa). */
   pdf_url?: string;
+  /** Período contable / liquidación (detalle PDF). */
+  period_label?: string;
   company?: Company;
   linked_payment?: {
     id: number;

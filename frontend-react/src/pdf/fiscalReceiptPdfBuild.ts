@@ -34,6 +34,28 @@ const C = {
 const money = (v: number) =>
   Number(v ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** Monto con símbol y espacio: «S/ 450.00» */
+const moneyPen = (v: number) => `S/ ${money(v)}`;
+
+function drawRightText(
+  page: PDFPage,
+  text: string,
+  rightX: number,
+  yFromTop: number,
+  size: number,
+  font: PDFFont,
+  color: ReturnType<typeof rgb>,
+) {
+  const tw = font.widthOfTextAtSize(text, size);
+  page.drawText(text, {
+    x: rightX - tw,
+    y: topY(page, yFromTop + size),
+    size,
+    font,
+    color,
+  });
+}
+
 function topY(page: PDFPage, fromTop: number) {
   return page.getHeight() - fromTop;
 }
@@ -57,25 +79,111 @@ function wrapLines(text: string, maxChars: number, maxLines: number): string[] {
   return lines;
 }
 
-function paymentMethodLabel(receipt: PosSaleDetail): string {
-  const pays = receipt.payments ?? [];
-  if (pays.length === 1) {
-    const m = pays[0].method?.trim().toLowerCase() ?? '';
-    const map: Record<string, string> = {
-      efectivo: 'Efectivo',
-      cash: 'Efectivo',
-      transferencia: 'Transferencia',
-      yape: 'Yape',
-      plin: 'Plin',
-      tarjeta: 'Tarjeta',
-      otro: 'Otro',
-    };
-    return map[m] ?? pays[0].method ?? '—';
+/** Salto de línea por ancho real (pt), no por cantidad de caracteres. */
+function wrapLinesByWidth(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidthPt: number,
+  maxLines: number,
+): string[] {
+  const t = (text ?? '').trim();
+  if (!t || maxWidthPt <= 4) return [];
+
+  const fits = (s: string) => font.widthOfTextAtSize(s, size) <= maxWidthPt;
+  const lines: string[] = [];
+  let cur = '';
+
+  const flush = () => {
+    if (!cur) return;
+    lines.push(cur);
+    cur = '';
+  };
+
+  const pushLongToken = (token: string) => {
+    let chunk = '';
+    for (const ch of token) {
+      const next = chunk + ch;
+      if (fits(next)) {
+        chunk = next;
+      } else {
+        if (chunk) {
+          flush();
+          if (lines.length >= maxLines) return;
+        }
+        chunk = fits(ch) ? ch : '…';
+      }
+    }
+    cur = chunk;
+  };
+
+  for (const word of t.split(/\s+/).filter(Boolean)) {
+    if (lines.length >= maxLines) break;
+    const next = cur ? `${cur} ${word}` : word;
+    if (fits(next)) {
+      cur = next;
+      continue;
+    }
+    flush();
+    if (lines.length >= maxLines) break;
+    if (!fits(word)) {
+      pushLongToken(word);
+    } else {
+      cur = word;
+    }
   }
-  if (pays.length > 1) return 'Varios';
-  const pm = (receipt.payment_method ?? '').trim().toLowerCase();
-  if (!pm) return '—';
-  return pm.charAt(0).toUpperCase() + pm.slice(1);
+  if (cur && lines.length < maxLines) lines.push(cur);
+  return lines;
+}
+
+function formatPaymentMethod(method: string): string {
+  const m = (method ?? '').trim().toLowerCase();
+  const map: Record<string, string> = {
+    efectivo: 'Efectivo',
+    cash: 'Efectivo',
+    contado: 'Efectivo',
+    transferencia: 'Transferencia',
+    yape: 'Yape',
+    plin: 'Plin',
+    tarjeta: 'Tarjeta',
+    otro: 'Otro',
+  };
+  if (map[m]) return map[m];
+  if (!m) return '—';
+  return method.trim().charAt(0).toUpperCase() + method.trim().slice(1);
+}
+
+function splitPaymentMethodHeader(header: string): string[] {
+  const h = (header ?? '').trim();
+  if (!h) return [];
+  if (h.includes('+')) {
+    return h
+      .split('+')
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+  return [h];
+}
+
+/** Filas de métodos de pago con monto (desde tabla fiscal_receipt_payments o cabecera). */
+function paymentMethodsForPdf(receipt: PosSaleDetail): { method: string; amount: number }[] {
+  const pays = receipt.payments ?? [];
+  if (pays.length > 0) {
+    return pays.map((p) => ({
+      method: formatPaymentMethod(p.method),
+      amount: Number(p.amount ?? 0),
+    }));
+  }
+  const pm = (receipt.payment_method ?? '').trim();
+  if (!pm) return [];
+  const parts = splitPaymentMethodHeader(pm);
+  if (parts.length > 1) {
+    return parts.map((part) => ({
+      method: formatPaymentMethod(part),
+      amount: receipt.total ?? 0,
+    }));
+  }
+  return [{ method: formatPaymentMethod(pm), amount: receipt.total ?? 0 }];
 }
 
 function customerDocLabel(receipt: PosSaleDetail): string {
@@ -104,17 +212,7 @@ function formatDateDDMMYYYY(iso: string): string {
 }
 
 function paymentMethodDisplay(method: string): string {
-  const m = method.trim().toLowerCase();
-  const map: Record<string, string> = {
-    efectivo: 'Efectivo',
-    cash: 'Efectivo',
-    transferencia: 'Transferencia',
-    yape: 'Yape',
-    plin: 'Plin',
-    tarjeta: 'Tarjeta',
-    otro: 'Otro',
-  };
-  return map[m] ?? (method ? method.charAt(0).toUpperCase() + method.slice(1) : '—');
+  return formatPaymentMethod(method);
 }
 
 async function embedLogo(doc: PDFDocument, url?: string): Promise<PDFImage | null> {
@@ -180,7 +278,14 @@ function estimateTicketHeight(receipt: PosSaleDetail, firm: FirmConfig | null): 
     itemsH += Math.max(10, wrapLines(desc, 24, 4).length * 8);
   }
   const pays = receipt.payments?.length ?? (receipt.payment_method ? 1 : 0);
-  return Math.min(1600, Math.max(420, 300 + itemsH + bankH + pays * 11 + 70));
+  const addrText = receipt.company?.address?.trim() || '';
+  const ticketContentW = TICKET_W - TICKET_M * 2;
+  const addrValueW = ticketContentW - 52;
+  const addrH =
+    addrText === ''
+      ? 0
+      : Math.max(1, Math.ceil(addrText.length / Math.max(10, Math.floor(addrValueW / 5)))) * 8 + 2;
+  return Math.min(1600, Math.max(440, 300 + itemsH + bankH + pays * 11 + 70 + addrH));
 }
 
 export async function buildFiscalReceiptA4Pdf(
@@ -205,13 +310,14 @@ export async function buildFiscalReceiptA4Pdf(
   let y = M;
 
   // —— Cabecera: logo | empresa | caja comprobante ——
-  const headerH = 72;
-  const logoMax = 58;
+  const logoMaxW = 110;
+  const logoMaxH = 78;
   let logoW = 0;
+  let logoH = 0;
   if (logo) {
-    const scale = Math.min(logoMax / logo.width, logoMax / logo.height, 1);
+    const scale = Math.min(logoMaxW / logo.width, logoMaxH / logo.height);
     logoW = logo.width * scale;
-    const logoH = logo.height * scale;
+    logoH = logo.height * scale;
     page.drawImage(logo, {
       x: M,
       y: topY(page, y + logoH),
@@ -220,8 +326,9 @@ export async function buildFiscalReceiptA4Pdf(
     });
   }
 
-  const centerX = M + Math.max(logoW, 0) + 12;
-  const centerW = contentW - Math.max(logoW, 0) - 12 - 168;
+  const headerH = Math.max(78, logoH + 8);
+  const centerX = M + Math.max(logoW, 0) + 14;
+  const centerW = contentW - Math.max(logoW, 0) - 14 - 168;
   let cy = y + 4;
   const nameLines = wrapLines(brand.toUpperCase(), Math.floor(centerW / 5.5), 2);
   for (const ln of nameLines) {
@@ -277,11 +384,14 @@ export async function buildFiscalReceiptA4Pdf(
     borderWidth: 0.8,
     borderDashArray: [3, 2],
   });
+  const docTypeSize = 9;
   if (ruc) {
-    page.drawText(`RUC ${ruc}`, {
-      x: boxX + 8,
-      y: topY(page, boxY + 14),
-      size: 8,
+    const rucText = `RUC ${ruc}`;
+    const rucW = fontB.widthOfTextAtSize(rucText, docTypeSize);
+    page.drawText(rucText, {
+      x: boxX + (boxW - rucW) / 2,
+      y: topY(page, boxY + 16),
+      size: docTypeSize,
       font: fontB,
       color: C.black,
     });
@@ -294,11 +404,11 @@ export async function buildFiscalReceiptA4Pdf(
     height: 16,
     color: C.lightGray,
   });
-  const dtW = fontB.widthOfTextAtSize(docType, 9);
+  const dtW = fontB.widthOfTextAtSize(docType, docTypeSize);
   page.drawText(docType, {
     x: boxX + (boxW - dtW) / 2,
     y: topY(page, boxY + 32),
-    size: 9,
+    size: docTypeSize,
     font: fontB,
     color: C.black,
   });
@@ -316,17 +426,30 @@ export async function buildFiscalReceiptA4Pdf(
 
   // —— Datos cliente ——
   const issue = (receipt.issue_date ?? '').slice(0, 10);
+  const periodLabel = (receipt.period_label ?? '').trim();
   const infoRows: [string, string][] = [
     ['FECHA DE EMISIÓN:', issue || '—'],
     ['FECHA DE VENCIMIENTO:', ''],
+    ...(periodLabel ? [['PERÍODO:', periodLabel] as [string, string]] : []),
     ['CLIENTE:', receipt.customer_name ?? '—'],
     [`${customerDocLabel(receipt)}:`, receipt.customer_number || '—'],
     ['DIRECCIÓN:', receipt.company?.address?.trim() || '—'],
   ];
+  const infoLabelW = 118;
+  const infoValueX = M + infoLabelW;
+  const infoValueWidth = contentW - infoLabelW;
+  const infoSize = 7.5;
   for (const [label, value] of infoRows) {
-    page.drawText(label, { x: M, y: topY(page, y + 9), size: 7.5, font: fontB, color: C.black });
-    page.drawText(value, { x: M + 118, y: topY(page, y + 9), size: 7.5, font, color: C.black });
-    y += 11;
+    const maxValLines = label.startsWith('DIRECCIÓN') ? 10 : 4;
+    const valLines = wrapLinesByWidth(value, font, infoSize, infoValueWidth, maxValLines);
+    const lines = valLines.length > 0 ? valLines : ['—'];
+    for (let i = 0; i < lines.length; i++) {
+      if (i === 0) {
+        page.drawText(label, { x: M, y: topY(page, y + infoSize), size: infoSize, font: fontB, color: C.black });
+      }
+      page.drawText(lines[i], { x: infoValueX, y: topY(page, y + infoSize), size: infoSize, font, color: C.black });
+      y += 11;
+    }
   }
   y += 6;
 
@@ -432,68 +555,42 @@ export async function buildFiscalReceiptA4Pdf(
   }
   y += tableBodyH + 10;
 
-  // —— Totales ——
+  // —— Totales (alineados al margen derecho de la hoja) ——
   const grav = receipt.subtotal ?? 0;
   const total = receipt.total ?? 0;
-  const totalsX = PAGE_W - M - 200;
-  page.drawText('OP. GRAVADAS: S/', {
-    x: totalsX,
-    y: topY(page, y + 10),
-    size: 8,
-    font,
-    color: C.black,
-  });
-  page.drawText(money(grav), {
-    x: totalsX + 95,
-    y: topY(page, y + 10),
-    size: 8,
-    font,
-    color: C.black,
-  });
-  y += 14;
-  page.drawText('TOTAL A PAGAR: S/', {
-    x: totalsX,
-    y: topY(page, y + 12),
-    size: 10,
-    font: fontB,
-    color: C.black,
-  });
-  page.drawText(money(total), {
-    x: totalsX + 95,
-    y: topY(page, y + 12),
-    size: 10,
-    font: fontB,
-    color: C.black,
-  });
+  const totalsRight = PAGE_W - M;
+  drawRightText(page, `OP. GRAVADAS: ${moneyPen(grav)}`, totalsRight, y, 8, font, C.black);
+  y += 16;
+  drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, y, 11, fontB, C.black);
   y += 28;
 
-  // —— Pago y cuentas bancarias ——
-  const payLabel = paymentMethodLabel(receipt);
-  page.drawText('MÉTODO DE PAGO:', {
+  // —— Métodos de pago ——
+  const payRows = paymentMethodsForPdf(receipt);
+  page.drawText('MÉTODO(S) DE PAGO:', {
     x: M,
     y: topY(page, y + 10),
     size: 7.5,
     font: fontB,
     color: C.black,
   });
-  const payBoxW = Math.min(120, fontB.widthOfTextAtSize(payLabel, 8) + 16);
-  page.drawRectangle({
-    x: M + 82,
-    y: topY(page, y + 14),
-    width: payBoxW,
-    height: 14,
-    borderColor: C.border,
-    borderWidth: 0.6,
-    borderDashArray: [2, 2],
-  });
-  page.drawText(payLabel, {
-    x: M + 88,
-    y: topY(page, y + 10),
-    size: 8,
-    font: fontB,
-    color: C.black,
-  });
-  y += 22;
+  y += 12;
+  if (payRows.length === 0) {
+    page.drawText('—', { x: M + 8, y: topY(page, y + 9), size: 8, font, color: C.black });
+    y += 14;
+  } else {
+    for (const pr of payRows) {
+      const line = `${pr.method} — ${moneyPen(pr.amount)}`;
+      page.drawText(line, {
+        x: M + 8,
+        y: topY(page, y + 9),
+        size: 8,
+        font: fontB,
+        color: C.black,
+      });
+      y += 12;
+    }
+    y += 4;
+  }
 
   if (bankInfo) {
     page.drawText('CUENTAS BANCARIAS:', {
@@ -565,8 +662,9 @@ export async function buildFiscalReceiptTicketPdf(
   let y = TICKET_M + 4;
 
   if (logo) {
-    const logoMax = 52;
-    const scale = Math.min(logoMax / logo.width, logoMax / logo.height, 1);
+    const logoMaxW = contentW * 0.55;
+    const logoMaxH = 44;
+    const scale = Math.min(logoMaxW / logo.width, logoMaxH / logo.height);
     const lw = logo.width * scale;
     const lh = logo.height * scale;
     page.drawImage(logo, {
@@ -606,6 +704,10 @@ export async function buildFiscalReceiptTicketPdf(
 
   const issue = (receipt.issue_date ?? '').slice(0, 10);
   y = drawTicketKv(page, 'F. Emisión:', issue || '—', y, font, fontB);
+  const periodTicket = (receipt.period_label ?? '').trim();
+  if (periodTicket) {
+    y = drawTicketKv(page, 'Período:', periodTicket, y, font, fontB);
+  }
   y = drawTicketKv(page, 'Cliente:', receipt.customer_name ?? '—', y, font, fontB);
   y = drawTicketKv(
     page,
@@ -615,7 +717,7 @@ export async function buildFiscalReceiptTicketPdf(
     font,
     fontB,
   );
-  y = drawTicketKv(page, 'Dirección:', receipt.company?.address?.trim() || '—', y, font, fontB);
+  y = drawTicketAddressBlock(page, receipt.company?.address?.trim() || '—', y, font, fontB);
   y = drawTicketKv(page, 'Vendedor:', sellerName(receipt), y, font, fontB);
   y += 2;
   drawTicketDivider(page, y);
@@ -702,7 +804,7 @@ export async function buildFiscalReceiptTicketPdf(
   y += 10;
 
   const total = receipt.total ?? 0;
-  const totalLabel = `TOTAL A PAGAR: S/ ${money(total)}`;
+  const totalLabel = `TOTAL A PAGAR: ${moneyPen(total)}`;
   const tlw = fontB.widthOfTextAtSize(totalLabel, 7.5);
   page.drawText(totalLabel, {
     x: TICKET_W - TICKET_M - tlw,
@@ -713,43 +815,46 @@ export async function buildFiscalReceiptTicketPdf(
   });
   y += 14;
 
-  if (bankInfo) {
-    for (const para of bankInfo.split(/\n+/)) {
-      const blines = wrapLines(para.trim(), 42, 8);
-      for (const ln of blines) {
-        drawCentered(page, ln, y, 6, font, C.black);
-        y += 7;
-      }
-      y += 1;
-    }
-    y += 4;
-  }
-
   const pays = receipt.payments ?? [];
   if (pays.length > 0) {
     page.drawText('PAGOS:', { x: TICKET_M, y: topY(page, y + 7), size: 6.5, font: fontB, color: C.black });
     y += 9;
     const payDate = formatDateDDMMYYYY(issue);
     for (const p of pays) {
-      const line = `- ${payDate} - ${paymentMethodDisplay(p.method)} - S/ ${money(p.amount)}`;
+      const line = `- ${payDate} - ${paymentMethodDisplay(p.method)} - ${moneyPen(p.amount)}`;
       for (const ln of wrapLines(line, 44, 2)) {
         page.drawText(ln, { x: TICKET_M, y: topY(page, y + 7), size: 6, font, color: C.black });
         y += 8;
       }
     }
   } else {
-    const pm = paymentMethodLabel(receipt);
     const payDate = formatDateDDMMYYYY(issue);
+    const methods = paymentMethodsForPdf(receipt);
     page.drawText('PAGOS:', { x: TICKET_M, y: topY(page, y + 7), size: 6.5, font: fontB, color: C.black });
     y += 9;
-    const line = `- ${payDate} - ${pm} - S/ ${money(total)}`;
-    page.drawText(line, { x: TICKET_M, y: topY(page, y + 7), size: 6, font, color: C.black });
-    y += 8;
+    if (methods.length === 0) {
+      page.drawText(`- ${payDate} - — - ${moneyPen(total)}`, {
+        x: TICKET_M,
+        y: topY(page, y + 7),
+        size: 6,
+        font,
+        color: C.black,
+      });
+      y += 8;
+    } else {
+      for (const m of methods) {
+        const line = `- ${payDate} - ${m.method} - ${moneyPen(m.amount)}`;
+        for (const ln of wrapLines(line, 44, 2)) {
+          page.drawText(ln, { x: TICKET_M, y: topY(page, y + 7), size: 6, font, color: C.black });
+          y += 8;
+        }
+      }
+    }
   }
 
   const paid = pays.reduce((s, p) => s + Number(p.amount ?? 0), 0);
   const saldo = Math.max(0, total - paid);
-  const saldoLabel = `SALDO: S/ ${money(saldo)}`;
+  const saldoLabel = `SALDO: ${moneyPen(saldo)}`;
   const slw = font.widthOfTextAtSize(saldoLabel, 6.5);
   page.drawText(saldoLabel, {
     x: TICKET_W - TICKET_M - slw,
@@ -758,7 +863,33 @@ export async function buildFiscalReceiptTicketPdf(
     font,
     color: C.black,
   });
-  y += 16;
+  y += 10;
+
+  if (bankInfo) {
+    page.drawText('CUENTAS BANCARIAS:', {
+      x: TICKET_M,
+      y: topY(page, y + 7),
+      size: 6.5,
+      font: fontB,
+      color: C.black,
+    });
+    y += 9;
+    for (const para of bankInfo.split(/\n+/)) {
+      const blines = wrapLines(para.trim(), 42, 8);
+      for (const ln of blines) {
+        page.drawText(ln, {
+          x: TICKET_M,
+          y: topY(page, y + 6),
+          size: 6,
+          font,
+          color: C.black,
+        });
+        y += 7;
+      }
+      y += 1;
+    }
+    y += 4;
+  }
 
   drawCentered(page, 'GRACIAS POR SU PREFERENCIA', y, 7.5, fontB, C.gray);
   y += 12;
@@ -793,4 +924,42 @@ function drawTicketKv(
     color: C.black,
   });
   return y + 10;
+}
+
+/** Dirección en ticket: etiqueta a la izquierda, valor alineado como el resto de filas; salto solo si no cabe. */
+function drawTicketAddressBlock(
+  page: PDFPage,
+  address: string,
+  y: number,
+  font: PDFFont,
+  fontB: PDFFont,
+): number {
+  const size = 6.5;
+  const label = 'Dirección:';
+  const labelW = fontB.widthOfTextAtSize(label, size);
+  const gap = 4;
+  const valueX = TICKET_M + labelW + gap;
+  const valueW = TICKET_W - TICKET_M - valueX;
+  const lines = wrapLinesByWidth(address, font, size, valueW, 12);
+  const toDraw = lines.length > 0 ? lines : ['—'];
+  for (let i = 0; i < toDraw.length; i++) {
+    if (i === 0) {
+      page.drawText(label, {
+        x: TICKET_M,
+        y: topY(page, y + size),
+        size,
+        font: fontB,
+        color: C.black,
+      });
+    }
+    page.drawText(toDraw[i], {
+      x: valueX,
+      y: topY(page, y + size),
+      size,
+      font,
+      color: C.black,
+    });
+    y += 8;
+  }
+  return y + 2;
 }

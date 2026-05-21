@@ -41,7 +41,6 @@ function buildUpsert(input: {
   categoryId: number | null;
   igvAffect: IgvAffectation;
   priceIncludesIgv: boolean;
-  tukifacItemId: string;
 }): ProductUpsertInput {
   const sym = 'S/';
   const saleText = `${sym} ${input.price.toFixed(2)}`;
@@ -79,7 +78,7 @@ function buildUpsert(input: {
     sale_unit_price: saleText,
     purchase_unit_price: purchaseText,
     apply_store: true,
-    tukifac_item_id: input.tukifacItemId.trim() === '' ? null : input.tukifacItemId.trim(),
+    tukifac_item_id: input.internalId.trim() === '' ? null : input.internalId.trim(),
   };
 }
 
@@ -112,9 +111,8 @@ const ProductForm = () => {
   const [catSaving, setCatSaving] = useState(false);
   const [catError, setCatError] = useState('');
 
-  const [tukifacItemId, setTukifacItemId] = useState('');
-  /** Si viene del sync sellnow, la API envía esta marca temporal. */
-  const [tukifacCreatedAt, setTukifacCreatedAt] = useState<string | null>(null);
+  /** Marca de ítems importados históricamente (campo legacy en BD). */
+  const [importedAt, setImportedAt] = useState<string | null>(null);
   const [remoteCategoryId, setRemoteCategoryId] = useState(0);
   const [imageUrl, setImageUrl] = useState('');
   const [loading, setLoading] = useState(!!editId);
@@ -148,8 +146,10 @@ const ProductForm = () => {
         setCategoryIdStr(p.product_category_id ? String(p.product_category_id) : '');
         setIgvAffect(affectationFromProduct(p.sale_affectation_igv_type_id));
         setPriceIncludesIgv(Boolean(p.price_includes_igv));
-        setTukifacItemId(normalizeTukifacItemIdFromApi(p.tukifac_item_id));
-        setTukifacCreatedAt(p.tukifac_created_at?.trim() ? p.tukifac_created_at : null);
+        if (!p.internal_id?.trim() && p.tukifac_item_id != null) {
+          setInternalId(normalizeTukifacItemIdFromApi(p.tukifac_item_id));
+        }
+        setImportedAt(p.tukifac_created_at?.trim() ? p.tukifac_created_at : null);
         setRemoteCategoryId(Number(p.category_id) || 0);
         setImageUrl((p.image_url ?? '').trim());
       })
@@ -218,7 +218,6 @@ const ProductForm = () => {
         categoryId: Number.isFinite(catNum) && catNum > 0 ? catNum : null,
         igvAffect,
         priceIncludesIgv,
-        tukifacItemId,
       });
       if (editId) {
         payload.category_id = remoteCategoryId;
@@ -246,7 +245,7 @@ const ProductForm = () => {
     );
   }
 
-  const fromTukifac = Boolean(tukifacCreatedAt);
+  const fromImport = Boolean(importedAt);
 
   return (
     <div className={PAGE_CLASS}>
@@ -261,11 +260,11 @@ const ProductForm = () => {
         </Link>
       </div>
 
-      {fromTukifac ? (
+      {fromImport ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-xs text-emerald-900 flex flex-wrap items-center gap-2">
-          <span className="font-semibold">Sincronizado con Tukifac</span>
+          <span className="font-semibold">Ítem importado al catálogo</span>
           <span className="text-emerald-800/80 font-mono">
-            {tukifacItemId.trim() !== '' ? tukifacItemId.trim() : 'sin código interno'}
+            {internalId.trim() !== '' ? internalId.trim() : 'sin código interno'}
           </span>
           {imageUrl ? (
             <a href={imageUrl} target="_blank" rel="noreferrer" className="ml-auto">
@@ -344,31 +343,10 @@ const ProductForm = () => {
               className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500 outline-none"
             />
             <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-              Tukifac acepta <span className="font-medium">codigo_interno</span> alfanumérico (no solo dígitos). Debe coincidir exactamente con el{' '}
-              <span className="font-medium">internal_id</span> del ítem en el tenant. Por defecto se iguala al código de barras si lo edita allí primero.
+              Alfanumérico (letras y/o números). Se usa al emitir comprobantes y en el POS. Por defecto se iguala al código de barras si lo
+              edita allí primero.
             </p>
           </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Código interno Tukifac <span className="text-slate-400 font-normal">(opcional)</span>
-          </label>
-          <input
-            type="text"
-            inputMode="text"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={64}
-            value={tukifacItemId}
-            onChange={(e) => setTukifacItemId(e.target.value)}
-            placeholder="Ej. VARIOUS_ITEM — mismo codigo_interno que en el tenant Tukifac"
-            className="w-full max-w-md px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500 outline-none"
-          />
-          <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-            Si lo completa, coincide con el <span className="font-medium">codigo_interno</span> del ítem en Tukifac. Al emitir <strong>notas de
-            venta</strong> desde pagos se usará como identificador de línea (junto con el código interno del producto si no hay este campo).
-          </p>
         </div>
 
         <div>

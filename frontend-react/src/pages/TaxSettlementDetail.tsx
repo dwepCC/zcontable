@@ -266,8 +266,8 @@ const TaxSettlementDetail = () => {
                 Comprobantes
               </Link>
               <Link
-                to={`/documents/fiscal-receipts?company_id=${row.company_id}`}
-                title="Conciliación — comprobantes pendientes"
+                to={`/comprobantes?status=pendiente_vincular&company_id=${row.company_id}`}
+                title="Comprobantes pendientes de vincular"
                 className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
               >
                 <i className="fas fa-balance-scale text-xs shrink-0" aria-hidden />

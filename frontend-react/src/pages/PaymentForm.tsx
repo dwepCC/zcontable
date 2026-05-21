@@ -17,8 +17,13 @@ import {
 import type { Company, Document } from '../types/dashboard';
 import SearchableSelect from '../components/SearchableSelect';
 import TukifacIssueLinksDialog from '../components/TukifacIssueLinksDialog';
+import PosReceiptModal from '../components/pos/PosReceiptModal';
+import { configService } from '../services/config';
+import { fiscalReceiptsService } from '../services/fiscalReceipts';
+import type { PosSaleDetail } from '../services/posSales';
 import { resolveBackendUrl } from '../api/client';
 import { parseTukifacReceiptViewLinks, type TukifacReceiptViewLinks } from '../utils/tukifacReceiptLinks';
+import { isLocalFiscalReceipt } from '../utils/fiscalReceiptLocal';
 
 function getErrorMessage(e: unknown): string {
   if (!e || typeof e !== 'object') return 'Error al guardar el pago';
@@ -32,16 +37,16 @@ function getErrorMessage(e: unknown): string {
   return 'Error al guardar el pago';
 }
 
-function getTukifacErrorMessage(e: unknown): string {
-  if (!e || typeof e !== 'object') return 'Error al enviar el comprobante a Tukifac';
-  if (!('response' in e)) return 'Error al enviar el comprobante a Tukifac';
+function getComprobanteErrorMessage(e: unknown): string {
+  if (!e || typeof e !== 'object') return 'Error al emitir el comprobante';
+  if (!('response' in e)) return 'Error al emitir el comprobante';
   const maybe = e as { response?: { data?: unknown } };
   const data = maybe.response?.data;
   if (data && typeof data === 'object' && 'error' in data) {
     const msg = (data as { error?: unknown }).error;
     if (typeof msg === 'string' && msg.trim()) return msg;
   }
-  return 'Error al enviar el comprobante a Tukifac';
+  return 'Error al emitir el comprobante';
 }
 
 function newManualAllocKey(): string {
@@ -191,14 +196,24 @@ const PaymentForm = () => {
   const [tukifacKind, setTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
   const [comprobanteSeriesId, setComprobanteSeriesId] = useState('');
   const [seriesRefresh, setSeriesRefresh] = useState(0);
-  /** Tras emitir Tukifac desde este formulario, enlaces ticket / PDF antes de ir al listado. */
+  /** Tras emitir comprobante legacy con URLs externas, enlaces antes de ir al listado. */
   const [tukifacPostSaveLinks, setTukifacPostSaveLinks] = useState<TukifacReceiptViewLinks | null>(null);
+  const [issuedReceipt, setIssuedReceipt] = useState<PosSaleDetail | null>(null);
+  const [firmBranding, setFirmBranding] = useState<{
+    name?: string;
+    ruc?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    logo_url?: string;
+    statement_bank_info?: string;
+  }>({});
 
   const effectivePaymentType: 'applied' | 'on_account' = isEdit
     ? (loadedPaymentType ?? 'on_account')
     : derivePaymentType(applyMode, documentId, manualAlloc);
 
-  /** Nuevo pago desde liquidación emitida: siempre se emite comprobante en Tukifac tras guardar el pago. */
+  /** Nuevo pago desde liquidación emitida: se emite comprobante local tras guardar el pago. */
   const showComprobanteEmision =
     !isEdit && Boolean(settlementLink) && effectivePaymentType === 'applied' && canIssueComprobante;
 
@@ -301,6 +316,10 @@ const PaymentForm = () => {
       setUploading(false);
     }
   };
+
+  useEffect(() => {
+    void configService.getFirmBranding().then(setFirmBranding).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const run = async () => {
@@ -624,6 +643,11 @@ const PaymentForm = () => {
                 detail: { type: 'success', message: `Comprobante ${issueOut.receipt.number} emitido correctamente.` },
               }),
             );
+            if (isLocalFiscalReceipt(issueOut.receipt.origin)) {
+              const detail = await fiscalReceiptsService.getDetail(issueOut.receipt.id);
+              setIssuedReceipt(detail);
+              return;
+            }
             const viewLinks = parseTukifacReceiptViewLinks(issueOut.receipt);
             if (viewLinks) {
               setTukifacPostSaveLinks(viewLinks);
@@ -635,7 +659,7 @@ const PaymentForm = () => {
               new CustomEvent('miweb:toast', {
                 detail: {
                   type: 'error',
-                  message: `Pago guardado. No se pudo emitir el comprobante: ${getTukifacErrorMessage(te)}`,
+                  message: `Pago guardado. No se pudo emitir el comprobante: ${getComprobanteErrorMessage(te)}`,
                 },
               }),
             );
@@ -671,6 +695,16 @@ const PaymentForm = () => {
           navigate('/payments', { replace: true });
         }}
         continueLabel="Ir al listado de pagos"
+      />
+      <PosReceiptModal
+        open={Boolean(issuedReceipt)}
+        receipt={issuedReceipt}
+        firm={firmBranding}
+        variant="post_sale"
+        onClose={() => {
+          setIssuedReceipt(null);
+          navigate('/payments', { replace: true });
+        }}
       />
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0 pr-1">

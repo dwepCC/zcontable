@@ -124,25 +124,95 @@ func (s *FiscalReceiptIssueService) IssueComprobanteFromPayment(paymentID uint, 
 		return nil, err
 	}
 
-	rec := models.TukifacFiscalReceipt{
-		ExternalID:             externalID,
-		CompanyID:              co.ID,
-		DocumentTypeID:         docType,
-		Number:                 fullNumber,
-		Total:                  math.Round(pay.Amount*100) / 100,
-		IssueDate:              issueDate,
-		CustomerNumber:         strings.TrimSpace(co.RUC),
-		CustomerName:           customerName,
-		ReconciliationStatus:   models.TukifacReceiptPending,
-		StateTypeDescription:   "Emitido localmente",
-		Origin:                 models.TukifacReceiptOriginIssuedLocal,
+	lines := buildLinesFromPaymentAllocations(&pay)
+	subtotal, tax, total := sumLineTotals(lines)
+	if total <= 0 {
+		total = roundFiscalMoney(pay.Amount)
+		if total > 0 {
+			subtotal = roundFiscalMoney(total / 1.18)
+			tax = roundFiscalMoney(total - subtotal)
+			lines = []models.FiscalReceiptLine{{
+				LineType:     models.FiscalReceiptLineTypeManual,
+				ProductName:  "Servicios contables",
+				Description:  "Servicios contables",
+				InternalCode: "0001",
+				UnitTypeID:   "NIU",
+				Quantity:     1,
+				UnitPrice:    total,
+				LineSubtotal: subtotal,
+				IGVRate:      18,
+				IGVAmount:    tax,
+				LineTotal:    total,
+				SortOrder:    0,
+			}}
+		}
 	}
-	if err := database.DB.Create(&rec).Error; err != nil {
+
+	pm := strings.TrimSpace(pay.Method)
+	if pm == "" {
+		pm = "efectivo"
+	}
+	sid := ser.ID
+
+	rec := models.TukifacFiscalReceipt{
+		ExternalID:           externalID,
+		CompanyID:            co.ID,
+		DocumentTypeID:       docType,
+		Number:               fullNumber,
+		Total:                total,
+		Subtotal:             subtotal,
+		TaxAmount:            tax,
+		IssueDate:            issueDate,
+		CustomerNumber:       strings.TrimSpace(co.RUC),
+		CustomerName:         customerName,
+		ReconciliationStatus: models.TukifacReceiptPending,
+		StateTypeDescription: "Emitido localmente",
+		Origin:               models.TukifacReceiptOriginIssuedLocal,
+		FiscalSeriesID:       &sid,
+		PaymentMethod:        pm,
+		PaymentReference:     strings.TrimSpace(pay.Reference),
+	}
+
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Create(&rec).Error; e != nil {
+			return e
+		}
+		for i := range lines {
+			ln := lines[i]
+			ln.FiscalReceiptID = rec.ID
+			if e := tx.Create(&ln).Error; e != nil {
+				return e
+			}
+		}
+		paySnap := models.FiscalReceiptPayment{
+			FiscalReceiptID: rec.ID,
+			SortOrder:       0,
+			Method:          pm,
+			Amount:          total,
+			OperationNumber: strings.TrimSpace(pay.Reference),
+		}
+		if e := tx.Create(&paySnap).Error; e != nil {
+			return e
+		}
+		pid := pay.ID
+		rec.LinkedPaymentID = &pid
+		rec.ReconciliationStatus = models.TukifacReceiptLinked
+		if pay.TaxSettlementID != nil && *pay.TaxSettlementID > 0 {
+			tid := *pay.TaxSettlementID
+			rec.TaxSettlementID = &tid
+		}
+		if e := tx.Save(&rec).Error; e != nil {
+			return e
+		}
+		return tx.Model(&models.Payment{}).Where("id = ?", pay.ID).Update("fiscal_status", "linked").Error
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := s.receipt.LinkIssuedReceiptToPayment(&rec, &pay); err != nil {
-		return &rec, err
+
+	detail, err := s.receipt.GetFiscalReceiptDetail(rec.ID)
+	if err != nil {
+		return &rec, nil
 	}
-	_ = database.DB.Preload("Company").First(&rec, rec.ID).Error
-	return &rec, nil
+	return detail, nil
 }

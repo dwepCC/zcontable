@@ -173,6 +173,12 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
                   <dt className="text-slate-500">RUC/DNI</dt>
                   <dd className="font-medium">{receipt.customer_number || '—'}</dd>
                 </div>
+                {(receipt.period_label ?? '').trim() ? (
+                  <div>
+                    <dt className="text-slate-500">Período</dt>
+                    <dd className="font-medium">{receipt.period_label}</dd>
+                  </div>
+                ) : null}
               </dl>
               {(receipt.payments?.length ?? 0) > 0 ? (
                 <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -180,7 +186,7 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
                   <ul className="divide-y divide-slate-100 text-sm">
                     {receipt.payments!.map((p) => (
                       <li key={p.id} className="px-3 py-2 flex flex-wrap justify-between gap-2">
-                        <span className="capitalize">
+                        <span>
                           {p.method}
                           {p.operation_number ? (
                             <span className="text-slate-500 font-normal"> · Op. {p.operation_number}</span>

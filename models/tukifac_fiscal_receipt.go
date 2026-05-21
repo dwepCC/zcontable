@@ -57,6 +57,9 @@ type TukifacFiscalReceipt struct {
 	IssuedByUser   *User                `gorm:"foreignKey:IssuedByUserID" json:"issued_by_user,omitempty"`
 	Lines          []FiscalReceiptLine     `gorm:"foreignKey:FiscalReceiptID" json:"lines,omitempty"`
 	Payments       []FiscalReceiptPayment  `gorm:"foreignKey:FiscalReceiptID" json:"payments,omitempty"`
+
+	// Campos calculados en detalle (no persistidos).
+	PeriodLabel string `gorm:"-" json:"period_label,omitempty"`
 }
 
 func (TukifacFiscalReceipt) TableName() string {

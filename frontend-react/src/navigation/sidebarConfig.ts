@@ -99,18 +99,17 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
           },
           { to: '/documents', icon: 'fas fa-file-invoice-dollar', label: 'Deudas', permission: P.documentsView },
           { to: '/tax-settlements', icon: 'fas fa-file-signature', label: 'Liquidaciones', permission: P.taxSettlementsList },
-          { to: '/comprobantes', icon: 'fas fa-file-invoice', label: 'Comprobantes', permission: P.tukifacFiscalReceiptsList },
+          { to: '/comprobantes', icon: 'fas fa-file-invoice', label: 'Comprobantes', permission: P.fiscalReceiptsList },
           { to: '/payments', icon: 'fas fa-wallet', label: 'Pagos', permission: P.paymentsView },
           { to: '/finance/calendar', icon: 'fas fa-calendar-days', label: 'Calendario', permission: P.financeCalendarView },
         ],
       },
       {
         type: 'group',
-        label: 'Catálogo e integraciones',
+        label: 'Catálogo',
         items: [
           { to: '/subscription-plans', icon: 'fas fa-layer-group', label: 'Planes', permission: P.subscriptionPlansView },
           { to: '/products', icon: 'fas fa-box-open', label: 'Productos', permission: P.productsView },
-          { to: '/documents/fiscal-receipts', icon: 'fas fa-link', label: 'Conciliación comprobantes', permission: P.fiscalReceiptsList },
         ],
       },
       {

@@ -87,7 +87,7 @@ function App() {
             <Route path="tukifac/documentos" element={<Navigate to="/comprobantes" replace />} />
             <Route path="documents/tukifac" element={<Navigate to="/comprobantes" replace />} />
             <Route path="documents/fiscal-receipts" element={<FiscalReceipts />} />
-            <Route path="fiscal-receipts" element={<Navigate to="/documents/fiscal-receipts" replace />} />
+            <Route path="fiscal-receipts" element={<Navigate to="/comprobantes?status=pendiente_vincular" replace />} />
             <Route path="plan-categories" element={<PlanCategories />} />
             <Route path="plan-categories/new" element={<PlanCategoryForm />} />
             <Route path="plan-categories/:id/edit" element={<PlanCategoryForm />} />

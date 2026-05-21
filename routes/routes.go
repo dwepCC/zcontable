@@ -117,7 +117,9 @@ func Setup(app *fiber.App) {
 	api.Get("/sale-note/series", middleware.RequirePermission(rbac.FiscalSeriesView), fiscalSeriesCtrl.ListAPI)
 
 	api.Get("/fiscal-receipts", middleware.RequirePermission(rbac.FiscalReceiptsList), fiscalReceiptCtrl.ListFiscalReceiptsAPI)
+	api.Get("/fiscal-receipts/:id", middleware.RequirePermission(rbac.FiscalReceiptsList), fiscalReceiptCtrl.GetAPI)
 	api.Get("/tukifac/fiscal-receipts", middleware.RequirePermission(rbac.FiscalReceiptsList), fiscalReceiptCtrl.ListFiscalReceiptsAPI)
+	api.Get("/tukifac/fiscal-receipts/:id", middleware.RequirePermission(rbac.FiscalReceiptsList), fiscalReceiptCtrl.GetAPI)
 	api.Post("/fiscal-receipts/:id/create-payment", middleware.RequirePermission(rbac.FiscalReceiptsCreatePayment), fiscalReceiptCtrl.CreatePaymentFromReceiptAPI)
 	api.Post("/tukifac/fiscal-receipts/:id/create-payment", middleware.RequirePermission(rbac.FiscalReceiptsCreatePayment), fiscalReceiptCtrl.CreatePaymentFromReceiptAPI)
 	api.Post("/fiscal-receipts/:id/link-payment", middleware.RequirePermission(rbac.FiscalReceiptsLinkPayment), fiscalReceiptCtrl.LinkReceiptAPI)
