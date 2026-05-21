@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
+  HOME_LINK,
   STUDIO_SECTION,
   filterSidebarEntries,
   getVisibleOperationalModules,
@@ -290,10 +291,47 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
     );
   };
 
+  const homeLinkClass = ({ isActive }: { isActive: boolean }) => {
+    const base =
+      'group flex items-center gap-3 rounded-2xl text-[13px] leading-snug transition-all duration-200 mb-2';
+    const active = 'bg-gradient-to-r from-[#0B8A72] to-[#0A7C66] text-white font-semibold';
+    const inactive = 'text-white/75 hover:bg-white/10 hover:text-white/95 font-medium';
+    return `${base} ${isActive ? active : inactive} ${isCollapsed ? 'justify-center px-3 py-2.5' : 'px-4 py-2.5'}`;
+  };
+
+  const renderHomeLink = (variant: LinkVariant, onNavigate?: () => void) => (
+    <NavLink
+      to={HOME_LINK.to}
+      end={HOME_LINK.exact}
+      title={HOME_LINK.label}
+      onClick={onNavigate}
+      className={
+        variant === 'mobile'
+          ? ({ isActive }) =>
+              `flex items-center gap-4 rounded-xl px-4 py-3 text-sm font-medium ${
+                isActive ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10'
+              }`
+          : homeLinkClass
+      }
+    >
+      <span
+        className={`flex shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/90 ${
+          variant === 'mobile' ? 'h-8 w-8' : 'h-9 w-9'
+        }`}
+      >
+        <i className={HOME_LINK.icon} aria-hidden />
+      </span>
+      {variant === 'mobile' || !isCollapsed ? (
+        <span className="truncate">{HOME_LINK.label}</span>
+      ) : null}
+    </NavLink>
+  );
+
   const desktopNav = (
     <nav
       className={`custom-scrollbar flex min-h-0 flex-1 flex-col space-y-0 overflow-y-auto overflow-x-visible py-1 pr-1 ${isCollapsed ? 'pl-2' : 'pl-4'}`}
     >
+      {renderHomeLink('desktop-expanded')}
       {visibleOperationalModules.length > 0 ? (
         <p
           className={`px-2 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white/45 ${
@@ -376,7 +414,8 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
       >
         <div className={`flex w-full shrink-0 items-center justify-center ${isCollapsed ? 'px-3 py-7' : 'px-6 py-8'}`}>
           <NavLink
-            to="/dashboard"
+            to="/"
+            end
             className="flex w-full max-w-[150px] justify-center"
             title="ZContable"
             aria-label="Inicio"
@@ -401,7 +440,8 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
       >
         <div className="relative flex shrink-0 items-center justify-center border-b border-white/10 px-6 py-6 min-h-[4.5rem]">
           <NavLink
-            to="/dashboard"
+            to="/"
+            end
             onClick={onClose}
             className="flex max-w-[150px] w-full justify-center"
             aria-label="Inicio"
@@ -418,6 +458,7 @@ const Sidebar = ({ isOpen, onClose, isCollapsed }: SidebarProps) => {
           </button>
         </div>
         <nav className="custom-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden py-4 pl-3 pr-1">
+          <div className="mb-3 px-1">{renderHomeLink('mobile', onClose)}</div>
           {visibleOperationalModules.length > 0 ? (
             <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">Módulos</p>
           ) : null}

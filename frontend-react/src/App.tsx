@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import Layout from './layouts/Layout';
 import Dashboard from './pages/Dashboard';
 import Companies from './pages/Companies';
+import ExternalClients from './pages/ExternalClients';
 import CompanyForm from './pages/CompanyForm';
 import CompanyStatement from './pages/CompanyStatement';
 import CompanyContacts from './pages/CompanyContacts';
@@ -71,6 +72,7 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="m/:slug" element={<ModuleComingSoon />} />
             <Route path="companies" element={<Companies />} />
+            <Route path="companies/external" element={<ExternalClients />} />
             <Route path="companies/new" element={<CompanyForm />} />
             <Route path="companies/:id/edit" element={<CompanyForm />} />
             <Route path="companies/:id/statement" element={<CompanyStatement />} />

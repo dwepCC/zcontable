@@ -26,6 +26,9 @@ const (
 	CompaniesAssignAccountant = "companies.assign_accountant"
 	CompaniesAssignSupervisor = "companies.assign_supervisor"
 	CompaniesAssignAssistant  = "companies.assign_assistant"
+	CompaniesExternalView     = "companies.external_view"
+	CompaniesConvertToStudio  = "companies.convert_to_studio"
+	CompaniesValidateDNI      = "companies.validate_dni"
 
 	ContactsView   = "contacts.view"
 	ContactsCreate = "contacts.create"
@@ -159,8 +162,8 @@ var AllPermissionCodes = []string{
 	AccessStudio,
 	DashboardView,
 	SettingsFirmView, SettingsFirmBrandingView, SettingsFirmUpdate, SettingsFirmUploadLogo, SettingsFirmUploadBankLogo, SettingsFirmUploadPaymentQR,
-	CompaniesValidateRUC, CompaniesNextCode, CompaniesImportTemplate, CompaniesImportSpreadsheet, CompaniesCreate, CompaniesUpdate, CompaniesStatus, CompaniesDelete, CompaniesView,
-	CompaniesAssignAccountant, CompaniesAssignSupervisor, CompaniesAssignAssistant,
+	CompaniesValidateRUC, CompaniesValidateDNI, CompaniesNextCode, CompaniesImportTemplate, CompaniesImportSpreadsheet, CompaniesCreate, CompaniesUpdate, CompaniesStatus, CompaniesDelete, CompaniesView,
+	CompaniesAssignAccountant, CompaniesAssignSupervisor, CompaniesAssignAssistant, CompaniesExternalView, CompaniesConvertToStudio,
 	ContactsView, ContactsCreate, ContactsUpdate, ContactsDelete,
 	DocumentsView, DocumentsCreate, DocumentsUpdate, DocumentsDelete,
 	PaymentsView, PaymentsCreate, PaymentsUpdate, PaymentsDelete, PaymentsIssueTukifac, PaymentsIssueComprobante, PaymentsUploadAttachment,

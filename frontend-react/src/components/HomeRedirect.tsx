@@ -1,13 +1,6 @@
-import { Navigate } from 'react-router-dom';
-import { auth } from '../services/auth';
-import { P } from '../rbac/codes';
+import Home from '../pages/Home';
 
-/** Redirige al inicio según permisos (emisor POS → /pos). */
-const HomeRedirect = () => {
-  if (auth.hasPermission(P.salesEmit) && !auth.hasPermission(P.dashboardView)) {
-    return <Navigate to="/pos" replace />;
-  }
-  return <Navigate to="/dashboard" replace />;
-};
+/** Ruta raíz protegida: vista Inicio (sin permisos especiales). */
+const HomeRedirect = () => <Home />;
 
 export default HomeRedirect;

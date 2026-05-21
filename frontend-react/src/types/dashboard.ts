@@ -5,8 +5,11 @@ export interface MonthlyPaymentStat {
   Height: number;
 }
 
+export type CompanyClientType = 'estudio' | 'externo';
+
 export interface Company {
   id: number;
+  client_type?: CompanyClientType;
   ruc: string;
   business_name: string;
   code: string; // Mapeado desde InternalCode con json:"code"

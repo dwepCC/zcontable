@@ -17,7 +17,15 @@ const PosHistory = () => {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<PosSaleDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [firm, setFirm] = useState<{ name?: string; ruc?: string }>({});
+  const [firm, setFirm] = useState<{
+    name?: string;
+    ruc?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    logo_url?: string;
+    statement_bank_info?: string;
+  }>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,7 +43,17 @@ const PosHistory = () => {
   }, [load]);
 
   useEffect(() => {
-    void configService.getFirmBranding().then((f) => setFirm({ name: f.name, ruc: f.ruc }));
+    void configService.getFirmBranding().then((f) =>
+      setFirm({
+        name: f.name,
+        ruc: f.ruc,
+        address: f.address,
+        phone: f.phone,
+        email: f.email,
+        logo_url: f.logo_url,
+        statement_bank_info: f.statement_bank_info,
+      }),
+    );
   }, []);
 
   const openReceipt = async (id: number) => {

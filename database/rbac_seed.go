@@ -130,6 +130,9 @@ func seedRBACPermissions(db *gorm.DB) error {
 		rbac.CompaniesAssignAccountant:   {Mod: "companies", Name: "Puede asignarse como contador de empresa"},
 		rbac.CompaniesAssignSupervisor:   {Mod: "companies", Name: "Puede asignarse como supervisor de empresa"},
 		rbac.CompaniesAssignAssistant:    {Mod: "companies", Name: "Puede asignarse como asistente de empresa"},
+		rbac.CompaniesExternalView:       {Mod: "companies", Name: "Ver clientes externos (POS)"},
+		rbac.CompaniesConvertToStudio:    {Mod: "companies", Name: "Convertir cliente externo a cliente del estudio"},
+		rbac.CompaniesValidateDNI:        {Mod: "companies", Name: "Consultar DNI (RENIEC)"},
 
 		rbac.ContactsView:   {Mod: "contacts", Name: "Ver contactos"},
 		rbac.ContactsCreate: {Mod: "contacts", Name: "Crear contacto"},

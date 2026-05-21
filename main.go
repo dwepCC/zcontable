@@ -25,6 +25,10 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
+	if err := database.RunCompanyMigrations(database.DB); err != nil {
+		log.Printf("company migrations: %v", err)
+	}
+
 	if err := database.BackfillUsernames(); err != nil {
 		log.Printf("backfill usernames: %v", err)
 	}

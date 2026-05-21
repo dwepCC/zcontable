@@ -19,6 +19,7 @@ import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
 
 import PosReceiptModal from '../../components/pos/PosReceiptModal';
+import PosQuickClientModal from '../../components/pos/PosQuickClientModal';
 
 import { configService } from '../../services/config';
 
@@ -86,7 +87,19 @@ const PosSale = () => {
 
   const [issuedReceipt, setIssuedReceipt] = useState<PosSaleDetail | null>(null);
 
-  const [firm, setFirm] = useState<{ name?: string; ruc?: string }>({});
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [quickClientOpen, setQuickClientOpen] = useState(false);
+  const [quickClientSeed, setQuickClientSeed] = useState('');
+  const canAddClient = auth.hasPermission(P.salesCompaniesPick);
+  const [firm, setFirm] = useState<{
+    name?: string;
+    ruc?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    logo_url?: string;
+    statement_bank_info?: string;
+  }>({});
 
 
 
@@ -204,7 +217,15 @@ const PosSale = () => {
 
         setSeries(ser);
 
-        setFirm({ name: branding.name, ruc: branding.ruc });
+        setFirm({
+          name: branding.name,
+          ruc: branding.ruc,
+          address: branding.address,
+          phone: branding.phone,
+          email: branding.email,
+          logo_url: branding.logo_url,
+          statement_bank_info: branding.statement_bank_info,
+        });
 
       })
 
@@ -806,7 +827,33 @@ const PosSale = () => {
 
               placeholder="Buscar cliente"
 
+              onQueryChange={setClientSearchQuery}
+
+              emptyStateAction={
+                canAddClient && clientSearchQuery.trim().length >= 2
+                  ? {
+                      label: 'Agregar nuevo cliente',
+                      onClick: () => {
+                        setQuickClientSeed(clientSearchQuery.trim());
+                        setQuickClientOpen(true);
+                      },
+                    }
+                  : undefined
+              }
             />
+            {canAddClient ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickClientSeed('');
+                  setQuickClientOpen(true);
+                }}
+                className="text-sm font-medium text-primary-700 hover:text-primary-800"
+              >
+                <i className="fas fa-user-plus mr-1 text-xs" />
+                Agregar nuevo cliente
+              </button>
+            ) : null}
 
             <label className="block text-sm font-medium text-slate-700">Tipo de comprobante</label>
 
@@ -968,6 +1015,19 @@ const PosSale = () => {
 
         }}
 
+      />
+
+      <PosQuickClientModal
+        open={quickClientOpen}
+        initialSearch={quickClientSeed}
+        onClose={() => setQuickClientOpen(false)}
+        onCreated={(c) => {
+          setCompanies((prev) => {
+            if (prev.some((x) => x.id === c.id)) return prev;
+            return [...prev, c].sort((a, b) => a.business_name.localeCompare(b.business_name));
+          });
+          setCompanyId(String(c.id));
+        }}
       />
 
     </div>

@@ -533,6 +533,7 @@ func parseCompanyImportRows(rows [][]string) ([]companyImportParsedRow, []Compan
 		fileCodes[strings.ToLower(code)] = excelIdx
 
 		c := models.Company{
+			ClientType:            models.CompanyClientTypeEstudio,
 			InternalCode:          code,
 			RUC:                   ruc,
 			BusinessName:          bname,

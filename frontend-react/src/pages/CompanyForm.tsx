@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { companiesService, type CompanyUpsertInput } from '../services/companies';
 import { usersService } from '../services/users';
 import { contactsService, type ContactUpsertInput } from '../services/contacts';
@@ -29,8 +29,10 @@ function rucDigits(raw: string): string {
 const CompanyForm = () => {
   const navigate = useNavigate();
   const params = useParams();
+  const [searchParams] = useSearchParams();
   const companyId = params.id ? Number(params.id) : null;
   const isEdit = Boolean(companyId);
+  const convertMode = isEdit && searchParams.get('convert') === '1';
 
   const isAdmin = useMemo(() => auth.hasPermission(P.accessStudio), []);
   const canUpsert = useMemo(
@@ -68,6 +70,7 @@ const CompanyForm = () => {
   const [subscriptionEndedAt, setSubscriptionEndedAt] = useState('');
   const [subscriptionActive, setSubscriptionActive] = useState(true);
   const [declaredBilling, setDeclaredBilling] = useState('');
+  const [clientType, setClientType] = useState<'estudio' | 'externo'>('estudio');
 
   const [activeTab, setActiveTab] = useState<'company' | 'team' | 'contacts'>('company');
 
@@ -101,6 +104,7 @@ const CompanyForm = () => {
         setSubscriptionPlans(plans.filter((p) => p.active !== false));
 
         if (c) {
+          setClientType(c.client_type === 'externo' ? 'externo' : 'estudio');
           setCode(c.code ?? '');
           setRuc(c.ruc ?? '');
           setStatus(c.status ?? 'activo');
@@ -357,6 +361,16 @@ const CompanyForm = () => {
       }
 
       if (isEdit && companyId) {
+        if (convertMode && clientType === 'externo') {
+          await companiesService.convertToStudio(companyId, payload);
+          window.dispatchEvent(
+            new CustomEvent('miweb:toast', {
+              detail: { type: 'success', message: 'Cliente convertido a cliente del estudio.' },
+            }),
+          );
+          navigate('/companies', { replace: true });
+          return;
+        }
         await companiesService.update(companyId, payload);
         window.dispatchEvent(
           new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Empresa actualizada correctamente.' } }),
@@ -408,16 +422,28 @@ const CompanyForm = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-slate-800">{isEdit ? 'Editar empresa' : 'Nueva empresa'}</h2>
-          <p className="text-sm text-slate-500">Datos maestros del cliente del estudio.</p>
+          <h2 className="text-xl font-semibold text-slate-800">
+            {convertMode ? 'Convertir a cliente del estudio' : isEdit ? 'Editar empresa' : 'Nueva empresa'}
+          </h2>
+          <p className="text-sm text-slate-500">
+            {convertMode
+              ? 'Complete plan, equipo y datos contables. El cliente dejará de ser solo POS.'
+              : 'Datos maestros del cliente del estudio.'}
+          </p>
         </div>
         <Link
-          to="/companies"
+          to={convertMode ? '/companies/external' : '/companies'}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50"
         >
           <i className="fas fa-arrow-left text-xs"></i> Volver al listado
         </Link>
       </div>
+
+      {convertMode ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Cliente externo (código {code}). Al guardar pasará a cliente del estudio con plan y equipo asignados.
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -1014,7 +1040,7 @@ const CompanyForm = () => {
             className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-primary-600 text-white text-sm font-medium shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 disabled:opacity-60"
           >
             <i className="fas fa-save mr-2 text-xs"></i>
-            {isEdit ? 'Guardar cambios' : 'Crear empresa'}
+            {convertMode ? 'Convertir a cliente del estudio' : isEdit ? 'Guardar cambios' : 'Crear empresa'}
           </button>
         </div>
       </form>

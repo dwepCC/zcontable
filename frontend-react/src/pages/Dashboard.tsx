@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import client from '../api/client';
 import { DashboardData } from '../types/dashboard';
 import { auth } from '../services/auth';
@@ -7,6 +7,7 @@ import { P } from '../rbac/codes';
 import { PeriodScoreMini, periodDebtMoraBadge } from '../utils/periodDebtScore';
 
 const Dashboard = () => {
+  const canViewDashboard = auth.hasPermission(P.dashboardView);
   const [activeCard, setActiveCard] = useState<number>(0);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,6 +18,7 @@ const Dashboard = () => {
   const isAdmin = useMemo(() => auth.hasPermission(P.accessStudio), []);
 
   useEffect(() => {
+    if (!canViewDashboard) return;
     const fetchData = async () => {
       const firstLoad = !dashboardLoadedOnceRef.current;
       try {
@@ -38,7 +40,11 @@ const Dashboard = () => {
     };
 
     void fetchData();
-  }, [debtOverdueFilter]);
+  }, [debtOverdueFilter, canViewDashboard]);
+
+  if (!canViewDashboard) {
+    return <Navigate to="/" replace />;
+  }
 
   if (loading) {
     return (

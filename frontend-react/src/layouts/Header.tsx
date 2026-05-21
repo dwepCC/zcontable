@@ -34,6 +34,8 @@ const Header = ({
   const [supervisorNotifications, setSupervisorNotifications] = useState<SupervisorNotification[]>([]);
   const [lastNotificationsFetchAt, setLastNotificationsFetchAt] = useState<number | null>(null);
   const canSupervisorNotif = useMemo(() => auth.hasPermission(P.supervisorsNotificationsView), []);
+  const canDashboard = useMemo(() => auth.hasPermission(P.dashboardView), []);
+  const canSearchCompanies = useMemo(() => auth.hasPermission(P.companiesView), []);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
@@ -64,7 +66,7 @@ const Header = ({
 
   useEffect(() => {
     const term = searchTerm.trim();
-    if (term.length <= 3) {
+    if (!canSearchCompanies || term.length <= 3) {
       setSearchResults([]);
       setShowResults(false);
       return;
@@ -85,7 +87,7 @@ const Header = ({
     }, 250);
 
     return () => window.clearTimeout(handle);
-  }, [searchTerm]);
+  }, [searchTerm, canSearchCompanies]);
 
   const fetchSupervisorNotifications = async () => {
     if (!canSupervisorNotif) return;
@@ -102,11 +104,17 @@ const Header = ({
       notificationsLoadingRef.current = true;
       setNotificationsLoading(true);
       setNotificationsError('');
-      const [response] = await Promise.all([
-        client.get<DashboardData>('/dashboard'),
-        fetchSupervisorNotifications(),
-      ]);
-      setDashboardData(response.data);
+      const tasks: Promise<void>[] = [fetchSupervisorNotifications()];
+      if (canDashboard) {
+        tasks.unshift(
+          client.get<DashboardData>('/dashboard').then((response) => {
+            setDashboardData(response.data);
+          }),
+        );
+      } else {
+        setDashboardData(null);
+      }
+      await Promise.all(tasks);
       const now = Date.now();
       lastNotificationsFetchAtRef.current = now;
       setLastNotificationsFetchAt(now);
@@ -138,7 +146,7 @@ const Header = ({
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [canSupervisorNotif]);
+  }, [canSupervisorNotif, canDashboard]);
 
   const financeNotificationsCount = useMemo(() => {
     const debt = dashboardData?.DebtCompaniesCount ?? dashboardData?.TopDebtors?.length ?? 0;
@@ -176,6 +184,7 @@ const Header = ({
             <i className={isSidebarCollapsed ? 'fas fa-angles-right' : 'fas fa-angles-left'}></i>
           </button>
 
+          {canSearchCompanies ? (
           <div className="relative group flex-1" ref={searchContainerRef}>
             <span className="absolute inset-y-0 left-4 flex items-center text-slate-400 group-focus-within:text-emerald-600 transition-colors">
               <i className="fas fa-search"></i>
@@ -222,6 +231,9 @@ const Header = ({
               </div>
             )}
           </div>
+          ) : (
+            <div className="flex-1" />
+          )}
         </div>
       </div>
 

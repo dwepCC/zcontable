@@ -158,6 +158,7 @@ const Companies = () => {
       const res = await companiesService.listPaged({
         q: qRaw || undefined,
         status: stRaw || undefined,
+        client_type: 'estudio',
         code_order: sp.get('code_order') === 'desc' ? 'desc' : 'asc',
         page: parsePositiveInt(sp.get('page'), 1),
         per_page: parsePositiveInt(sp.get('per_page'), 20),

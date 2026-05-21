@@ -1,5 +1,6 @@
 import client from '../api/client';
 import type { Company, TukifacFiscalReceipt } from '../types/dashboard';
+import type { DniValidationResult, RucValidationResult } from './companies';
 import type { PaginationMeta } from './payments';
 import type { Product } from './products';
 import type { FiscalSeriesItem } from './fiscalDocumentSeries';
@@ -49,11 +50,14 @@ export type FiscalReceiptLine = {
   product_id?: number;
   product_name: string;
   description: string;
+  internal_code?: string;
+  unit_type_id?: string;
   quantity: number;
   unit_price: number;
   line_subtotal: number;
   igv_amount: number;
   line_total: number;
+  sort_order?: number;
 };
 
 export type PosSaleDetail = TukifacFiscalReceipt & {
@@ -63,12 +67,35 @@ export type PosSaleDetail = TukifacFiscalReceipt & {
   notes?: string;
   payment_method?: string;
   payments?: FiscalReceiptPaymentRow[];
+  issued_by_user?: { name?: string; username?: string };
 };
 
 export const posSalesService = {
   async listCompanies(): Promise<Company[]> {
     const res = await client.get<{ data: Company[] }>('/pos/companies');
     return res.data?.data ?? [];
+  },
+
+  async createQuickCompany(body: {
+    ruc: string;
+    business_name: string;
+    trade_name?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+  }): Promise<Company> {
+    const res = await client.post<{ data: Company }>('/pos/companies', body);
+    return res.data.data;
+  },
+
+  async validateRuc(ruc: string): Promise<RucValidationResult> {
+    const res = await client.post<RucValidationResult>('/pos/companies/validate-ruc', { ruc });
+    return res.data;
+  },
+
+  async validateDni(dni: string): Promise<DniValidationResult> {
+    const res = await client.post<DniValidationResult>('/pos/companies/validate-dni', { dni });
+    return res.data;
   },
 
   async listSeries(activeOnly = true): Promise<FiscalSeriesItem[]> {

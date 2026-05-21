@@ -17,6 +17,17 @@ export type SidebarLinkItem = {
   exact?: boolean;
   /** Permiso module.action requerido para mostrar el enlace (auth.hasPermission). */
   permission?: string;
+  /** Visible para cualquier usuario autenticado (sin permiso). */
+  public?: boolean;
+};
+
+/** Inicio: accesible para todos los usuarios logueados. */
+export const HOME_LINK: SidebarLinkItem = {
+  to: '/',
+  icon: 'fas fa-home',
+  label: 'Inicio',
+  exact: true,
+  public: true,
 };
 
 export type SidebarGroup = {
@@ -80,6 +91,12 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
         items: [
           { to: '/dashboard', icon: 'fas fa-th-large', label: 'Dashboard', exact: true, permission: P.dashboardView },
           { to: '/companies', icon: 'fas fa-building', label: 'Empresas', permission: P.companiesView },
+          {
+            to: '/companies/external',
+            icon: 'fas fa-user-tag',
+            label: 'Clientes externos',
+            permission: P.companiesExternalView,
+          },
           { to: '/documents', icon: 'fas fa-file-invoice-dollar', label: 'Deudas', permission: P.documentsView },
           { to: '/tax-settlements', icon: 'fas fa-file-signature', label: 'Liquidaciones', permission: P.taxSettlementsList },
           { to: '/comprobantes', icon: 'fas fa-file-invoice', label: 'Comprobantes', permission: P.tukifacFiscalReceiptsList },
@@ -236,8 +253,9 @@ export function isComingSoonSlug(value: string): value is ComingSoonModuleSlug {
   return (COMING_SOON_MODULE_SLUGS as readonly string[]).includes(value);
 }
 
-/** Enlace visible solo con el permiso exacto del ítem (misma regla que la pantalla/API). */
+/** Enlace visible: público (logueado) o con el permiso del ítem. */
 export function isSidebarLinkVisible(link: SidebarLinkItem): boolean {
+  if (link.public) return true;
   const code = link.permission?.trim();
   if (!code) return false;
   return auth.hasPermission(code);
@@ -284,7 +302,9 @@ function normalizeNavPath(p: string): string {
 }
 
 function collectNavPaths(): NavPathRow[] {
-  const rows: NavPathRow[] = [];
+  const rows: NavPathRow[] = [
+    { moduleId: 'finance', path: '/', exact: true },
+  ];
   for (const mod of OPERATIONAL_MODULES) {
     for (const e of mod.entries) {
       if (e.type === 'link') {

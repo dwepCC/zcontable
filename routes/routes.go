@@ -61,6 +61,7 @@ func Setup(app *fiber.App) {
 
 	// Companies
 	api.Post("/companies/validate-ruc", middleware.RequirePermission(rbac.CompaniesValidateRUC), companyCtrl.ValidateRUCAPI)
+	api.Post("/companies/validate-dni", middleware.RequirePermission(rbac.CompaniesValidateDNI), companyCtrl.ValidateDNIAPI)
 	api.Get("/companies/next-internal-code", middleware.RequirePermission(rbac.CompaniesNextCode), companyCtrl.NextInternalCodeAPI)
 	api.Get("/companies/import/template", middleware.RequirePermission(rbac.CompaniesImportTemplate), companyCtrl.ImportTemplateAPI)
 	api.Post("/companies/import", middleware.RequirePermission(rbac.CompaniesImportSpreadsheet), companyCtrl.ImportCompaniesAPI)
@@ -69,6 +70,7 @@ func Setup(app *fiber.App) {
 	api.Get("/companies/:id/statement", middleware.RequirePermission(rbac.CompaniesView), companyCtrl.StatementAPI)
 	api.Post("/companies", middleware.RequirePermission(rbac.CompaniesCreate), companyCtrl.CreateAPI)
 	api.Put("/companies/:id", middleware.RequirePermission(rbac.CompaniesUpdate), companyCtrl.UpdateAPI)
+	api.Put("/companies/:id/convert-to-studio", middleware.RequirePermission(rbac.CompaniesConvertToStudio), companyCtrl.ConvertToStudioAPI)
 	api.Patch("/companies/:id/status", middleware.RequirePermission(rbac.CompaniesStatus), companyCtrl.PatchStatusAPI)
 	api.Delete("/companies/:id", middleware.RequirePermission(rbac.CompaniesDelete), companyCtrl.DeleteAPI)
 
@@ -131,6 +133,9 @@ func Setup(app *fiber.App) {
 	api.Get("/pos/sales", middleware.RequirePermission(rbac.SalesHistory), posSaleCtrl.ListAPI)
 	api.Get("/pos/sales/:id", middleware.RequirePermission(rbac.SalesHistory), posSaleCtrl.GetAPI)
 	api.Get("/pos/companies", middleware.RequirePermission(rbac.SalesCompaniesPick), posSaleCtrl.ListCompaniesAPI)
+	api.Post("/pos/companies", middleware.RequirePermission(rbac.SalesCompaniesPick), posSaleCtrl.CreateQuickCompanyAPI)
+	api.Post("/pos/companies/validate-ruc", middleware.RequirePermission(rbac.SalesCompaniesPick), companyCtrl.ValidateRUCAPI)
+	api.Post("/pos/companies/validate-dni", middleware.RequirePermission(rbac.SalesCompaniesPick), companyCtrl.ValidateDNIAPI)
 	api.Get("/pos/products", middleware.RequirePermission(rbac.SalesCatalogPick), posSaleCtrl.ListProductsAPI)
 	api.Get("/pos/document-series", middleware.RequirePermission(rbac.SalesEmit), fiscalSeriesCtrl.ListAPI)
 

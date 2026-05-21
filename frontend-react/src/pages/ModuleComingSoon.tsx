@@ -9,7 +9,7 @@ const ModuleComingSoon = () => {
   const { slug } = useParams();
 
   if (!slug || !isComingSoonSlug(slug)) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const copy = PLACEHOLDER_PAGE_COPY[slug];

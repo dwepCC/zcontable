@@ -16,7 +16,15 @@ type PreviewTab = 'summary' | 'a4' | 'ticket';
 type Props = {
   open: boolean;
   receipt: PosSaleDetail | null;
-  firm: { name?: string; ruc?: string };
+  firm: {
+    name?: string;
+    ruc?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    logo_url?: string;
+    statement_bank_info?: string;
+  };
   onClose: () => void;
   /** Tras emitir venta: sin descarga directa; acciones de nueva venta / historial. */
   variant?: 'post_sale' | 'history';
@@ -64,7 +72,7 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
     return () => {
       cancelled = true;
     };
-  }, [open, receipt, tab, firm.name, firm.ruc]);
+  }, [open, receipt, tab, firm]);
 
   useEffect(() => {
     if (!open) return;

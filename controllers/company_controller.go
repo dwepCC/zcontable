@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"miappfiber/models"
+	"miappfiber/rbac"
 	"miappfiber/services"
 
 	"github.com/gofiber/fiber/v3"
@@ -31,6 +32,14 @@ func NewCompanyController() *CompanyController {
 		accessService:  services.NewAccessService(),
 		apiPeruService: services.NewApiPeruService(),
 	}
+}
+
+func (ctrl *CompanyController) hasCompaniesPerm(c fiber.Ctx, code string) bool {
+	uid, err := getUserID(c)
+	if err != nil {
+		return false
+	}
+	return services.Authz().HasPermission(uid, code)
 }
 
 // ---- API ----
@@ -59,9 +68,19 @@ func (ctrl *CompanyController) ListAPI(c fiber.Ctx) error {
 		codeOrder = "asc"
 	}
 
+	clientType := strings.TrimSpace(c.Query("client_type", ""))
+	if clientType == models.CompanyClientTypeExterno {
+		if !hasStudioScope(c) && !ctrl.hasCompaniesPerm(c, rbac.CompaniesExternalView) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Sin permiso para ver clientes externos"})
+		}
+	} else if clientType == "" {
+		clientType = models.CompanyClientTypeEstudio
+	}
+
 	params := services.CompanyListParams{
 		Query:             q,
 		Status:            status,
+		ClientType:        clientType,
 		AllowedCompanyIDs: allowedIDs,
 		CodeOrder:         codeOrder,
 	}
@@ -143,6 +162,7 @@ func (ctrl *CompanyController) CreateAPI(c fiber.Ctx) error {
 	if err := c.Bind().Body(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
 	}
+	input.ClientType = models.CompanyClientTypeEstudio
 	if err := ctrl.companyService.Create(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -306,6 +326,36 @@ func (ctrl *CompanyController) ValidateRUCAPI(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(res)
+}
+
+func (ctrl *CompanyController) ValidateDNIAPI(c fiber.Ctx) error {
+	var body struct {
+		DNI string `json:"dni"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	res, err := ctrl.apiPeruService.LookupDNI(body.DNI)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(res)
+}
+
+func (ctrl *CompanyController) ConvertToStudioAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	var input models.Company
+	if err := c.Bind().Body(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	company, err := ctrl.companyService.ConvertToStudio(uint(id), &input)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(company)
 }
 
 func (ctrl *CompanyController) DeleteAPI(c fiber.Ctx) error {

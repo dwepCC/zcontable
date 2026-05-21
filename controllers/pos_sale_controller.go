@@ -19,14 +19,16 @@ import (
 )
 
 type PosSaleController struct {
-	svc     *services.PosSaleService
-	product *services.ProductService
+	svc            *services.PosSaleService
+	product        *services.ProductService
+	companyService *services.CompanyService
 }
 
 func NewPosSaleController() *PosSaleController {
 	return &PosSaleController{
-		svc:     services.NewPosSaleService(),
-		product: services.NewProductService(),
+		svc:            services.NewPosSaleService(),
+		product:        services.NewProductService(),
+		companyService: services.NewCompanyService(),
 	}
 }
 
@@ -110,6 +112,18 @@ func (ctrl *PosSaleController) ListCompaniesAPI(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"data": list})
+}
+
+func (ctrl *PosSaleController) CreateQuickCompanyAPI(c fiber.Ctx) error {
+	var body services.ExternalCompanyQuickInput
+	if err := c.Bind().Body(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	company, err := ctrl.companyService.CreateExternal(body)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"data": company})
 }
 
 func (ctrl *PosSaleController) ListProductsAPI(c fiber.Ctx) error {
