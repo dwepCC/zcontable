@@ -6,8 +6,17 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// SeedFiscalDocumentSeries crea series por defecto (idempotente).
+// SeedFiscalDocumentSeries inserta series por defecto solo en instalación vacía.
+// Si ya existe al menos una serie (p. ej. NV03 tras editar), no hace nada en cada deploy.
 func SeedFiscalDocumentSeries() error {
+	var count int64
+	if err := DB.Model(&models.FiscalDocumentSeries{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
 	defaults := []models.FiscalDocumentSeries{
 		{Name: "Nota de Venta", SunatCode: "00", Series: "NV01", CurrentNumber: 0, Active: true, Description: "Nota de venta interna (no se envía a SUNAT)"},
 		{Name: "Boleta", SunatCode: "03", Series: "B001", CurrentNumber: 0, Active: true, Description: "Boleta de venta electrónica"},

@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { resolveBackendUrl } from '../../api/client';
 import type { PosSaleDetail } from '../../services/posSales';
-import FiscalReceiptPdfCanvasPreview from '../../pdf/FiscalReceiptPdfCanvasPreview';
+import FiscalReceiptPdfCanvasPreview, {
+  printFiscalReceiptCanvasPreview,
+} from '../../pdf/FiscalReceiptPdfCanvasPreview';
 import {
   buildFiscalReceiptPdfBlob,
   docTypeLabel,
   downloadFiscalReceiptPdf,
+  fiscalReceiptPdfFilename,
   type ReceiptPdfFormat,
 } from '../../pdf/fiscalReceiptPdf';
 
@@ -26,8 +29,8 @@ type Props = {
     statement_bank_info?: string;
   };
   onClose: () => void;
-  /** Tras emitir venta: sin descarga directa; acciones de nueva venta / historial. */
-  variant?: 'post_sale' | 'history';
+  /** post_sale: POS; payment: tras pago con comprobante; history: listado comprobantes/POS. */
+  variant?: 'post_sale' | 'payment' | 'history';
 };
 
 const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: Props) => {
@@ -35,6 +38,7 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [busy, setBusy] = useState(false);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -85,7 +89,8 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
   if (!open || !receipt) return null;
 
   const lines = [...(receipt.lines ?? [])].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-  const allowDownload = variant === 'history';
+  const showPdfActions = true;
+  const downloadName = fiscalReceiptPdfFilename(receipt);
 
   return createPortal(
     <div className="fixed inset-0 z-[10000] flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -104,7 +109,11 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-primary-700">
-              {variant === 'post_sale' ? 'Venta registrada' : 'Comprobante'}
+              {variant === 'post_sale'
+                ? 'Venta registrada'
+                : variant === 'payment'
+                  ? 'Comprobante emitido'
+                  : 'Comprobante'}
             </p>
             <h2 id="pos-receipt-title" className="truncate text-lg font-semibold text-slate-900">
               {docTypeLabel(receipt.document_type_id ?? '')} {receipt.number}
@@ -241,7 +250,10 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-auto min-h-[280px] max-h-[min(420px,55vh)]">
+            <div
+              ref={previewWrapRef}
+              className="rounded-xl border border-slate-200 bg-slate-50 overflow-auto min-h-[280px] max-h-[min(420px,55vh)]"
+            >
               {loadingPreview ? (
                 <p className="flex h-[320px] items-center justify-center text-sm text-slate-500">
                   <i className="fas fa-spinner fa-spin mr-2" />
@@ -260,38 +272,60 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
         </div>
 
         <div className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-5 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            {allowDownload ? (
-              <>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void runAction(async () => {
-                      await downloadFiscalReceiptPdf(receipt, firm, undefined, 'a4');
-                    })
+          {showPdfActions ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void runAction(async () => {
+                    await downloadFiscalReceiptPdf(receipt, firm, undefined, 'a4');
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-800 hover:bg-primary-100 disabled:opacity-50"
+              >
+                <i className="fas fa-download text-xs" />
+                Descargar A4
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void runAction(async () => {
+                    await downloadFiscalReceiptPdf(receipt, firm, undefined, 'ticket');
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <i className="fas fa-download text-xs" />
+                Descargar ticket
+              </button>
+              <button
+                type="button"
+                disabled={busy || !previewBlob || tab === 'summary'}
+                onClick={() => {
+                  if (!printFiscalReceiptCanvasPreview(previewWrapRef.current)) {
+                    window.dispatchEvent(
+                      new CustomEvent('miweb:toast', {
+                        detail: {
+                          type: 'error',
+                          message:
+                            tab === 'summary'
+                              ? 'Abra la pestaña Vista A4 o Vista ticket para imprimir'
+                              : 'No se pudo abrir la impresión',
+                        },
+                      }),
+                    );
                   }
-                  className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-800 hover:bg-primary-100 disabled:opacity-50"
-                >
-                  <i className="fas fa-download text-xs" />
-                  Descargar A4
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void runAction(async () => {
-                      await downloadFiscalReceiptPdf(receipt, firm, undefined, 'ticket');
-                    })
-                  }
-                  className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  <i className="fas fa-download text-xs" />
-                  Descargar ticket
-                </button>
-              </>
-            ) : null}
-          </div>
+                }}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                title={tab === 'summary' ? 'Seleccione Vista A4 o Vista ticket' : `Imprimir ${downloadName}`}
+              >
+                <i className="fas fa-print text-xs" />
+                Imprimir
+              </button>
+            </div>
+          ) : null}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             {variant === 'post_sale' ? (
               <>
@@ -311,6 +345,15 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
                   Nueva venta
                 </button>
               </>
+            ) : variant === 'payment' ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onClose}
+                className="inline-flex justify-center items-center rounded-full bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                Ir al listado de pagos
+              </button>
             ) : (
               <button
                 type="button"

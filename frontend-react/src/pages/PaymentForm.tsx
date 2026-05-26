@@ -700,7 +700,7 @@ const PaymentForm = () => {
         open={Boolean(issuedReceipt)}
         receipt={issuedReceipt}
         firm={firmBranding}
-        variant="post_sale"
+        variant="payment"
         onClose={() => {
           setIssuedReceipt(null);
           navigate('/payments', { replace: true });
