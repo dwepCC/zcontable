@@ -3,6 +3,7 @@ package database
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"miappfiber/models"
 	"miappfiber/rbac"
@@ -50,7 +51,7 @@ func applyMigrationOnce(db *gorm.DB, name string, fn func(*gorm.DB) error) error
 	if err := fn(db); err != nil {
 		return err
 	}
-	return db.Create(&models.SchemaMigration{Name: name}).Error
+	return db.Create(&models.SchemaMigration{Name: name, AppliedAt: time.Now()}).Error
 }
 
 // migrateCompanyTeamAssignPermissions asigna companies.assign_* una sola vez según matriz heredada (BD pre-permisos de equipo).

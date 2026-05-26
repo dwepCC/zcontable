@@ -403,7 +403,7 @@ const Payments = () => {
                     </td>
                     <td className="px-4 py-3">
                       {localPdf && tukRec ? (
-                        <FiscalReceiptPdfActions receiptId={tukRec.id} receiptNumber={tukRec.number} compact />
+                        <FiscalReceiptPdfActions receiptId={tukRec.id} compact />
                       ) : !ticketUrl && !pdfUrl ? (
                         <span className="text-slate-400 text-xs">—</span>
                       ) : (

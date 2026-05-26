@@ -199,6 +199,13 @@ function customerDocTicketLabel(receipt: PosSaleDetail): string {
   return customerDocLabel(receipt);
 }
 
+/** Metadatos del PDF: Chrome y otros visores usan el título al guardar desde la pestaña. */
+function applyReceiptPdfMetadata(doc: PDFDocument, receipt: PosSaleDetail) {
+  const title = (receipt.number ?? '').trim() || `comprobante-${receipt.id}`;
+  doc.setTitle(title);
+  doc.setAuthor('ZContable');
+}
+
 function sellerName(receipt: PosSaleDetail): string {
   const u = receipt.issued_by_user;
   return u?.name?.trim() || u?.username?.trim() || '—';
@@ -232,6 +239,8 @@ async function embedLogo(doc: PDFDocument, url?: string): Promise<PDFImage | nul
 
 const TICKET_W = 227;
 const TICKET_M = 8;
+/** Ancho columna de etiquetas (F. Emisión, Cliente, RUC, etc.); valores a la derecha, alineados a la izquierda. */
+const TICKET_KV_LABEL_W = 56;
 
 function drawTicketDivider(page: PDFPage, y: number) {
   page.drawLine({
@@ -280,7 +289,7 @@ function estimateTicketHeight(receipt: PosSaleDetail, firm: FirmConfig | null): 
   const pays = receipt.payments?.length ?? (receipt.payment_method ? 1 : 0);
   const addrText = receipt.company?.address?.trim() || '';
   const ticketContentW = TICKET_W - TICKET_M * 2;
-  const addrValueW = ticketContentW - 52;
+  const addrValueW = ticketContentW - TICKET_KV_LABEL_W;
   const addrH =
     addrText === ''
       ? 0
@@ -293,6 +302,7 @@ export async function buildFiscalReceiptA4Pdf(
   firm: FirmConfig | null,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  applyReceiptPdfMetadata(doc, receipt);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontB = await doc.embedFont(StandardFonts.HelveticaBold);
   const page = doc.addPage([PAGE_W, PAGE_H]);
@@ -426,11 +436,9 @@ export async function buildFiscalReceiptA4Pdf(
 
   // —— Datos cliente ——
   const issue = (receipt.issue_date ?? '').slice(0, 10);
-  const periodLabel = (receipt.period_label ?? '').trim();
   const infoRows: [string, string][] = [
     ['FECHA DE EMISIÓN:', issue || '—'],
     ['FECHA DE VENCIMIENTO:', ''],
-    ...(periodLabel ? [['PERÍODO:', periodLabel] as [string, string]] : []),
     ['CLIENTE:', receipt.customer_name ?? '—'],
     [`${customerDocLabel(receipt)}:`, receipt.customer_number || '—'],
     ['DIRECCIÓN:', receipt.company?.address?.trim() || '—'],
@@ -555,13 +563,10 @@ export async function buildFiscalReceiptA4Pdf(
   }
   y += tableBodyH + 10;
 
-  // —— Totales (alineados al margen derecho de la hoja) ——
-  const grav = receipt.subtotal ?? 0;
+  // —— Total ——
   const total = receipt.total ?? 0;
   const totalsRight = PAGE_W - M;
-  drawRightText(page, `OP. GRAVADAS: ${moneyPen(grav)}`, totalsRight, y, 8, font, C.black);
-  y += 16;
-  drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, y, 11, fontB, C.black);
+  drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, y, 9, fontB, C.black);
   y += 28;
 
   // —— Métodos de pago ——
@@ -645,6 +650,7 @@ export async function buildFiscalReceiptTicketPdf(
   firm: FirmConfig | null,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  applyReceiptPdfMetadata(doc, receipt);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontB = await doc.embedFont(StandardFonts.HelveticaBold);
   const pageH = estimateTicketHeight(receipt, firm);
@@ -704,10 +710,6 @@ export async function buildFiscalReceiptTicketPdf(
 
   const issue = (receipt.issue_date ?? '').slice(0, 10);
   y = drawTicketKv(page, 'F. Emisión:', issue || '—', y, font, fontB);
-  const periodTicket = (receipt.period_label ?? '').trim();
-  if (periodTicket) {
-    y = drawTicketKv(page, 'Período:', periodTicket, y, font, fontB);
-  }
   y = drawTicketKv(page, 'Cliente:', receipt.customer_name ?? '—', y, font, fontB);
   y = drawTicketKv(
     page,
@@ -805,11 +807,12 @@ export async function buildFiscalReceiptTicketPdf(
 
   const total = receipt.total ?? 0;
   const totalLabel = `TOTAL A PAGAR: ${moneyPen(total)}`;
-  const tlw = fontB.widthOfTextAtSize(totalLabel, 7.5);
+  const totalSize = 6.5;
+  const tlw = fontB.widthOfTextAtSize(totalLabel, totalSize);
   page.drawText(totalLabel, {
     x: TICKET_W - TICKET_M - tlw,
     y: topY(page, y + 8),
-    size: 7.5,
+    size: totalSize,
     font: fontB,
     color: C.black,
   });
@@ -906,24 +909,31 @@ function drawTicketKv(
   font: PDFFont,
   fontB: PDFFont,
 ): number {
-  page.drawText(label, {
-    x: TICKET_M,
-    y: topY(page, y + 8),
-    size: 6.5,
-    font: fontB,
-    color: C.black,
-  });
-  const maxVal = 26;
-  const clipped = value.length > maxVal ? `${value.slice(0, maxVal - 1)}…` : value;
-  const vw = font.widthOfTextAtSize(clipped, 6.5);
-  page.drawText(clipped, {
-    x: TICKET_W - TICKET_M - vw,
-    y: topY(page, y + 8),
-    size: 6.5,
-    font,
-    color: C.black,
-  });
-  return y + 10;
+  const size = 6.5;
+  const valueX = TICKET_M + TICKET_KV_LABEL_W;
+  const valueW = TICKET_W - TICKET_M - valueX;
+  const valLines = wrapLinesByWidth((value ?? '').trim() || '—', font, size, valueW, 5);
+  const lines = valLines.length > 0 ? valLines : ['—'];
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0) {
+      page.drawText(label, {
+        x: TICKET_M,
+        y: topY(page, y + size),
+        size,
+        font: fontB,
+        color: C.black,
+      });
+    }
+    page.drawText(lines[i], {
+      x: valueX,
+      y: topY(page, y + size),
+      size,
+      font,
+      color: C.black,
+    });
+    y += 9;
+  }
+  return y + 1;
 }
 
 /** Dirección en ticket: etiqueta a la izquierda, valor alineado como el resto de filas; salto solo si no cabe. */
@@ -936,9 +946,7 @@ function drawTicketAddressBlock(
 ): number {
   const size = 6.5;
   const label = 'Dirección:';
-  const labelW = fontB.widthOfTextAtSize(label, size);
-  const gap = 4;
-  const valueX = TICKET_M + labelW + gap;
+  const valueX = TICKET_M + TICKET_KV_LABEL_W;
   const valueW = TICKET_W - TICKET_M - valueX;
   const lines = wrapLinesByWidth(address, font, size, valueW, 12);
   const toDraw = lines.length > 0 ? lines : ['—'];

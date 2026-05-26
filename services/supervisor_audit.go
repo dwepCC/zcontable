@@ -291,6 +291,10 @@ func (s *SupervisorService) RunAutomations(periodYM string) error {
 	if err := database.DB.Where("period_ym = ?", periodYM).Find(&controls).Error; err != nil {
 		return err
 	}
+	observedByControl, err := countObservedDeclarationsByControl(controls)
+	if err != nil {
+		return err
+	}
 	now := time.Now()
 	warnBefore := now.AddDate(0, 0, 3)
 	for _, c := range controls {
@@ -304,15 +308,41 @@ func (s *SupervisorService) RunAutomations(periodYM string) error {
 			s.notifyIfNew(uid, "due_soon", "Vencimiento próximo",
 				fmt.Sprintf("Vence el %s", c.DueDate.Format("2006-01-02")), periodYM, &cid)
 		}
-		var obs int64
-		_ = database.DB.Model(&models.SupervisorDeclaration{}).
-			Where("monthly_control_id = ? AND status = ?", c.ID, models.SupervisorDeclObservado).Count(&obs).Error
-		if obs > 0 {
+		if observedByControl[c.ID] > 0 {
 			s.notifyIfNew(uid, "declaration_observed", "Declaración observada",
 				fmt.Sprintf("Hay declaraciones observadas en control %d", c.ID), periodYM, &cid)
 		}
 	}
 	return nil
+}
+
+// countObservedDeclarationsByControl evita N+1: una sola consulta agrupada por control.
+func countObservedDeclarationsByControl(controls []models.SupervisorMonthlyControl) (map[uint]int64, error) {
+	out := make(map[uint]int64, len(controls))
+	if len(controls) == 0 {
+		return out, nil
+	}
+	ids := make([]uint, 0, len(controls))
+	for _, c := range controls {
+		ids = append(ids, c.ID)
+	}
+	type row struct {
+		MonthlyControlID uint  `gorm:"column:monthly_control_id"`
+		Cnt              int64 `gorm:"column:cnt"`
+	}
+	var rows []row
+	err := database.DB.Model(&models.SupervisorDeclaration{}).
+		Select("monthly_control_id, COUNT(*) AS cnt").
+		Where("monthly_control_id IN ? AND status = ?", ids, models.SupervisorDeclObservado).
+		Group("monthly_control_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.MonthlyControlID] = r.Cnt
+	}
+	return out, nil
 }
 
 func StartSupervisorAutomationLoop() {

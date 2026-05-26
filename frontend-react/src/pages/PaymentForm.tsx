@@ -773,11 +773,9 @@ const PaymentForm = () => {
                     ).map((r) => (
                       <option key={r.id} value={String(r.id)}>
                         {r.number}
-                        {r.next_number ? ` → próximo ${r.next_number}` : ''}
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500 mt-1">El correlativo se asigna automáticamente al guardar.</p>
                 </div>
                 <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                   <label htmlFor="date" className="block text-sm font-medium text-slate-700 mb-1">

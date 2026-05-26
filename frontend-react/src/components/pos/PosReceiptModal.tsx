@@ -3,11 +3,11 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { resolveBackendUrl } from '../../api/client';
 import type { PosSaleDetail } from '../../services/posSales';
+import FiscalReceiptPdfCanvasPreview from '../../pdf/FiscalReceiptPdfCanvasPreview';
 import {
   buildFiscalReceiptPdfBlob,
   docTypeLabel,
   downloadFiscalReceiptPdf,
-  openFiscalReceiptPdf,
   type ReceiptPdfFormat,
 } from '../../pdf/fiscalReceiptPdf';
 
@@ -32,7 +32,7 @@ type Props = {
 
 const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: Props) => {
   const [tab, setTab] = useState<PreviewTab>('summary');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -40,19 +40,13 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
     if (!open) {
       setTab('summary');
       setLoadingPreview(false);
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
+      setPreviewBlob(null);
     }
   }, [open]);
 
   useEffect(() => {
     if (!open || !receipt || tab === 'summary') {
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
+      setPreviewBlob(null);
       return;
     }
     const format: ReceiptPdfFormat = tab === 'ticket' ? 'ticket' : 'a4';
@@ -60,11 +54,7 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
     setLoadingPreview(true);
     void buildFiscalReceiptPdfBlob(receipt, firm, format)
       .then((blob) => {
-        if (cancelled) return;
-        setPreviewUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return URL.createObjectURL(blob);
-        });
+        if (!cancelled) setPreviewBlob(blob);
       })
       .finally(() => {
         if (!cancelled) setLoadingPreview(false);
@@ -251,56 +241,26 @@ const PosReceiptModal = ({ open, receipt, firm, onClose, variant = 'history' }: 
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden min-h-[280px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-auto min-h-[280px] max-h-[min(420px,55vh)]">
               {loadingPreview ? (
                 <p className="flex h-[320px] items-center justify-center text-sm text-slate-500">
                   <i className="fas fa-spinner fa-spin mr-2" />
                   Generando vista previa…
                 </p>
-              ) : previewUrl ? (
-                <iframe
-                  title={tab === 'a4' ? 'Vista A4' : 'Vista ticket'}
-                  src={previewUrl}
-                  className="w-full h-[min(420px,55vh)] bg-white"
+              ) : previewBlob ? (
+                <FiscalReceiptPdfCanvasPreview
+                  blob={previewBlob}
+                  scale={tab === 'ticket' ? 1.15 : 1.35}
                 />
               ) : (
                 <p className="p-8 text-center text-sm text-slate-500">No se pudo generar la vista previa.</p>
               )}
-              <p className="px-3 py-2 text-xs text-slate-500 border-t border-slate-200 bg-white">
-                Use el visor del navegador (imprimir o guardar) desde la barra del PDF embebido o abra en nueva pestaña.
-              </p>
             </div>
           )}
         </div>
 
         <div className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-5 space-y-2">
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void runAction(async () => {
-                  await openFiscalReceiptPdf(receipt, firm, 'a4');
-                })
-              }
-              className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              <i className="fas fa-external-link-alt text-xs" />
-              Abrir A4
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void runAction(async () => {
-                  await openFiscalReceiptPdf(receipt, firm, 'ticket');
-                })
-              }
-              className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              <i className="fas fa-receipt text-xs" />
-              Abrir ticket
-            </button>
             {allowDownload ? (
               <>
                 <button

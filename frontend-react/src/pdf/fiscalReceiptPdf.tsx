@@ -1,8 +1,10 @@
 import type { FirmConfig } from '../types/dashboard';
 import type { PosSaleDetail } from '../services/posSales';
-import { buildFiscalReceiptA4Pdf, buildFiscalReceiptTicketPdf, docTypeLabel } from './fiscalReceiptPdfBuild';
+import { buildFiscalReceiptA4Pdf, buildFiscalReceiptTicketPdf } from './fiscalReceiptPdfBuild';
+import { fiscalReceiptPdfFilename } from './fiscalReceiptPdfFilename';
 
-export { docTypeLabel };
+export { docTypeLabel } from './fiscalReceiptPdfBuild';
+export { fiscalReceiptPdfFilename, fiscalReceiptPdfBaseName } from './fiscalReceiptPdfFilename';
 
 export type ReceiptPdfFormat = 'a4' | 'ticket';
 
@@ -36,14 +38,22 @@ export async function buildFiscalReceiptPdfBlob(
   return new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
 }
 
-export function openPdfBlobInNewTab(blob: Blob): boolean {
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, '_blank', 'noopener,noreferrer');
+/**
+ * Abre el PDF en una pestaña nueva.
+ * El título interno del PDF (setTitle en pdf-lib) ayuda al nombre al guardar en Chrome.
+ * Nota: no usar noopener aquí; con ventana en blanco + document.write la pestaña queda en about:blank.
+ */
+export function openPdfBlobInNewTab(blob: Blob, filename?: string): boolean {
+  const name = (filename?.trim() || 'comprobante.pdf').replace(/[\\/:*?"<>|]/g, '') || 'comprobante.pdf';
+  const file = new File([blob], name, { type: 'application/pdf' });
+  const url = URL.createObjectURL(file);
+  const w = window.open(url, '_blank');
   if (!w) {
     URL.revokeObjectURL(url);
     return false;
   }
-  setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  w.opener = null;
+  setTimeout(() => URL.revokeObjectURL(url), 300_000);
   return true;
 }
 
@@ -53,7 +63,7 @@ export async function openFiscalReceiptPdf(
   format: ReceiptPdfFormat = 'a4',
 ): Promise<boolean> {
   const blob = await buildFiscalReceiptPdfBlob(receipt, firm, format);
-  return openPdfBlobInNewTab(blob);
+  return openPdfBlobInNewTab(blob, fiscalReceiptPdfFilename(receipt));
 }
 
 export async function downloadFiscalReceiptPdf(
@@ -63,11 +73,12 @@ export async function downloadFiscalReceiptPdf(
   format: ReceiptPdfFormat = 'a4',
 ) {
   const blob = await buildFiscalReceiptPdfBlob(receipt, firm, format);
-  const url = URL.createObjectURL(blob);
+  const name = filename ?? fiscalReceiptPdfFilename(receipt);
+  const file = new File([blob], name, { type: 'application/pdf' });
+  const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
-  const suffix = format === 'ticket' ? '-ticket' : '';
-  a.download = filename ?? `comprobante-${receipt.number ?? receipt.id}${suffix}.pdf`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(url);
 }

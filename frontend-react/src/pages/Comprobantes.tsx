@@ -499,7 +499,7 @@ const Comprobantes = () => {
                       </td>
                       <td className="px-3 py-3">
                         {localPdf ? (
-                          <FiscalReceiptPdfActions receiptId={r.id} receiptNumber={r.number} compact />
+                          <FiscalReceiptPdfActions receiptId={r.id} compact />
                         ) : ticketUrl || pdfUrl ? (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {ticketUrl ? (
