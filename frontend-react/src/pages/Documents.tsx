@@ -966,7 +966,7 @@ const Documents = () => {
         open={Boolean(issuedReceipt)}
         receipt={issuedReceipt}
         firm={firmBranding}
-        variant="post_sale"
+        variant="payment"
         onClose={() => setIssuedReceipt(null)}
       />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
