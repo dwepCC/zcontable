@@ -33,10 +33,26 @@ type Document struct {
 	Payments   []Payment            `gorm:"foreignKey:DocumentID" json:"payments,omitempty"`
 	Allocations []PaymentAllocation `gorm:"foreignKey:DocumentID" json:"allocations,omitempty"`
 	Items      []DocumentItem       `gorm:"foreignKey:DocumentID" json:"items,omitempty"`
-	// Número legible para UI (p. ej. DEU-LI-202603 en deudas de liquidación); no persiste en BD.
+	// DisplayNumber legible para UI (p. ej. DEU-LI-202603 en deudas de liquidación); no persiste en BD.
 	DisplayNumber string `json:"display_number,omitempty" gorm:"-"`
 	// HasItems indica si existen filas en document_items (relleno en API, no columna en BD).
 	HasItems bool `json:"has_items,omitempty" gorm:"-"`
+	// Campos calculados en API (no persisten).
+	PaidAmount    float64                      `json:"paid_amount,omitempty" gorm:"-"`
+	BalanceAmount float64                      `json:"balance_amount,omitempty" gorm:"-"`
+	IsOverdue     bool                         `json:"is_overdue,omitempty" gorm:"-"`
+	PaymentHistory []DocumentPaymentHistoryEntry `json:"payment_history,omitempty" gorm:"-"`
+}
+
+// DocumentPaymentHistoryEntry línea del historial de pagos aplicados a la deuda.
+type DocumentPaymentHistoryEntry struct {
+	PaymentID   uint      `json:"payment_id"`
+	Date        time.Time `json:"date"`
+	Amount      float64   `json:"amount"`
+	Method      string    `json:"method"`
+	Reference   string    `json:"reference"`
+	Notes       string    `json:"notes"`
+	Description string    `json:"description"`
 }
 
 func (Document) TableName() string {

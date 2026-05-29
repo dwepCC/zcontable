@@ -23,6 +23,8 @@ type FirmConfig struct {
 	StatementBankLogoURL           string `gorm:"size:512" json:"statement_bank_logo_url"`
 	StatementPaymentQrURL          string `gorm:"size:512" json:"statement_payment_qr_url"`
 	StatementPaymentQrCaption      string `gorm:"size:120" json:"statement_payment_qr_caption"`
+	OperationsKeyHash              string `gorm:"type:text" json:"-"`
+	OperationsKeyConfigured        bool   `gorm:"-" json:"operations_key_configured"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

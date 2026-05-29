@@ -316,6 +316,7 @@ type TaxSettlementUpdateInput struct {
 	Notes              string                   `json:"notes"`
 	Pdt621JSON         string                   `json:"pdt621_json"`
 	Lines              []TaxSettlementLineInput `json:"lines"`
+	OperationKey       string                   `json:"operation_key"`
 }
 
 func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput) (*models.TaxSettlement, error) {
@@ -726,58 +727,9 @@ func (s *TaxSettlementService) Delete(id uint) error {
 			return err
 		}
 
-		paySvc := NewPaymentService()
-
 		if ts.Status == models.TaxSettlementStatusIssued {
-			var payIDs []uint
-			if err := tx.Model(&models.Payment{}).Where("tax_settlement_id = ?", id).Pluck("id", &payIDs).Error; err != nil {
+			if err := s.revertIssuedSettlementLinks(tx, &ts); err != nil {
 				return err
-			}
-			for _, pid := range payIDs {
-				if err := paySvc.DeletePaymentTx(tx, pid); err != nil {
-					return fmt.Errorf("no se pudo revertir el pago %d: %w", pid, err)
-				}
-			}
-			if err := tx.Model(&models.TukifacFiscalReceipt{}).
-				Where("tax_settlement_id = ?", id).
-				Updates(map[string]interface{}{"tax_settlement_id": nil}).Error; err != nil {
-				return err
-			}
-			for _, ln := range ts.Lines {
-				if ln.DocumentID == nil || *ln.DocumentID == 0 {
-					continue
-				}
-				if ln.LineType != models.TaxSettlementLineAdjust && ln.LineType != models.TaxSettlementLineTaxManual {
-					continue
-				}
-				var d models.Document
-				if err := tx.First(&d, *ln.DocumentID).Error; err != nil {
-					if errors.Is(err, gorm.ErrRecordNotFound) {
-						continue
-					}
-					return err
-				}
-				wantNum := fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID)
-				if strings.TrimSpace(d.Source) != "liquidacion" || strings.TrimSpace(d.Number) != wantNum {
-					continue
-				}
-				paid := DocumentPaidTotal(tx, d.ID)
-				if paid >= 0.005 {
-					return fmt.Errorf("la deuda %s aún tiene saldo abonado; no se puede eliminar la liquidación", wantNum)
-				}
-				var payCnt int64
-				if err := tx.Model(&models.Payment{}).Where("document_id = ?", d.ID).Count(&payCnt).Error; err != nil {
-					return err
-				}
-				if payCnt > 0 {
-					return fmt.Errorf("existe un pago registrado sobre la deuda %s; elimínelo antes de borrar la liquidación", wantNum)
-				}
-				if err := tx.Where("document_id = ?", d.ID).Delete(&models.DocumentItem{}).Error; err != nil {
-					return err
-				}
-				if err := tx.Delete(&models.Document{}, d.ID).Error; err != nil {
-					return err
-				}
 			}
 		}
 
@@ -793,4 +745,104 @@ func (s *TaxSettlementService) Delete(id uint) error {
 		}
 		return nil
 	})
+}
+
+// RevertToDraft revierte pagos, comprobantes y deudas internas de una liquidación emitida y la deja en borrador para editar.
+func (s *TaxSettlementService) RevertToDraft(id uint) (*models.TaxSettlement, error) {
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var ts models.TaxSettlement
+		if err := tx.Preload("Lines", func(db *gorm.DB) *gorm.DB {
+			return db.Order("sort_order ASC, id ASC")
+		}).First(&ts, id).Error; err != nil {
+			return err
+		}
+		if ts.Status == models.TaxSettlementStatusDraft {
+			return nil
+		}
+		if ts.Status != models.TaxSettlementStatusIssued {
+			return errors.New("solo se puede revertir una liquidación emitida")
+		}
+		if err := s.revertIssuedSettlementLinks(tx, &ts); err != nil {
+			return err
+		}
+		ts.Status = models.TaxSettlementStatusDraft
+		ts.TotalHonorarios = 0
+		ts.TotalImpuestos = 0
+		ts.TotalGeneral = 0
+		return tx.Save(&ts).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetByID(id)
+}
+
+func (s *TaxSettlementService) revertIssuedSettlementLinks(tx *gorm.DB, ts *models.TaxSettlement) error {
+	if ts == nil {
+		return nil
+	}
+	paySvc := NewPaymentService()
+
+	var payIDs []uint
+	if err := tx.Model(&models.Payment{}).Where("tax_settlement_id = ?", ts.ID).Pluck("id", &payIDs).Error; err != nil {
+		return err
+	}
+	for _, pid := range payIDs {
+		if err := paySvc.DeletePaymentTx(tx, pid); err != nil {
+			return fmt.Errorf("no se pudo revertir el pago %d: %w", pid, err)
+		}
+	}
+	if err := tx.Model(&models.TukifacFiscalReceipt{}).
+		Where("tax_settlement_id = ?", ts.ID).
+		Updates(map[string]interface{}{"tax_settlement_id": nil}).Error; err != nil {
+		return err
+	}
+
+	var lines []models.TaxSettlementLine
+	if err := tx.Where("tax_settlement_id = ?", ts.ID).Order("sort_order ASC, id ASC").Find(&lines).Error; err != nil {
+		return err
+	}
+	for _, ln := range lines {
+		if ln.DocumentID == nil || *ln.DocumentID == 0 {
+			continue
+		}
+		if ln.LineType != models.TaxSettlementLineAdjust && ln.LineType != models.TaxSettlementLineTaxManual {
+			continue
+		}
+		var d models.Document
+		if err := tx.First(&d, *ln.DocumentID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.Model(&models.TaxSettlementLine{}).Where("id = ?", ln.ID).Update("document_id", nil).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		wantNum := fmt.Sprintf("DEU-LIQ-%d-%d", ts.ID, ln.ID)
+		if strings.TrimSpace(d.Source) != "liquidacion" || strings.TrimSpace(d.Number) != wantNum {
+			continue
+		}
+		paid := DocumentPaidTotal(tx, d.ID)
+		if paid >= 0.005 {
+			return fmt.Errorf("la deuda %s aún tiene saldo abonado; no se puede revertir la liquidación", wantNum)
+		}
+		var payCnt int64
+		if err := tx.Model(&models.Payment{}).Where("document_id = ?", d.ID).Count(&payCnt).Error; err != nil {
+			return err
+		}
+		if payCnt > 0 {
+			return fmt.Errorf("existe un pago registrado sobre la deuda %s; elimínelo antes de revertir", wantNum)
+		}
+		if err := tx.Where("document_id = ?", d.ID).Delete(&models.DocumentItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.Document{}, d.ID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.TaxSettlementLine{}).Where("id = ?", ln.ID).Update("document_id", nil).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

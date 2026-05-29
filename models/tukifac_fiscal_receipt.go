@@ -59,7 +59,21 @@ type TukifacFiscalReceipt struct {
 	Payments       []FiscalReceiptPayment  `gorm:"foreignKey:FiscalReceiptID" json:"payments,omitempty"`
 
 	// Campos calculados en detalle (no persistidos).
-	PeriodLabel string `gorm:"-" json:"period_label,omitempty"`
+	PeriodLabel        string              `gorm:"-" json:"period_label,omitempty"`
+	DebtPaymentContext *DebtPaymentContext `gorm:"-" json:"debt_payment_context,omitempty"`
+}
+
+// DebtPaymentContext resumen de pago aplicado a deuda(s) para comprobante/PDF.
+type DebtPaymentContext struct {
+	IsPartialPayment  bool     `json:"is_partial_payment"`
+	StatusLabel       string   `json:"status_label"`
+	DocumentNumber    string   `json:"document_number,omitempty"`
+	PaidConceptLabel  string   `json:"paid_concept_label,omitempty"`
+	PaidConcepts      []string `json:"paid_concepts,omitempty"`
+	DebtTotal         float64  `json:"debt_total"`
+	PaidThisOperation float64  `json:"paid_this_operation"`
+	PaidAccumulated   float64  `json:"paid_accumulated"`
+	BalancePending    float64  `json:"balance_pending"`
 }
 
 func (TukifacFiscalReceipt) TableName() string {

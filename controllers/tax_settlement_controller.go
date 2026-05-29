@@ -240,6 +240,9 @@ func (ctrl *TaxSettlementController) UpdateAPI(c fiber.Ctx) error {
 	if err := c.Bind().Body(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
 	}
+	if err := services.VerifyOperationsKey(body.OperationKey); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
 	ts, err := ctrl.svc.UpdateDraft(uint(id), body)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -287,8 +290,48 @@ func (ctrl *TaxSettlementController) DeleteAPI(c fiber.Ctx) error {
 		}
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 	}
+	var body struct {
+		OperationKey string `json:"operation_key"`
+	}
+	_ = c.Bind().Body(&body)
+	if err := services.VerifyOperationsKey(body.OperationKey); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
 	if err := ctrl.svc.Delete(uint(id)); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "Liquidación eliminada"})
+}
+
+// RevertToDraftAPI POST /api/tax-settlements/:id/revert-to-draft — revierte vínculos y deja en borrador para editar.
+func (ctrl *TaxSettlementController) RevertToDraftAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil || id == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	ts0, err := ctrl.svc.GetByID(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No encontrado"})
+	}
+	if err := ctrl.ensureCompanyAccess(c, ts0.CompanyID); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+	var body struct {
+		OperationKey string `json:"operation_key"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	if err := services.VerifyOperationsKey(body.OperationKey); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+	ts, err := ctrl.svc.RevertToDraft(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	ctrl.attachCanRegisterPayment(ts)
+	return c.JSON(ts)
 }

@@ -60,6 +60,7 @@ type DocumentListParams struct {
 	CompanyID         uint
 	Status            string
 	Overdue           bool
+	CollectionSituation string
 	DateFrom          *time.Time
 	DateTo            *time.Time
 	AllowedCompanyIDs []uint
@@ -305,6 +306,13 @@ func shouldFilterDocumentsWithRealOpenBalance(params DocumentListParams) bool {
 	if params.ExplicitAllStatuses {
 		return false
 	}
+	sit := normalizeCollectionSituation(params.CollectionSituation)
+	if sit == CollectionSituationPagadas || sit == CollectionSituationAnuladas {
+		return false
+	}
+	if sit == CollectionSituationPorCobrar || sit == CollectionSituationVencidas {
+		return true
+	}
 	if params.Status == "pagado" || params.Status == "anulado" {
 		return false
 	}
@@ -318,6 +326,28 @@ func shouldFilterDocumentsWithRealOpenBalance(params DocumentListParams) bool {
 		return true
 	}
 	return false
+}
+
+func (s *DocumentService) applyCollectionSituationFilter(q *gorm.DB, situation string, startOfToday time.Time) *gorm.DB {
+	sit := normalizeCollectionSituation(situation)
+	switch sit {
+	case CollectionSituationAll:
+		return q
+	case CollectionSituationAnuladas:
+		return q.Where("status = ?", DocumentStatusCancelled)
+	case CollectionSituationPagadas:
+		return q.Where("status = ?", DocumentStatusPaid)
+	case CollectionSituationVencidas:
+		return q.Where("due_date IS NOT NULL AND due_date < ? AND status <> ? AND status <> ?",
+			startOfToday, DocumentStatusPaid, DocumentStatusCancelled).
+			Where(documentOpenBalancePositiveClause())
+	case CollectionSituationPorCobrar:
+		return q.Where("status IN ?", []string{DocumentStatusPending, DocumentStatusPartial}).
+			Where("(due_date IS NULL OR due_date >= ?)", startOfToday).
+			Where(documentOpenBalancePositiveClause())
+	default:
+		return q
+	}
 }
 
 func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentListParams) *gorm.DB {
@@ -336,19 +366,20 @@ func (s *DocumentService) applyDocumentListFilters(q *gorm.DB, params DocumentLi
 	}
 
 	singleCompanyNoIssueDates := params.CompanyID != 0 && params.DateFrom == nil && params.DateTo == nil
-	// Con rango de emisión (p. ej. vista mensual / todas las empresas), no recortar por vencimiento:
-	// "pendiente" debe listar todas las pendientes en el rango (las vencidas usan filtro "vencido"/overdue).
 	hasIssueDateRange := params.DateFrom != nil || params.DateTo != nil
+	situation := normalizeCollectionSituation(params.CollectionSituation)
 
-	if params.ImplicitOpenBalances {
-		q = q.Where("status IN ?", []string{"pendiente", "parcial"})
+	if situation != CollectionSituationAll && situation != "" {
+		q = s.applyCollectionSituationFilter(q, situation, startOfToday)
+	} else if params.ImplicitOpenBalances {
+		q = q.Where("status IN ?", []string{DocumentStatusPending, DocumentStatusPartial})
 	} else {
 		if params.Status != "" {
 			q = q.Where("status = ?", params.Status)
 		}
 		if params.Overdue {
-			q = q.Where("due_date IS NOT NULL AND due_date < ? AND status <> ? AND status <> ?", startOfToday, "pagado", "anulado")
-		} else if (params.Status == "pendiente" || params.Status == "parcial") && !singleCompanyNoIssueDates && !hasIssueDateRange {
+			q = q.Where("due_date IS NOT NULL AND due_date < ? AND status <> ? AND status <> ?", startOfToday, DocumentStatusPaid, DocumentStatusCancelled)
+		} else if (params.Status == DocumentStatusPending || params.Status == DocumentStatusPartial) && !singleCompanyNoIssueDates && !hasIssueDateRange {
 			q = q.Where("(due_date IS NULL OR due_date >= ?)", startOfToday)
 		}
 	}
@@ -435,6 +466,7 @@ func (s *DocumentService) List(params DocumentListParams) ([]models.Document, er
 	}
 	s.enrichDocumentDisplayNumbers(list)
 	s.enrichDocumentHasItems(list)
+	s.enrichDocumentsFinancials(list)
 	return list, nil
 }
 
@@ -476,6 +508,7 @@ func (s *DocumentService) ListPaged(params DocumentListParams, page int, perPage
 	} else {
 		s.enrichDocumentHasItems(list)
 	}
+	s.enrichDocumentsFinancials(list)
 	return list, total, nil
 }
 
@@ -538,6 +571,61 @@ func (s *DocumentService) ListCompaniesDebtSummaryPaged(params DocumentListParam
 	return out, total, nil
 }
 
+func (s *DocumentService) enrichDocumentsFinancials(list []models.Document) {
+	if len(list) == 0 {
+		return
+	}
+	now := time.Now()
+	for i := range list {
+		paid := DocumentPaidTotal(database.DB, list[i].ID)
+		list[i].PaidAmount = math.Round(paid*100) / 100
+		list[i].BalanceAmount = DocumentBalance(list[i].TotalAmount, paid)
+		list[i].IsOverdue = DocumentIsOverdue(&list[i], list[i].BalanceAmount, now)
+	}
+}
+
+func (s *DocumentService) loadDocumentPaymentHistory(documentID uint) ([]models.DocumentPaymentHistoryEntry, error) {
+	type row struct {
+		PaymentID   uint
+		Date        time.Time
+		Amount      float64
+		Method      string
+		Reference   string
+		Notes       string
+		Description string
+	}
+	var rows []row
+
+	err := database.DB.Raw(`
+		SELECT p.id AS payment_id, p.date, pa.amount, p.method, p.reference, p.notes, p.description
+		FROM payment_allocations pa
+		INNER JOIN payments p ON p.id = pa.payment_id AND p.deleted_at IS NULL
+		WHERE pa.document_id = ? AND pa.deleted_at IS NULL
+		UNION ALL
+		SELECT p.id, p.date, p.amount, p.method, p.reference, p.notes, p.description
+		FROM payments p
+		WHERE p.document_id = ? AND p.deleted_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM payment_allocations pa2 WHERE pa2.payment_id = p.id AND pa2.deleted_at IS NULL)
+		ORDER BY date ASC, payment_id ASC
+	`, documentID, documentID).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.DocumentPaymentHistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.DocumentPaymentHistoryEntry{
+			PaymentID:   r.PaymentID,
+			Date:        r.Date,
+			Amount:      math.Round(r.Amount*100) / 100,
+			Method:      r.Method,
+			Reference:   r.Reference,
+			Notes:       r.Notes,
+			Description: r.Description,
+		})
+	}
+	return out, nil
+}
+
 func (s *DocumentService) GetByID(id uint) (*models.Document, error) {
 	var d models.Document
 	if err := database.DB.Preload("Company").Preload("Payments").
@@ -549,6 +637,15 @@ func (s *DocumentService) GetByID(id uint) (*models.Document, error) {
 		return nil, err
 	}
 	d.HasItems = len(d.Items) > 0
+	enriched := []models.Document{d}
+	s.enrichDocumentsFinancials(enriched)
+	d.PaidAmount = enriched[0].PaidAmount
+	d.BalanceAmount = enriched[0].BalanceAmount
+	d.IsOverdue = enriched[0].IsOverdue
+	hist, err := s.loadDocumentPaymentHistory(id)
+	if err == nil {
+		d.PaymentHistory = hist
+	}
 	return &d, nil
 }
 
@@ -574,21 +671,12 @@ func (s *DocumentService) RecalculateStatusFromPayments(documentID uint) error {
 	if err := database.DB.First(&d, documentID).Error; err != nil {
 		return err
 	}
-	if d.Status == "anulado" {
+	if d.Status == DocumentStatusCancelled {
 		return nil
 	}
 
 	paid := DocumentPaidTotal(database.DB, documentID)
-
-	total := d.TotalAmount
-	next := "pendiente"
-	if paid <= 0 {
-		next = "pendiente"
-	} else if paid+0.005 >= total {
-		next = "pagado"
-	} else if paid > 0 && paid < total && !math.IsNaN(paid) {
-		next = "parcial"
-	}
+	next := ComputeDocumentStatusFromPaid(paid, d.TotalAmount, d.Status)
 
 	if next != d.Status {
 		return database.DB.Model(&models.Document{}).Where("id = ?", documentID).Update("status", next).Error

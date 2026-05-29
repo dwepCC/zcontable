@@ -120,6 +120,32 @@ export interface Document {
   items?: DocumentItem[];
   /** Presente en API de listado/detalle: si existen filas en `document_items`. */
   has_items?: boolean;
+  paid_amount?: number;
+  balance_amount?: number;
+  is_overdue?: boolean;
+  payment_history?: DocumentPaymentHistoryEntry[];
+}
+
+export interface DocumentPaymentHistoryEntry {
+  payment_id: number;
+  date: string;
+  amount: number;
+  method?: string;
+  reference?: string;
+  notes?: string;
+  description?: string;
+}
+
+export interface DebtPaymentContext {
+  is_partial_payment: boolean;
+  status_label: string;
+  document_number?: string;
+  paid_concept_label?: string;
+  paid_concepts?: string[];
+  debt_total: number;
+  paid_this_operation: number;
+  paid_accumulated: number;
+  balance_pending: number;
 }
 
 export interface PaymentAllocation {
@@ -184,6 +210,7 @@ export interface TukifacFiscalReceipt {
   pdf_url?: string;
   /** Período contable / liquidación (detalle PDF). */
   period_label?: string;
+  debt_payment_context?: DebtPaymentContext;
   company?: Company;
   linked_payment?: {
     id: number;
@@ -270,6 +297,8 @@ export interface FirmConfig {
   statement_payment_qr_url?: string;
   /** Texto bajo el QR; por defecto en PDF «Paga aquí con Yape» */
   statement_payment_qr_caption?: string;
+  /** true si ya hay clave de operaciones registrada (el hash no se expone). */
+  operations_key_configured?: boolean;
   created_at?: string;
   updated_at?: string;
 }

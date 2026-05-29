@@ -82,6 +82,7 @@ function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="tax-settlements" element={<TaxSettlements />} />
             <Route path="tax-settlements/new" element={<TaxSettlementNew />} />
+            <Route path="tax-settlements/:id/edit" element={<TaxSettlementNew />} />
             <Route path="tax-settlements/:id" element={<TaxSettlementDetail />} />
             <Route path="comprobantes" element={<Comprobantes />} />
             <Route path="tukifac/documentos" element={<Navigate to="/comprobantes" replace />} />

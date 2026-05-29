@@ -16,6 +16,7 @@ const Settings = () => {
   const [error, setError] = useState('');
 
   const [config, setConfig] = useState<FirmConfig | null>(null);
+  const [operationsKeyDraft, setOperationsKeyDraft] = useState('');
 
   useEffect(() => {
     if (!canViewSettings) {
@@ -68,8 +69,10 @@ const Settings = () => {
         statement_bank_info: config.statement_bank_info ?? '',
         statement_payment_observations: config.statement_payment_observations ?? '',
         statement_payment_qr_caption: config.statement_payment_qr_caption ?? '',
+        operations_key: operationsKeyDraft.trim() || undefined,
       });
       setConfig(updated);
+      setOperationsKeyDraft('');
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Configuración guardada.' } }),
       );
@@ -326,6 +329,36 @@ const Settings = () => {
                       onChange={handleChange}
                       disabled={!canEdit || saving || uploading}
                       className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none disabled:opacity-60"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-4 space-y-2">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Clave de operaciones</div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Se solicita al editar o eliminar liquidaciones de impuestos.{' '}
+                      {config.operations_key_configured ? (
+                        <span className="font-medium text-emerald-800">Ya hay una clave configurada.</span>
+                      ) : (
+                        <span className="font-medium text-amber-800">Aún no hay clave configurada.</span>
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="operations_key" className="block text-sm font-medium text-slate-700 mb-1">
+                      {config.operations_key_configured ? 'Nueva clave (opcional)' : 'Definir clave'}
+                    </label>
+                    <input
+                      type="password"
+                      id="operations_key"
+                      name="operations_key"
+                      value={operationsKeyDraft}
+                      onChange={(e) => setOperationsKeyDraft(e.target.value)}
+                      disabled={!canEdit || saving || uploading}
+                      autoComplete="new-password"
+                      placeholder={config.operations_key_configured ? 'Dejar vacío para no cambiar' : 'Mínimo 4 caracteres recomendado'}
+                      className="w-full max-w-md px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none disabled:opacity-60"
                     />
                   </div>
                 </div>

@@ -173,6 +173,7 @@ func Setup(app *fiber.App) {
 	api.Get("/tax-settlements/:id/payment-suggestions", middleware.RequirePermission(rbac.TaxSettlementsPaymentSuggestions), taxSettleCtrl.PaymentSuggestionsAPI)
 	api.Get("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsView), taxSettleCtrl.GetAPI)
 	api.Put("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.UpdateAPI)
+	api.Post("/tax-settlements/:id/revert-to-draft", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.RevertToDraftAPI)
 	api.Post("/tax-settlements/:id/emit", middleware.RequirePermission(rbac.TaxSettlementsEmit), taxSettleCtrl.EmitAPI)
 	api.Delete("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsDelete), taxSettleCtrl.DeleteAPI)
 

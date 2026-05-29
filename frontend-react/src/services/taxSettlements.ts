@@ -36,6 +36,7 @@ export interface TaxSettlementUpdateInput {
   notes?: string;
   pdt621_json?: string;
   lines: TaxSettlementLineInput[];
+  operation_key?: string;
 }
 
 export interface TaxSettlementsPaginationMeta {
@@ -123,7 +124,14 @@ export const taxSettlementsService = {
     return res.data;
   },
 
-  async delete(id: number): Promise<void> {
-    await client.delete(`/tax-settlements/${id}`);
+  async revertToDraft(id: number, operationKey: string): Promise<TaxSettlement> {
+    const res = await client.post<TaxSettlement>(`/tax-settlements/${id}/revert-to-draft`, {
+      operation_key: operationKey,
+    });
+    return res.data;
+  },
+
+  async delete(id: number, operationKey: string): Promise<void> {
+    await client.delete(`/tax-settlements/${id}`, { data: { operation_key: operationKey } });
   },
 };

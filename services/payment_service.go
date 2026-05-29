@@ -77,20 +77,12 @@ func recalculateDocumentStatusTx(tx *gorm.DB, documentID uint) error {
 	if err := tx.First(&d, documentID).Error; err != nil {
 		return err
 	}
-	if d.Status == "anulado" {
+	if d.Status == DocumentStatusCancelled {
 		return nil
 	}
 
 	paid := DocumentPaidTotal(tx, documentID)
-
-	next := "pendiente"
-	if paid <= 0 {
-		next = "pendiente"
-	} else if paid+0.005 >= d.TotalAmount {
-		next = "pagado"
-	} else if paid > 0 && paid < d.TotalAmount && !math.IsNaN(paid) {
-		next = "parcial"
-	}
+	next := ComputeDocumentStatusFromPaid(paid, d.TotalAmount, d.Status)
 
 	if next != d.Status {
 		return tx.Model(&models.Document{}).Where("id = ?", documentID).Update("status", next).Error

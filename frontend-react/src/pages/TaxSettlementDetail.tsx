@@ -12,6 +12,7 @@ import {
   taxSettlementPdfFilename,
 } from '../pdf/taxSettlementDocument';
 import ConfirmDialog from '../components/ConfirmDialog';
+import OperationsKeyDialog from '../components/OperationsKeyDialog';
 
 const TaxSettlementDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -19,6 +20,8 @@ const TaxSettlementDetail = () => {
   const location = useLocation();
   const settlementId = Number(id);
   const canEmit = useMemo(() => auth.hasPermission(P.taxSettlementsEmit), []);
+  const canUpdate = useMemo(() => auth.hasPermission(P.taxSettlementsUpdate), []);
+  const canDelete = useMemo(() => auth.hasPermission(P.taxSettlementsDelete), []);
 
   const [row, setRow] = useState<TaxSettlement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +30,10 @@ const TaxSettlementDetail = () => {
   const [emitDialogOpen, setEmitDialogOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteKeyOpen, setDeleteKeyOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [editKeyOpen, setEditKeyOpen] = useState(false);
+  const [editKeyLoading, setEditKeyLoading] = useState(false);
 
   useEffect(() => {
     if (!settlementId) return;
@@ -119,14 +125,15 @@ const TaxSettlementDetail = () => {
     }`;
   };
 
-  const confirmDeleteSettlement = async () => {
+  const confirmDeleteSettlement = async (operationKey: string) => {
     if (!settlementId) return;
     setDeleteLoading(true);
     try {
-      await taxSettlementsService.delete(settlementId);
+      await taxSettlementsService.delete(settlementId, operationKey);
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Liquidación eliminada.' } }),
       );
+      setDeleteKeyOpen(false);
       setDeleteDialogOpen(false);
       navigate('/tax-settlements');
     } catch (e: unknown) {
@@ -144,6 +151,31 @@ const TaxSettlementDetail = () => {
       );
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const confirmEditSettlement = async (operationKey: string) => {
+    if (!settlementId) return;
+    setEditKeyLoading(true);
+    try {
+      await taxSettlementsService.revertToDraft(settlementId, operationKey);
+      setEditKeyOpen(false);
+      navigate(`/tax-settlements/${settlementId}/edit`);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'error',
+            message: typeof msg === 'string' && msg.trim() ? msg : 'No se pudo preparar la edición.',
+          },
+        }),
+      );
+    } finally {
+      setEditKeyLoading(false);
     }
   };
 
@@ -284,7 +316,17 @@ const TaxSettlementDetail = () => {
             <i className={`fas ${exportingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'} text-xs shrink-0`} aria-hidden />
             {exportingPdf ? 'Generando PDF…' : 'PDF cliente'}
           </button>
-          {canEmit ? (
+          {canUpdate ? (
+            <button
+              type="button"
+              onClick={() => setEditKeyOpen(true)}
+              className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
+            >
+              <i className="fas fa-pen text-xs shrink-0" aria-hidden />
+              Editar
+            </button>
+          ) : null}
+          {canDelete ? (
             <button
               type="button"
               onClick={() => setDeleteDialogOpen(true)}
@@ -398,14 +440,42 @@ const TaxSettlementDetail = () => {
         open={deleteDialogOpen}
         title="Advertencia: eliminar liquidación"
         message={row ? settlementDeleteWarningMessage() : ''}
-        confirmLabel="Sí, eliminar"
+        confirmLabel="Continuar"
         cancelLabel="Cancelar"
         danger
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={() => {
+          setDeleteDialogOpen(false);
+          setDeleteKeyOpen(true);
+        }}
+      />
+
+      <OperationsKeyDialog
+        open={deleteKeyOpen}
+        title="Clave de operaciones"
+        message="Confirme la clave para eliminar esta liquidación."
+        confirmLabel="Eliminar"
         loading={deleteLoading}
         onClose={() => {
-          if (!deleteLoading) setDeleteDialogOpen(false);
+          if (!deleteLoading) setDeleteKeyOpen(false);
         }}
-        onConfirm={() => void confirmDeleteSettlement()}
+        onConfirm={(key) => void confirmDeleteSettlement(key)}
+      />
+
+      <OperationsKeyDialog
+        open={editKeyOpen}
+        title="Editar liquidación"
+        message={
+          row?.status === 'emitida'
+            ? 'Se revertirán pagos, comprobantes vinculados y deudas internas DEU-LIQ antes de abrir el editor.'
+            : 'Confirme la clave para abrir el editor.'
+        }
+        confirmLabel="Continuar"
+        loading={editKeyLoading}
+        onClose={() => {
+          if (!editKeyLoading) setEditKeyOpen(false);
+        }}
+        onConfirm={(key) => void confirmEditSettlement(key)}
       />
     </div>
   );

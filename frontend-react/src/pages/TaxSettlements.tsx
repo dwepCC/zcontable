@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { taxSettlementsService } from '../services/taxSettlements';
 import type { TaxSettlement, TaxSettlementLine } from '../types/dashboard';
 import Pagination from '../components/Pagination';
 import CompanySearchInput from '../components/CompanySearchInput';
 import ConfirmDialog from '../components/ConfirmDialog';
+import OperationsKeyDialog from '../components/OperationsKeyDialog';
+import TableRowMoreMenu from '../components/TableRowMoreMenu';
 import { auth } from '../services/auth';
 import { P } from '../rbac/codes';
 
@@ -56,19 +58,25 @@ function settlementDeleteWarningFromRow(row: TaxSettlement): string {
 }
 
 const TaxSettlements = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCompanyId = searchParams.get('company_id') ?? '';
   const page = parsePositiveInt(searchParams.get('page'), 1);
   const perPage = parsePositiveInt(searchParams.get('per_page'), 20);
 
   const canCreate = useMemo(() => auth.hasPermission(P.taxSettlementsCreate), []);
+  const canUpdate = useMemo(() => auth.hasPermission(P.taxSettlementsUpdate), []);
+  const canDelete = useMemo(() => auth.hasPermission(P.taxSettlementsDelete), []);
   const canRegisterPayment = useMemo(() => auth.hasPermission(P.paymentsCreate), []);
 
   const [list, setList] = useState<TaxSettlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<TaxSettlement | null>(null);
+  const [deleteKeyTarget, setDeleteKeyTarget] = useState<TaxSettlement | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [editKeyTarget, setEditKeyTarget] = useState<TaxSettlement | null>(null);
+  const [editKeyLoading, setEditKeyLoading] = useState(false);
   const [itemsModalRow, setItemsModalRow] = useState<TaxSettlement | null>(null);
   const [filterCompanyId, setFilterCompanyId] = useState(initialCompanyId);
   const [pagination, setPagination] = useState({
@@ -152,15 +160,15 @@ const TaxSettlements = () => {
     return s;
   };
 
-  const confirmDeleteFromList = async () => {
-    if (!deleteTarget) return;
+  const confirmDeleteFromList = async (operationKey: string) => {
+    if (!deleteKeyTarget) return;
     setDeleteLoading(true);
     try {
-      await taxSettlementsService.delete(deleteTarget.id);
+      await taxSettlementsService.delete(deleteKeyTarget.id, operationKey);
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'Liquidación eliminada.' } }),
       );
-      setDeleteTarget(null);
+      setDeleteKeyTarget(null);
       void fetchList();
     } catch (e: unknown) {
       const msg =
@@ -177,6 +185,37 @@ const TaxSettlements = () => {
       );
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const settlementEditKeyMessage = (row: TaxSettlement) =>
+    row.status === 'emitida'
+      ? 'Si la liquidación está emitida, se revertirán pagos vinculados, referencias en comprobantes y deudas internas DEU-LIQ antes de abrir el editor.'
+      : 'Confirme la clave para abrir el editor de la liquidación en borrador.';
+
+  const confirmEditFromList = async (operationKey: string) => {
+    if (!editKeyTarget) return;
+    setEditKeyLoading(true);
+    try {
+      await taxSettlementsService.revertToDraft(editKeyTarget.id, operationKey);
+      const id = editKeyTarget.id;
+      setEditKeyTarget(null);
+      navigate(`/tax-settlements/${id}/edit`);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'error',
+            message: typeof msg === 'string' && msg.trim() ? msg : 'No se pudo preparar la edición.',
+          },
+        }),
+      );
+    } finally {
+      setEditKeyLoading(false);
     }
   };
 
@@ -344,15 +383,32 @@ const TaxSettlements = () => {
                         <i className="fas fa-eye text-[10px]" aria-hidden />
                         Ver
                       </Link>
-                      {canCreate ? (
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(row)}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:text-red-800 self-center"
-                        >
-                          <i className="fas fa-trash-alt text-[10px]" aria-hidden />
-                          Eliminar
-                        </button>
+                      {canUpdate || canDelete ? (
+                        <TableRowMoreMenu
+                          items={[
+                            ...(canUpdate
+                              ? [
+                                  {
+                                    type: 'button' as const,
+                                    label: 'Editar',
+                                    icon: 'fas fa-pen',
+                                    onClick: () => setEditKeyTarget(row),
+                                  },
+                                ]
+                              : []),
+                            ...(canDelete
+                              ? [
+                                  {
+                                    type: 'button' as const,
+                                    label: 'Eliminar',
+                                    icon: 'fas fa-trash',
+                                    danger: true,
+                                    onClick: () => setDeleteTarget(row),
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
                       ) : null}
                     </div>
                   </td>
@@ -389,7 +445,39 @@ const TaxSettlements = () => {
         onClose={() => {
           if (!deleteLoading) setDeleteTarget(null);
         }}
-        onConfirm={() => void confirmDeleteFromList()}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          setDeleteKeyTarget(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
+
+      <OperationsKeyDialog
+        open={Boolean(deleteKeyTarget)}
+        title="Clave de operaciones"
+        message={
+          deleteKeyTarget
+            ? `Confirme la clave para eliminar la liquidación ${deleteKeyTarget.number || `#${deleteKeyTarget.id}`}.`
+            : undefined
+        }
+        confirmLabel="Eliminar"
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteKeyTarget(null);
+        }}
+        onConfirm={(key) => void confirmDeleteFromList(key)}
+      />
+
+      <OperationsKeyDialog
+        open={Boolean(editKeyTarget)}
+        title="Editar liquidación"
+        message={editKeyTarget ? settlementEditKeyMessage(editKeyTarget) : undefined}
+        confirmLabel="Continuar"
+        loading={editKeyLoading}
+        onClose={() => {
+          if (!editKeyLoading) setEditKeyTarget(null);
+        }}
+        onConfirm={(key) => void confirmEditFromList(key)}
       />
 
       {itemsModalRow
