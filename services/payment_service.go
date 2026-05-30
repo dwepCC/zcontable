@@ -8,6 +8,7 @@ import (
 
 	"miappfiber/database"
 	"miappfiber/models"
+	debtsvc "miappfiber/services/debt"
 
 	"gorm.io/gorm"
 )
@@ -73,21 +74,7 @@ func isValidPaymentType(value string) bool {
 }
 
 func recalculateDocumentStatusTx(tx *gorm.DB, documentID uint) error {
-	var d models.Document
-	if err := tx.First(&d, documentID).Error; err != nil {
-		return err
-	}
-	if d.Status == DocumentStatusCancelled {
-		return nil
-	}
-
-	paid := DocumentPaidTotal(tx, documentID)
-	next := ComputeDocumentStatusFromPaid(paid, d.TotalAmount, d.Status)
-
-	if next != d.Status {
-		return tx.Model(&models.Document{}).Where("id = ?", documentID).Update("status", next).Error
-	}
-	return nil
+	return debtsvc.NewService().PersistBalanceAndStatus(tx, documentID)
 }
 
 func (s *PaymentService) Create(input *models.Payment) error {
@@ -239,34 +226,17 @@ func (s *PaymentService) CreateFromParams(p *PaymentCreateParams) (uint, error) 
 	}
 
 	var paymentID uint
+	debtSvc := debtsvc.NewService()
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		docSeen := map[uint]struct{}{}
+		applyLines := make([]debtsvc.PaymentAllocationLine, 0, len(lines))
 		for _, ln := range lines {
-			if _, dup := docSeen[ln.DocumentID]; dup {
-				return errors.New("documento repetido en imputación; una sola línea por documento")
-			}
-			docSeen[ln.DocumentID] = struct{}{}
-
-			var d models.Document
-			if err := tx.First(&d, ln.DocumentID).Error; err != nil {
-				return errors.New("documento inválido")
-			}
-			if d.CompanyID != p.CompanyID {
-				return errors.New("el documento no pertenece a la empresa")
-			}
-			if d.Status == "anulado" {
-				return errors.New("no se puede imputar a un documento anulado")
-			}
-			bal := d.TotalAmount - DocumentPaidTotal(tx, ln.DocumentID)
-			if ln.Amount > bal+0.005 {
-				return errors.New("el monto excede el saldo de un documento imputado")
-			}
+			applyLines = append(applyLines, debtsvc.PaymentAllocationLine{
+				DocumentID: ln.DocumentID,
+				Amount:     ln.Amount,
+			})
 		}
-
-		pay := models.Payment{
+		pid, err := debtSvc.ApplyPaymentTx(tx, debtsvc.ApplyPaymentInput{
 			CompanyID:       p.CompanyID,
-			DocumentID:      nil,
-			Type:            "applied",
 			Date:            p.Date,
 			Amount:          p.Amount,
 			Method:          p.Method,
@@ -276,25 +246,12 @@ func (s *PaymentService) CreateFromParams(p *PaymentCreateParams) (uint, error) 
 			Notes:           p.Notes,
 			FiscalStatus:    p.FiscalStatus,
 			TaxSettlementID: p.TaxSettlementID,
-		}
-		if err := tx.Create(&pay).Error; err != nil {
+			Lines:           applyLines,
+		})
+		if err != nil {
 			return err
 		}
-		paymentID = pay.ID
-
-		for _, ln := range lines {
-			a := models.PaymentAllocation{
-				PaymentID:  pay.ID,
-				DocumentID: ln.DocumentID,
-				Amount:     ln.Amount,
-			}
-			if err := tx.Create(&a).Error; err != nil {
-				return err
-			}
-			if err := recalculateDocumentStatusTx(tx, ln.DocumentID); err != nil {
-				return err
-			}
-		}
+		paymentID = pid
 		return nil
 	})
 	return paymentID, err
@@ -310,6 +267,7 @@ func (s *PaymentService) buildFIFOAllocations(companyID uint, amount float64, al
 		return nil, err
 	}
 
+	debtSvc := debtsvc.NewService()
 	remaining := amount
 	var lines []PaymentAllocationInput
 
@@ -317,7 +275,7 @@ func (s *PaymentService) buildFIFOAllocations(companyID uint, amount float64, al
 		if remaining < 0.005 {
 			break
 		}
-		bal := d.TotalAmount - DocumentPaidTotal(database.DB, d.ID)
+		bal := debtSvc.EffectiveBalance(database.DB, &d)
 		if bal < 0.005 {
 			continue
 		}
@@ -350,7 +308,7 @@ func (s *PaymentService) Update(id uint, input *models.Payment) error {
 	database.DB.Model(&models.PaymentAllocation{}).Where("payment_id = ?", p.ID).Count(&allocCount)
 
 	if p.DocumentID != nil || normalizePaymentType(p.Type) == "applied" || allocCount > 0 {
-		return errors.New("no se puede editar un pago aplicado o con imputaciones")
+		return errors.New("no se puede editar un pago aplicado o con imputaciones; elimínelo y regístrelo de nuevo")
 	}
 
 	oldDocID := p.DocumentID
@@ -419,13 +377,13 @@ func (s *PaymentService) Update(id uint, input *models.Payment) error {
 				return errors.New("no se puede registrar pagos en un documento anulado")
 			}
 
-			var paid float64
-			tx.Model(&models.Payment{}).
-				Where("document_id = ? AND id <> ?", *p.DocumentID, p.ID).
-				Select("COALESCE(SUM(amount),0)").Scan(&paid)
-
-			balance := newDoc.TotalAmount - paid
-			if p.Amount > balance+0.005 {
+			debtSvc := debtsvc.NewService()
+			paidOthers := debtSvc.PaidTotal(tx, *p.DocumentID) - p.Amount
+			if paidOthers < 0 {
+				paidOthers = 0
+			}
+			bal := debtsvc.BalanceFromTotalPaid(newDoc.TotalAmount, paidOthers)
+			if p.Amount > bal+0.005 {
 				return errors.New("el monto excede el saldo del documento")
 			}
 		}

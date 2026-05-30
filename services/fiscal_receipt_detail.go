@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -17,13 +18,7 @@ func roundFiscalMoney(v float64) float64 {
 }
 
 func documentPeriodLabel(doc *models.Document) string {
-	if doc == nil {
-		return ""
-	}
-	if p := strings.TrimSpace(doc.AccountingPeriod); p != "" {
-		return p
-	}
-	return strings.TrimSpace(doc.ServiceMonth)
+	return ReceiptDocumentPeriodLabel(doc)
 }
 
 // buildLinesFromPaymentAllocations genera líneas de PDF desde imputaciones del pago (deudas / liquidación).
@@ -31,9 +26,9 @@ func buildLinesFromPaymentAllocations(pay *models.Payment) []models.FiscalReceip
 	if pay == nil || len(pay.Allocations) == 0 {
 		return nil
 	}
+	settlementByDoc := settlementLinesByDocumentID(pay)
 	lines := make([]models.FiscalReceiptLine, 0)
 	sortIdx := 0
-	payDesc := strings.TrimSpace(pay.Description)
 	for _, a := range pay.Allocations {
 		amt := roundFiscalMoney(a.Amount)
 		if amt <= 0 || a.Document == nil {
@@ -44,20 +39,117 @@ func buildLinesFromPaymentAllocations(pay *models.Payment) []models.FiscalReceip
 		if paidBefore < 0 {
 			paidBefore = 0
 		}
-		chunk := buildLinesFromDocumentAllocation(a.Document, amt, paidBefore, payDesc, sortIdx)
+		var chunk []models.FiscalReceiptLine
+		if sl := settlementByDoc[a.DocumentID]; sl != nil && len(sortedDocumentItems(a.Document)) == 0 {
+			chunk = buildFiscalLinesFromSettlementAllocation(a.Document, amt, paidBefore, sl, sortIdx)
+		} else {
+			chunk = buildLinesFromDocumentAllocation(a.Document, amt, paidBefore, sl, sortIdx)
+		}
 		lines = append(lines, chunk...)
 		sortIdx += len(chunk)
 	}
 	return lines
 }
 
+func settlementLinesByDocumentID(pay *models.Payment) map[uint]*models.TaxSettlementLine {
+	if pay == nil || pay.TaxSettlement == nil || len(pay.TaxSettlement.Lines) == 0 {
+		return nil
+	}
+	out := make(map[uint]*models.TaxSettlementLine, len(pay.TaxSettlement.Lines))
+	for i := range pay.TaxSettlement.Lines {
+		ln := &pay.TaxSettlement.Lines[i]
+		if ln.DocumentID == nil || *ln.DocumentID == 0 {
+			continue
+		}
+		out[*ln.DocumentID] = ln
+	}
+	return out
+}
+
+func settlementLinePeriodYM(sl *models.TaxSettlementLine) string {
+	if sl == nil {
+		return ""
+	}
+	if pym := strings.TrimSpace(sl.PeriodYM); pym != "" {
+		return pym
+	}
+	if sl.PeriodDate != nil && !sl.PeriodDate.IsZero() {
+		return sl.PeriodDate.Format("2006-01")
+	}
+	return ""
+}
+
+func settlementLineConceptDisplay(sl *models.TaxSettlementLine) string {
+	if sl == nil {
+		return ""
+	}
+	desc := strings.TrimSpace(sl.Concept)
+	if desc == "" {
+		return ""
+	}
+	if pym := settlementLinePeriodYM(sl); pym != "" {
+		return fmt.Sprintf("%s — %s", desc, pym)
+	}
+	return desc
+}
+
+func documentConceptBase(doc *models.Document, sl *models.TaxSettlementLine) string {
+	if sl != nil {
+		if c := strings.TrimSpace(sl.Concept); c != "" {
+			return c
+		}
+	}
+	if doc != nil {
+		if c := strings.TrimSpace(doc.Description); c != "" {
+			return c
+		}
+	}
+	return ""
+}
+
+func appendPeriodToConcept(desc string, sl *models.TaxSettlementLine, doc *models.Document) string {
+	desc = strings.TrimSpace(desc)
+	if desc == "" {
+		return desc
+	}
+	if sl != nil {
+		if pym := settlementLinePeriodYM(sl); pym != "" {
+			return fmt.Sprintf("%s — %s", desc, pym)
+		}
+	}
+	return appendPeriodToDesc(desc, doc)
+}
+
+func buildFiscalLinesFromSettlementAllocation(doc *models.Document, allocAmount, paidBefore float64, sl *models.TaxSettlementLine, lineStart int) []models.FiscalReceiptLine {
+	allocAmount = roundFiscalMoney(allocAmount)
+	if allocAmount <= 0 || doc == nil || sl == nil {
+		return nil
+	}
+	desc := settlementLineConceptDisplay(sl)
+	if desc == "" {
+		desc = appendPeriodToConcept(documentConceptBase(doc, nil), nil, doc)
+	}
+	if desc == "" {
+		desc = "Pago de deuda"
+	}
+	docRemain := roundFiscalMoney(doc.TotalAmount - paidBefore)
+	if docRemain < 0 {
+		docRemain = 0
+	}
+	desc = appendPartialLabelIfNeeded(desc, allocAmount, docRemain)
+	return []models.FiscalReceiptLine{newFiscalLineFromAmount(desc, allocAmount, lineStart)}
+}
+
 func documentItemLabel(it models.DocumentItem) string {
+	if t := strings.TrimSpace(it.Description); t != "" {
+		return t
+	}
 	if it.Product != nil {
 		if n := productDisplayName(it.Product); n != "" {
 			return n
 		}
 	}
-	return strings.TrimSpace(it.Description)
+	return ""
 }
 
 func appendPeriodToDesc(desc string, doc *models.Document) string {
@@ -65,6 +157,22 @@ func appendPeriodToDesc(desc string, doc *models.Document) string {
 		return fmt.Sprintf("%s — %s", desc, per)
 	}
 	return desc
+}
+
+const fiscalPartialPaymentLabel = " (parcial)"
+
+func appendPartialLabelIfNeeded(desc string, paidAmount, fullAmount float64) string {
+	if fullAmount <= documentMoneyEpsilon {
+		return desc
+	}
+	if paidAmount >= fullAmount-documentMoneyEpsilon {
+		return desc
+	}
+	d := strings.TrimSpace(desc)
+	if strings.HasSuffix(strings.ToLower(d), "(parcial)") {
+		return desc
+	}
+	return desc + fiscalPartialPaymentLabel
 }
 
 func newFiscalLineFromAmount(desc string, amt float64, sortOrder int) models.FiscalReceiptLine {
@@ -102,7 +210,7 @@ func sortedDocumentItems(doc *models.Document) []models.DocumentItem {
 }
 
 // buildLinesFromDocumentAllocation asigna el monto imputado a ítems de la deuda (waterfill tras pagos previos).
-func buildLinesFromDocumentAllocation(doc *models.Document, allocAmount, paidBefore float64, payDesc string, lineStart int) []models.FiscalReceiptLine {
+func buildLinesFromDocumentAllocation(doc *models.Document, allocAmount, paidBefore float64, sl *models.TaxSettlementLine, lineStart int) []models.FiscalReceiptLine {
 	allocAmount = roundFiscalMoney(allocAmount)
 	if allocAmount <= 0 || doc == nil {
 		return nil
@@ -135,7 +243,8 @@ func buildLinesFromDocumentAllocation(doc *models.Document, allocAmount, paidBef
 			if desc == "" {
 				desc = "Concepto"
 			}
-			desc = appendPeriodToDesc(desc, doc)
+			desc = appendPeriodToConcept(desc, sl, doc)
+			desc = appendPartialLabelIfNeeded(desc, lineAmt, itemRemain)
 			out = append(out, newFiscalLineFromAmount(desc, lineAmt, sortIdx))
 			sortIdx++
 			remaining = roundFiscalMoney(remaining - lineAmt)
@@ -144,27 +253,26 @@ func buildLinesFromDocumentAllocation(doc *models.Document, allocAmount, paidBef
 			}
 		}
 		if remaining > documentMoneyEpsilon {
-			fallback := strings.TrimSpace(payDesc)
-			if fallback == "" {
-				fallback = strings.TrimSpace(doc.Description)
-			}
+			fallback := documentConceptBase(doc, sl)
 			if fallback == "" {
 				fallback = "Saldo adicional"
 			}
-			fallback = appendPeriodToDesc(fallback, doc)
+			fallback = appendPeriodToConcept(fallback, sl, doc)
 			out = append(out, newFiscalLineFromAmount(fallback, remaining, sortIdx))
 		}
 		return out
 	}
 
-	desc := strings.TrimSpace(payDesc)
-	if desc == "" {
-		desc = strings.TrimSpace(doc.Description)
-	}
+	desc := documentConceptBase(doc, sl)
 	if desc == "" {
 		desc = "Pago de deuda"
 	}
-	desc = appendPeriodToDesc(desc, doc)
+	desc = appendPeriodToConcept(desc, sl, doc)
+	docRemain := roundFiscalMoney(doc.TotalAmount - paidBefore)
+	if docRemain < 0 {
+		docRemain = 0
+	}
+	desc = appendPartialLabelIfNeeded(desc, allocAmount, docRemain)
 	return []models.FiscalReceiptLine{newFiscalLineFromAmount(desc, allocAmount, lineStart)}
 }
 
@@ -176,11 +284,27 @@ func fiscalLineConceptLabel(ln models.FiscalReceiptLine) string {
 }
 
 func paidConceptsFromFiscalLines(lines []models.FiscalReceiptLine) []string {
+	return uniqueFiscalLineConcepts(lines, false)
+}
+
+// partialPaidConceptsFromFiscalLines conceptos de líneas con pago parcial (bloque «Detalle de pago»).
+func partialPaidConceptsFromFiscalLines(lines []models.FiscalReceiptLine) []string {
+	return uniqueFiscalLineConcepts(lines, true)
+}
+
+func isPartialFiscalLineConcept(label string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(label)), "(parcial)")
+}
+
+func uniqueFiscalLineConcepts(lines []models.FiscalReceiptLine, partialOnly bool) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(lines))
 	for _, ln := range lines {
 		label := fiscalLineConceptLabel(ln)
 		if label == "" {
+			continue
+		}
+		if partialOnly && !isPartialFiscalLineConcept(label) {
 			continue
 		}
 		k := strings.ToLower(label)
@@ -202,7 +326,167 @@ func setDebtPaymentContextConcepts(ctx *models.DebtPaymentContext, concepts []st
 		ctx.PaidConceptLabel = ctx.PaidConcepts[0]
 	} else if len(ctx.PaidConcepts) > 1 {
 		ctx.PaidConceptLabel = strings.Join(ctx.PaidConcepts, "; ")
+	} else {
+		ctx.PaidConceptLabel = ""
 	}
+}
+
+func debtPaymentContextToJSON(ctx *models.DebtPaymentContext) (string, error) {
+	if ctx == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(ctx)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func debtPaymentContextFromJSON(raw string) (*models.DebtPaymentContext, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var ctx models.DebtPaymentContext
+	if err := json.Unmarshal([]byte(raw), &ctx); err != nil {
+		return nil, err
+	}
+	return &ctx, nil
+}
+
+// buildDebtPaymentContextSnapshot congela el bloque «Detalle de pago» al emitir el comprobante.
+func buildDebtPaymentContextSnapshot(pay *models.Payment, lines []models.FiscalReceiptLine) *models.DebtPaymentContext {
+	if pay == nil || len(lines) == 0 {
+		return nil
+	}
+	concepts := partialPaidConceptsFromFiscalLines(lines)
+	paidThis := roundFiscalMoney(pay.Amount)
+
+	if len(pay.Allocations) == 0 && pay.DocumentID != nil && *pay.DocumentID > 0 {
+		var doc models.Document
+		if err := database.DB.First(&doc, *pay.DocumentID).Error; err != nil {
+			return nil
+		}
+		paidAcc := DocumentPaidTotal(database.DB, doc.ID)
+		ctx := &models.DebtPaymentContext{
+			DocumentNumber:    strings.TrimSpace(doc.DisplayNumber),
+			DebtTotal:         doc.TotalAmount,
+			PaidThisOperation: paidThis,
+			PaidAccumulated:   roundFiscalMoney(paidAcc),
+			BalancePending:    DocumentBalance(doc.TotalAmount, paidAcc),
+		}
+		if ctx.DocumentNumber == "" {
+			ctx.DocumentNumber = strings.TrimSpace(doc.Number)
+		}
+		applyDebtPaymentContextStatusFromSnapshot(ctx, concepts)
+		setDebtPaymentContextConcepts(ctx, concepts)
+		return ctx
+	}
+	if len(pay.Allocations) == 0 {
+		return nil
+	}
+
+	var primary *models.PaymentAllocation
+	var totalBalanceAfter float64
+	for i := range pay.Allocations {
+		a := &pay.Allocations[i]
+		if a.Document == nil || a.DocumentID == 0 {
+			continue
+		}
+		paidAcc := DocumentPaidTotal(database.DB, a.DocumentID)
+		bal := DocumentBalance(a.Document.TotalAmount, paidAcc)
+		totalBalanceAfter += bal
+		if primary == nil {
+			primary = a
+		}
+		if bal > documentMoneyEpsilon {
+			primary = a
+		}
+	}
+	if primary == nil || primary.Document == nil {
+		return nil
+	}
+	doc := primary.Document
+	paidAcc := DocumentPaidTotal(database.DB, doc.ID)
+	ctx := &models.DebtPaymentContext{
+		DocumentNumber:    strings.TrimSpace(doc.DisplayNumber),
+		DebtTotal:         doc.TotalAmount,
+		PaidThisOperation: paidThis,
+		PaidAccumulated:   roundFiscalMoney(paidAcc),
+		BalancePending:    roundFiscalMoney(totalBalanceAfter),
+	}
+	if ctx.DocumentNumber == "" {
+		ctx.DocumentNumber = strings.TrimSpace(doc.Number)
+	}
+	if len(pay.Allocations) == 1 {
+		ctx.BalancePending = DocumentBalance(doc.TotalAmount, paidAcc)
+	}
+	applyDebtPaymentContextStatusFromSnapshot(ctx, concepts)
+	setDebtPaymentContextConcepts(ctx, concepts)
+	return ctx
+}
+
+func applyDebtPaymentContextStatusFromSnapshot(ctx *models.DebtPaymentContext, partialConcepts []string) {
+	if ctx == nil {
+		return
+	}
+	if len(partialConcepts) > 0 {
+		ctx.IsPartialPayment = true
+		ctx.StatusLabel = "PAGO PARCIAL"
+		return
+	}
+	if ctx.BalancePending > documentMoneyEpsilon {
+		ctx.IsPartialPayment = true
+		ctx.StatusLabel = "PAGO PARCIAL"
+		return
+	}
+	ctx.IsPartialPayment = false
+	ctx.StatusLabel = "DEUDA CANCELADA"
+}
+
+// buildDebtPaymentContextFromStoredLines usa líneas ya persistidas (comprobantes legacy sin JSON).
+func buildDebtPaymentContextFromStoredLines(rec *models.TukifacFiscalReceipt) *models.DebtPaymentContext {
+	if rec == nil || len(rec.Lines) == 0 {
+		return nil
+	}
+	concepts := partialPaidConceptsFromFiscalLines(rec.Lines)
+	ctx := &models.DebtPaymentContext{
+		PaidThisOperation: roundFiscalMoney(rec.Total),
+		PaidAccumulated:   roundFiscalMoney(rec.Total),
+	}
+	if len(concepts) > 0 {
+		ctx.IsPartialPayment = true
+		ctx.StatusLabel = "PAGO PARCIAL"
+		var pendingHint float64
+		for _, ln := range rec.Lines {
+			if isPartialFiscalLineConcept(fiscalLineConceptLabel(ln)) {
+				pendingHint += ln.LineTotal
+			}
+		}
+		ctx.BalancePending = roundFiscalMoney(pendingHint)
+	} else {
+		ctx.IsPartialPayment = false
+		ctx.StatusLabel = "DEUDA CANCELADA"
+		ctx.BalancePending = 0
+	}
+	ctx.DebtTotal = roundFiscalMoney(rec.Total)
+	setDebtPaymentContextConcepts(ctx, concepts)
+	return ctx
+}
+
+func applyDebtPaymentContextForDetail(rec *models.TukifacFiscalReceipt) {
+	if rec == nil {
+		return
+	}
+	if ctx, err := debtPaymentContextFromJSON(rec.DebtPaymentContextJSON); err == nil && ctx != nil {
+		rec.DebtPaymentContext = ctx
+		return
+	}
+	if len(rec.Lines) > 0 {
+		rec.DebtPaymentContext = buildDebtPaymentContextFromStoredLines(rec)
+		return
+	}
+	enrichDebtPaymentContext(rec)
 }
 
 func sumLineTotals(lines []models.FiscalReceiptLine) (subtotal, tax, total float64) {
@@ -359,7 +643,9 @@ func (s *FiscalReceiptService) GetFiscalReceiptDetail(id uint) (*models.TukifacF
 		}).
 		Preload("IssuedByUser").
 		Preload("LinkedPayment").
-		Preload("LinkedPayment.TaxSettlement").
+		Preload("LinkedPayment.TaxSettlement.Lines", func(db *gorm.DB) *gorm.DB {
+			return db.Order("sort_order ASC, id ASC")
+		}).
 		Preload("LinkedPayment.Allocations", func(db *gorm.DB) *gorm.DB {
 			return db.Order("id ASC")
 		}).
@@ -373,22 +659,29 @@ func (s *FiscalReceiptService) GetFiscalReceiptDetail(id uint) (*models.TukifacF
 	}
 
 	if len(rec.Lines) == 0 && rec.LinkedPaymentID != nil && *rec.LinkedPaymentID > 0 {
-		var pay models.Payment
-		if err := database.DB.
-			Preload("Allocations", func(db *gorm.DB) *gorm.DB {
-				return db.Order("id ASC")
-			}).
-			Preload("Allocations.Document.Items", func(db *gorm.DB) *gorm.DB {
-				return db.Order("sort_order ASC, id ASC")
-			}).
-			Preload("Allocations.Document.Items.Product").
-			Preload("TaxSettlement").
-			First(&pay, *rec.LinkedPaymentID).Error; err == nil {
-			rec.Lines = buildLinesFromPaymentAllocations(&pay)
-			if rec.LinkedPayment == nil {
-				rec.LinkedPayment = &pay
-			} else if len(rec.LinkedPayment.Allocations) == 0 {
-				rec.LinkedPayment.Allocations = pay.Allocations
+		pay := rec.LinkedPayment
+		if pay == nil || len(pay.Allocations) == 0 {
+			var loaded models.Payment
+			if err := database.DB.
+				Preload("Allocations", func(db *gorm.DB) *gorm.DB {
+					return db.Order("id ASC")
+				}).
+				Preload("Allocations.Document.Items", func(db *gorm.DB) *gorm.DB {
+					return db.Order("sort_order ASC, id ASC")
+				}).
+				Preload("Allocations.Document.Items.Product").
+				Preload("TaxSettlement.Lines", func(db *gorm.DB) *gorm.DB {
+					return db.Order("sort_order ASC, id ASC")
+				}).
+				Preload("TaxSettlement").
+				First(&loaded, *rec.LinkedPaymentID).Error; err == nil {
+				pay = &loaded
+				rec.LinkedPayment = pay
+			}
+		}
+		if pay != nil && len(pay.Allocations) > 0 {
+			if rebuilt := BuildReceiptLinesFromPayment(pay); len(rebuilt) > 0 {
+				rec.Lines = rebuilt
 			}
 		}
 	}
@@ -404,7 +697,7 @@ func (s *FiscalReceiptService) GetFiscalReceiptDetail(id uint) (*models.TukifacF
 
 	syncFiscalReceiptPayments(&rec)
 	rec.PeriodLabel = resolveFiscalReceiptPeriodLabel(&rec)
-	enrichDebtPaymentContext(&rec)
+	applyDebtPaymentContextForDetail(&rec)
 
 	return &rec, nil
 }
@@ -442,10 +735,10 @@ func enrichDebtPaymentContext(rec *models.TukifacFiscalReceipt) {
 			ctx.DocumentNumber = strings.TrimSpace(doc.Number)
 		}
 		setDebtPaymentStatusLabel(ctx)
-		concepts := paidConceptsFromFiscalLines(rec.Lines)
+		concepts := partialPaidConceptsFromFiscalLines(rec.Lines)
 		if len(concepts) == 0 {
-			chunk := buildLinesFromDocumentAllocation(&doc, paidThis, paidBefore, strings.TrimSpace(pay.Description), 0)
-			concepts = paidConceptsFromFiscalLines(chunk)
+			chunk := buildLinesFromDocumentAllocation(&doc, paidThis, paidBefore, nil, 0)
+			concepts = partialPaidConceptsFromFiscalLines(chunk)
 		}
 		setDebtPaymentContextConcepts(ctx, concepts)
 		rec.DebtPaymentContext = ctx
@@ -489,14 +782,14 @@ func enrichDebtPaymentContext(rec *models.TukifacFiscalReceipt) {
 		ctx.DocumentNumber = strings.TrimSpace(doc.Number)
 	}
 	setDebtPaymentStatusLabel(ctx)
-	concepts := paidConceptsFromFiscalLines(rec.Lines)
+	concepts := partialPaidConceptsFromFiscalLines(rec.Lines)
 	if len(concepts) == 0 {
 		paidBefore := roundFiscalMoney(paidAcc - paidThis)
 		if paidBefore < 0 {
 			paidBefore = 0
 		}
-		chunk := buildLinesFromDocumentAllocation(doc, paidThis, paidBefore, strings.TrimSpace(pay.Description), 0)
-		concepts = paidConceptsFromFiscalLines(chunk)
+		chunk := buildLinesFromDocumentAllocation(doc, paidThis, paidBefore, nil, 0)
+		concepts = partialPaidConceptsFromFiscalLines(chunk)
 	}
 	setDebtPaymentContextConcepts(ctx, concepts)
 	rec.DebtPaymentContext = ctx
@@ -507,7 +800,7 @@ func attachDebtPaymentConcepts(rec *models.TukifacFiscalReceipt) {
 	if rec == nil || rec.DebtPaymentContext == nil || len(rec.Lines) == 0 {
 		return
 	}
-	concepts := paidConceptsFromFiscalLines(rec.Lines)
+	concepts := partialPaidConceptsFromFiscalLines(rec.Lines)
 	if len(concepts) == 0 {
 		return
 	}

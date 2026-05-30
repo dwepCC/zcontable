@@ -44,6 +44,8 @@ type TukifacFiscalReceipt struct {
 	PaymentMethod          string         `gorm:"size:30" json:"payment_method,omitempty"`
 	PaymentReference       string         `gorm:"size:120" json:"payment_reference,omitempty"`
 	Notes                  string         `gorm:"type:text" json:"notes,omitempty"`
+	// Snapshot JSON de DebtPaymentContext al emitir (PDF / reimpresión inmutable).
+	DebtPaymentContextJSON string         `gorm:"type:text" json:"-"`
 	// URLs de impresión/descarga (legacy / externas).
 	PrintTicketURL string `gorm:"size:2000" json:"print_ticket_url,omitempty"`
 	PdfURL         string `gorm:"size:2000" json:"pdf_url,omitempty"`
