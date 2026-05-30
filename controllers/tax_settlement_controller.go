@@ -202,6 +202,59 @@ func (ctrl *TaxSettlementController) PaymentSuggestionsAPI(c fiber.Ctx) error {
 	return c.JSON(res)
 }
 
+// DebtsContextAPI GET /api/tax-settlements/:id/debts-context — deudas vinculadas y abiertas no vinculadas.
+func (ctrl *TaxSettlementController) DebtsContextAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil || id == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	ts0, err := ctrl.svc.GetByID(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No encontrado"})
+	}
+	if err := ctrl.ensureCompanyAccess(c, ts0.CompanyID); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+	ctx, err := ctrl.svc.DebtsContext(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(ctx)
+}
+
+// LinkDebtAPI POST /api/tax-settlements/:id/link-debt — vincula deuda existente al borrador.
+func (ctrl *TaxSettlementController) LinkDebtAPI(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
+	if err != nil || id == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
+	}
+	ts0, err := ctrl.svc.GetByID(uint(id))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No encontrado"})
+	}
+	if err := ctrl.ensureCompanyAccess(c, ts0.CompanyID); err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+	}
+	if ts0.Status != models.TaxSettlementStatusDraft {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "solo en borrador se pueden agregar deudas"})
+	}
+	var body services.LinkDebtInput
+	if err := c.Bind().Body(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	ts, err := ctrl.svc.LinkDebtToDraft(uint(id), body)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(ts)
+}
+
 func (ctrl *TaxSettlementController) GetAPI(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 32)
 	if err != nil || id == 0 {

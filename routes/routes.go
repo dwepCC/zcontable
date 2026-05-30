@@ -107,6 +107,7 @@ func Setup(app *fiber.App) {
 
 	// Reports API
 	api.Get("/reports/financial", middleware.RequirePermission(rbac.ReportsFinancialView), reportCtrl.FinancialSummaryAPI)
+	api.Get("/reports/debts", middleware.RequirePermission(rbac.ReportsFinancialView), reportCtrl.DebtsReportAPI)
 
 	// Series y comprobantes fiscales (local)
 	api.Get("/fiscal-document-series", middleware.RequirePermission(rbac.FiscalSeriesView), fiscalSeriesCtrl.ListAPI)
@@ -171,6 +172,8 @@ func Setup(app *fiber.App) {
 	api.Get("/tax-settlements", middleware.RequirePermission(rbac.TaxSettlementsList), taxSettleCtrl.ListAPI)
 	api.Post("/tax-settlements", middleware.RequirePermission(rbac.TaxSettlementsCreate), taxSettleCtrl.CreateAPI)
 	api.Get("/tax-settlements/:id/payment-suggestions", middleware.RequirePermission(rbac.TaxSettlementsPaymentSuggestions), taxSettleCtrl.PaymentSuggestionsAPI)
+	api.Get("/tax-settlements/:id/debts-context", middleware.RequirePermission(rbac.TaxSettlementsView), taxSettleCtrl.DebtsContextAPI)
+	api.Post("/tax-settlements/:id/link-debt", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.LinkDebtAPI)
 	api.Get("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsView), taxSettleCtrl.GetAPI)
 	api.Put("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.UpdateAPI)
 	api.Post("/tax-settlements/:id/revert-to-draft", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.RevertToDraftAPI)
