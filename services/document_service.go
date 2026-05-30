@@ -10,6 +10,7 @@ import (
 
 	"miappfiber/database"
 	"miappfiber/models"
+	debtsvc "miappfiber/services/debt"
 
 	"gorm.io/gorm"
 )
@@ -175,6 +176,8 @@ func (s *DocumentService) Create(input *models.Document) error {
 			input.AccountingPeriod = ap
 		}
 	}
+	debtsvc.ApplyPeriodFromString(input, input.AccountingPeriod, input.ServiceMonth)
+	debtsvc.NewService().InitBalanceOnCreate(input)
 
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		if input.Number == "" && isManualDocumentSource(input.Source) {
@@ -576,11 +579,13 @@ func (s *DocumentService) enrichDocumentsFinancials(list []models.Document) {
 		return
 	}
 	now := time.Now()
+	debtSvc := debtsvc.NewService()
 	for i := range list {
-		paid := DocumentPaidTotal(database.DB, list[i].ID)
+		paid := debtSvc.PaidTotal(database.DB, list[i].ID)
 		list[i].PaidAmount = math.Round(paid*100) / 100
-		list[i].BalanceAmount = DocumentBalance(list[i].TotalAmount, paid)
-		list[i].IsOverdue = DocumentIsOverdue(&list[i], list[i].BalanceAmount, now)
+		bal := debtSvc.EffectiveBalance(database.DB, &list[i])
+		list[i].BalanceAmount = bal
+		list[i].IsOverdue = DocumentIsOverdue(&list[i], bal, now)
 	}
 }
 
@@ -667,19 +672,5 @@ func (s *DocumentService) Delete(id uint) error {
 }
 
 func (s *DocumentService) RecalculateStatusFromPayments(documentID uint) error {
-	var d models.Document
-	if err := database.DB.First(&d, documentID).Error; err != nil {
-		return err
-	}
-	if d.Status == DocumentStatusCancelled {
-		return nil
-	}
-
-	paid := DocumentPaidTotal(database.DB, documentID)
-	next := ComputeDocumentStatusFromPaid(paid, d.TotalAmount, d.Status)
-
-	if next != d.Status {
-		return database.DB.Model(&models.Document{}).Where("id = ?", documentID).Update("status", next).Error
-	}
-	return nil
+	return debtsvc.NewService().PersistBalanceAndStatus(database.DB, documentID)
 }

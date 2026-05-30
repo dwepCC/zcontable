@@ -2,15 +2,20 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"miappfiber/database"
 	"miappfiber/models"
+	debtsvc "miappfiber/services/debt"
 
 	"gorm.io/gorm"
 )
 
-const migDocumentsRecalcStatusV1 = "documents_v1_recalc_status_from_payments"
+const (
+	migDocumentsRecalcStatusV1   = "documents_v1_recalc_status_from_payments"
+	migDocumentsDomainV2Backfill = "documents_v2_debt_domain_backfill"
+)
 
 // RunDocumentMigrations migraciones idempotentes de deudas (datos).
 func RunDocumentMigrations(db *gorm.DB) error {
@@ -22,6 +27,7 @@ func RunDocumentMigrations(db *gorm.DB) error {
 		fn   func(*gorm.DB) error
 	}{
 		{migDocumentsRecalcStatusV1, migrateDocumentsRecalcStatusFromPayments},
+		{migDocumentsDomainV2Backfill, migrateDocumentsDebtDomainV2Backfill},
 	}
 	for _, step := range steps {
 		if err := applyDocumentMigrationOnce(db, step.name, step.fn); err != nil {
@@ -50,11 +56,77 @@ func migrateDocumentsRecalcStatusFromPayments(db *gorm.DB) error {
 	if err := db.Model(&models.Document{}).Pluck("id", &ids).Error; err != nil {
 		return err
 	}
-	svc := NewDocumentService()
+	svc := debtsvc.NewService()
 	for _, id := range ids {
-		if err := svc.RecalculateStatusFromPayments(id); err != nil {
+		if err := svc.PersistBalanceAndStatus(db, id); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func migrateDocumentsDebtDomainV2Backfill(db *gorm.DB) error {
+	svc := debtsvc.NewService()
+	var warnPeriod int
+
+	// tax_settlement_id desde líneas de liquidación
+	if err := db.Exec(`
+		UPDATE documents d
+		INNER JOIN tax_settlement_lines tsl ON tsl.document_id = d.id
+		SET d.tax_settlement_id = tsl.tax_settlement_id
+		WHERE d.tax_settlement_id IS NULL AND tsl.tax_settlement_id IS NOT NULL
+	`).Error; err != nil {
+		return err
+	}
+
+	// tax_settlement_id desde patrón legacy DEU-LIQ-{settlementId}-{lineId}
+	var legacy []models.Document
+	if err := db.Where("number LIKE ?", "DEU-LIQ-%").Find(&legacy).Error; err != nil {
+		return err
+	}
+	for i := range legacy {
+		d := &legacy[i]
+		if d.TaxSettlementID != nil && *d.TaxSettlementID > 0 {
+			continue
+		}
+		sid, ok := debtsvc.ParseDEULIQNumber(d.Number)
+		if !ok {
+			continue
+		}
+		if err := db.Model(&models.Document{}).Where("id = ?", d.ID).Update("tax_settlement_id", sid).Error; err != nil {
+			return err
+		}
+	}
+
+	// balance_amount + status + periodo
+	var ids []uint
+	if err := db.Model(&models.Document{}).Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		var d models.Document
+		if err := db.First(&d, id).Error; err != nil {
+			return err
+		}
+		if err := svc.PersistBalanceAndStatusForDoc(db, &d); err != nil {
+			return err
+		}
+		if !d.HasPeriod {
+			if debtsvc.ApplyPeriodFromString(&d, d.AccountingPeriod, d.ServiceMonth) {
+				if err := db.Model(&models.Document{}).Where("id = ?", id).Updates(map[string]interface{}{
+					"has_period":   d.HasPeriod,
+					"period_month": d.PeriodMonth,
+					"period_year":  d.PeriodYear,
+				}).Error; err != nil {
+					return err
+				}
+			} else {
+				warnPeriod++
+			}
+		}
+	}
+	if warnPeriod > 0 {
+		log.Printf("[migrate %s] %d documentos sin periodo parseable (YYYY-MM)", migDocumentsDomainV2Backfill, warnPeriod)
 	}
 	return nil
 }
