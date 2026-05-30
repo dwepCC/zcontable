@@ -85,6 +85,19 @@ export function formatMoneyPen(n: number): string {
   return `S/ ${n.toFixed(2)}`;
 }
 
+/** Periodo MM/YYYY desde has_period o legacy YYYY-MM. */
+export function formatDocumentPeriod(doc: Document): string {
+  if (doc.has_period && doc.period_month != null && doc.period_year != null) {
+    const mo = String(doc.period_month).padStart(2, '0');
+    return `${mo}/${doc.period_year}`;
+  }
+  const raw = ((doc.accounting_period ?? '').trim() || (doc.service_month ?? '').trim());
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return `${raw.slice(5, 7)}/${raw.slice(0, 4)}`;
+  }
+  return raw || '—';
+}
+
 /** Deuda con saldo pendiente y no anulada. */
 export function documentCanReceivePayment(doc: Document): boolean {
   if (doc.status === 'anulado' || doc.status === 'pagado') return false;

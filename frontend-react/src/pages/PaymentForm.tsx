@@ -191,6 +191,7 @@ const PaymentForm = () => {
   /** Opciones extra para selects de deuda (id → etiqueta) cuando el listado aún no incluye ese document_id. */
   const [allocDocHints, setAllocDocHints] = useState<Array<{ id: number; label: string; searchText: string }>>([]);
   const settlementLoadedRef = useRef(false);
+  const settlementAllowedDocIdsRef = useRef<Set<number>>(new Set());
   const lastSettlementParamRef = useRef<string | null>(null);
 
   const [tukifacKind, setTukifacKind] = useState<'boleta' | 'factura' | 'sale_note'>('sale_note');
@@ -438,6 +439,7 @@ const PaymentForm = () => {
         });
         if (sug.lines.length > 0) {
           const hintMap = new Map<number, { id: number; label: string; searchText: string }>();
+          settlementAllowedDocIdsRef.current = new Set(sug.lines.map((l) => l.document_id));
           for (const l of sug.lines) {
             hintMap.set(l.document_id, {
               id: l.document_id,
@@ -456,6 +458,7 @@ const PaymentForm = () => {
           setAmount(sug.suggested_total.toFixed(2));
           setSettlementLoadError('');
         } else {
+          settlementAllowedDocIdsRef.current = new Set();
           setAllocDocHints([]);
           setManualAlloc([{ key: newManualAllocKey(), doc: '', amt: '' }]);
           setAmount('');
@@ -546,6 +549,16 @@ const PaymentForm = () => {
     if (
       settlementLink &&
       Number(companyId) === settlementLink.companyId &&
+      effectivePaymentType === 'applied' &&
+      applyMode !== 'manual'
+    ) {
+      setError('Pago desde liquidación: use imputación manual a las deudas vinculadas.');
+      return;
+    }
+
+    if (
+      settlementLink &&
+      Number(companyId) === settlementLink.companyId &&
       effectivePaymentType === 'on_account'
     ) {
       setError('Este pago está vinculado a una liquidación: debe imputar montos a las deudas (una deuda, FIFO o manual).');
@@ -566,6 +579,14 @@ const PaymentForm = () => {
         if (lines.length === 0) {
           setError('Indique al menos una línea de imputación manual');
           return;
+        }
+        if (settlementLink && settlementAllowedDocIdsRef.current.size > 0) {
+          for (const l of lines) {
+            if (!settlementAllowedDocIdsRef.current.has(l.document_id)) {
+              setError('Desde liquidación solo puede imputar deudas vinculadas a esa liquidación.');
+              return;
+            }
+          }
         }
         const sum = lines.reduce((a, l) => a + l.amount, 0);
         if (Math.abs(sum - amountNum) > 0.02) {

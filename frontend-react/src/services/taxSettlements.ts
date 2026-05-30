@@ -65,6 +65,26 @@ export interface PaymentSuggestionsResponse {
   suggested_total: number;
 }
 
+export interface SettlementDebtRow {
+  document_id: number;
+  number: string;
+  description: string;
+  total_amount: number;
+  balance_amount: number;
+  status: string;
+  accounting_period?: string;
+  has_period: boolean;
+  period_month?: number;
+  period_year?: number;
+}
+
+export interface SettlementDebtsContext {
+  tax_settlement_id: number;
+  company_id: number;
+  linked: SettlementDebtRow[];
+  unlinked: SettlementDebtRow[];
+}
+
 export const taxSettlementsService = {
   async preview(companyId: number, asOf?: string): Promise<SettlementPreviewLine[]> {
     const res = await client.get<{ data: SettlementPreviewLine[] }>(`/companies/${companyId}/settlements/preview`, {
@@ -121,6 +141,20 @@ export const taxSettlementsService = {
 
   async paymentSuggestions(id: number): Promise<PaymentSuggestionsResponse> {
     const res = await client.get<PaymentSuggestionsResponse>(`/tax-settlements/${id}/payment-suggestions`);
+    return res.data;
+  },
+
+  async debtsContext(id: number): Promise<SettlementDebtsContext> {
+    const res = await client.get<SettlementDebtsContext>(`/tax-settlements/${id}/debts-context`);
+    return res.data;
+  },
+
+  async linkDebt(settlementId: number, documentId: number, concept?: string, amount?: number): Promise<TaxSettlement> {
+    const res = await client.post<TaxSettlement>(`/tax-settlements/${settlementId}/link-debt`, {
+      document_id: documentId,
+      concept: concept?.trim() || undefined,
+      amount: amount && amount > 0 ? amount : undefined,
+    });
     return res.data;
   },
 

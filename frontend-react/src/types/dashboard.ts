@@ -117,6 +117,10 @@ export interface Document {
   service_month?: string;
   /** Periodo contable YYYY-MM (independiente de issue_date). */
   accounting_period?: string;
+  has_period?: boolean;
+  period_month?: number;
+  period_year?: number;
+  tax_settlement_id?: number;
   items?: DocumentItem[];
   /** Presente en API de listado/detalle: si existen filas en `document_items`. */
   has_items?: boolean;
