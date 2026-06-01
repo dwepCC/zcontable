@@ -31,6 +31,7 @@ func Setup(app *fiber.App) {
 	taxSettleCtrl := controllers.NewTaxSettlementController()
 	supervisorCtrl := controllers.NewSupervisorController()
 	calendarCtrl := controllers.NewFinanceCalendarController()
+	credCtrl := controllers.NewCompanyAccessCredentialController()
 
 	app.Post("/api/login", authCtrl.LoginAPI)
 
@@ -235,4 +236,12 @@ func Setup(app *fiber.App) {
 	cal.Put("/activities/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.UpdateActivityAPI)
 	cal.Delete("/activities/:id", middleware.RequirePermission(rbac.FinanceCalendarManage), calendarCtrl.DeleteActivityAPI)
 	cal.Get("/:periodYm", middleware.RequirePermission(rbac.FinanceCalendarView), calendarCtrl.GetAPI)
+
+	// Claves de acceso por empresa (Finanzas)
+	creds := api.Group("/finance/company-credentials")
+	creds.Get("/", middleware.RequirePermission(rbac.CompanyCredentialsView), credCtrl.ListAPI)
+	creds.Get("/import/template", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportTemplateAPI)
+	creds.Post("/import", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportAPI)
+	creds.Get("/:companyId", middleware.RequirePermission(rbac.CompanyCredentialsView), credCtrl.GetAPI)
+	creds.Put("/:companyId", middleware.RequirePermission(rbac.CompanyCredentialsManage), credCtrl.UpdateAPI)
 }

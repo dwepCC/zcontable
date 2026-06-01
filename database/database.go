@@ -72,6 +72,7 @@ func AutoMigrate() error {
 		&models.FinanceCalendar{},
 		&models.FinanceCalendarMark{},
 		&models.FinanceCalendarActivity{},
+		&models.CompanyAccessCredential{},
 		&models.FiscalDocumentSeries{},
 		&models.FiscalReceiptLine{},
 		&models.FiscalReceiptPayment{},

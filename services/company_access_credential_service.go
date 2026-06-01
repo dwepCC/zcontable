@@ -1,0 +1,277 @@
+package services
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"miappfiber/database"
+	"miappfiber/models"
+
+	"gorm.io/gorm"
+)
+
+type CompanyAccessCredentialService struct{}
+
+func NewCompanyAccessCredentialService() *CompanyAccessCredentialService {
+	return &CompanyAccessCredentialService{}
+}
+
+// CompanyAccessCredentialRow fila de listado (empresa + credenciales).
+type CompanyAccessCredentialRow struct {
+	CompanyID uint `json:"company_id"`
+	Code      string `json:"code"`
+	Dig       string `json:"dig"`
+	RUC       string `json:"ruc"`
+	BusinessName string `json:"business_name"`
+	AssistantName  string `json:"assistant_name"`
+	SupervisorName string `json:"supervisor_name"`
+
+	SolUsuario string `json:"sol_usuario"`
+	SolClave   string `json:"sol_clave"`
+
+	BnlCuenta            string `json:"bnl_cuenta"`
+	BnlDNI               string `json:"bnl_dni"`
+	BnlClaveDetracciones string `json:"bnl_clave_detracciones"`
+
+	AfpUsuario string `json:"afp_usuario"`
+	AfpClave   string `json:"afp_clave"`
+
+	RnpClave string `json:"rnp_clave"`
+
+	FacturadorLink       string `json:"facturador_link"`
+	FacturadorUsuario    string `json:"facturador_usuario"`
+	FacturadorContrasena string `json:"facturador_contrasena"`
+
+	UpdatedAt *string `json:"credentials_updated_at,omitempty"`
+}
+
+type CompanyAccessCredentialListParams struct {
+	Q                 string
+	Page              int
+	PerPage           int
+	AllowedCompanyIDs []uint
+}
+
+type CompanyAccessCredentialListResult struct {
+	Rows       []CompanyAccessCredentialRow `json:"data"`
+	Total      int64                        `json:"total"`
+	Page       int                          `json:"page"`
+	PerPage    int                          `json:"per_page"`
+	TotalPages int                          `json:"total_pages"`
+}
+
+// CompanyAccessCredentialUpdateInput campos editables (no RUC ni razón social).
+type CompanyAccessCredentialUpdateInput struct {
+	Dig                  string `json:"dig"`
+	SolUsuario           string `json:"sol_usuario"`
+	SolClave             string `json:"sol_clave"`
+	BnlCuenta            string `json:"bnl_cuenta"`
+	BnlDNI               string `json:"bnl_dni"`
+	BnlClaveDetracciones string `json:"bnl_clave_detracciones"`
+	AfpUsuario           string `json:"afp_usuario"`
+	AfpClave             string `json:"afp_clave"`
+	RnpClave             string `json:"rnp_clave"`
+	FacturadorLink       string `json:"facturador_link"`
+	FacturadorUsuario    string `json:"facturador_usuario"`
+	FacturadorContrasena string `json:"facturador_contrasena"`
+}
+
+func userDisplayName(u *models.User) string {
+	if u == nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Name)
+}
+
+func (s *CompanyAccessCredentialService) companyInScope(companyID uint, allowed []uint) error {
+	if allowed == nil {
+		return nil
+	}
+	for _, id := range allowed {
+		if id == companyID {
+			return nil
+		}
+	}
+	return fmt.Errorf("empresa no disponible en su alcance")
+}
+
+func (s *CompanyAccessCredentialService) rowFrom(company models.Company, cred *models.CompanyAccessCredential) CompanyAccessCredentialRow {
+	row := CompanyAccessCredentialRow{
+		CompanyID:      company.ID,
+		Code:           strings.TrimSpace(company.InternalCode),
+		RUC:            strings.TrimSpace(company.RUC),
+		BusinessName:   strings.TrimSpace(company.BusinessName),
+		AssistantName:  userDisplayName(company.Assistant),
+		SupervisorName: userDisplayName(company.Supervisor),
+	}
+	if cred != nil {
+		row.Dig = cred.Dig
+		row.SolUsuario = cred.SolUsuario
+		row.SolClave = cred.SolClave
+		row.BnlCuenta = cred.BnlCuenta
+		row.BnlDNI = cred.BnlDNI
+		row.BnlClaveDetracciones = cred.BnlClaveDetracciones
+		row.AfpUsuario = cred.AfpUsuario
+		row.AfpClave = cred.AfpClave
+		row.RnpClave = cred.RnpClave
+		row.FacturadorLink = cred.FacturadorLink
+		row.FacturadorUsuario = cred.FacturadorUsuario
+		row.FacturadorContrasena = cred.FacturadorContrasena
+		ts := cred.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")
+		row.UpdatedAt = &ts
+	}
+	return row
+}
+
+func (s *CompanyAccessCredentialService) List(p CompanyAccessCredentialListParams) (*CompanyAccessCredentialListResult, error) {
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	perPage := p.PerPage
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 200 {
+		perPage = 200
+	}
+
+	q := database.DB.Model(&models.Company{}).
+		Where("client_type = ?", models.CompanyClientTypeEstudio).
+		Preload("Assistant").
+		Preload("Supervisor")
+
+	if p.AllowedCompanyIDs != nil {
+		if len(p.AllowedCompanyIDs) == 0 {
+			return &CompanyAccessCredentialListResult{
+				Rows: []CompanyAccessCredentialRow{}, Total: 0, Page: page, PerPage: perPage, TotalPages: 0,
+			}, nil
+		}
+		q = q.Where("id IN ?", p.AllowedCompanyIDs)
+	}
+
+	term := strings.TrimSpace(p.Q)
+	if len(term) >= 2 {
+		like := "%" + term + "%"
+		q = q.Where(
+			"ruc LIKE ? OR business_name LIKE ? OR internal_code LIKE ?",
+			like, like, like,
+		)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var companies []models.Company
+	offset := (page - 1) * perPage
+	if err := q.Order("internal_code ASC").Offset(offset).Limit(perPage).Find(&companies).Error; err != nil {
+		return nil, err
+	}
+
+	ids := make([]uint, 0, len(companies))
+	for _, c := range companies {
+		ids = append(ids, c.ID)
+	}
+	credByCompany := map[uint]*models.CompanyAccessCredential{}
+	if len(ids) > 0 {
+		var creds []models.CompanyAccessCredential
+		if err := database.DB.Where("company_id IN ?", ids).Find(&creds).Error; err != nil {
+			return nil, err
+		}
+		for i := range creds {
+			credByCompany[creds[i].CompanyID] = &creds[i]
+		}
+	}
+
+	rows := make([]CompanyAccessCredentialRow, 0, len(companies))
+	for _, c := range companies {
+		rows = append(rows, s.rowFrom(c, credByCompany[c.ID]))
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(perPage) - 1) / int64(perPage))
+	}
+
+	return &CompanyAccessCredentialListResult{
+		Rows: rows, Total: total, Page: page, PerPage: perPage, TotalPages: totalPages,
+	}, nil
+}
+
+func (s *CompanyAccessCredentialService) GetByCompanyID(companyID uint, allowed []uint) (*CompanyAccessCredentialRow, error) {
+	if err := s.companyInScope(companyID, allowed); err != nil {
+		return nil, err
+	}
+	var company models.Company
+	if err := database.DB.Where("id = ? AND client_type = ?", companyID, models.CompanyClientTypeEstudio).
+		Preload("Assistant").Preload("Supervisor").
+		First(&company).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("empresa no encontrada")
+		}
+		return nil, err
+	}
+	var cred models.CompanyAccessCredential
+	err := database.DB.Where("company_id = ?", companyID).First(&cred).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		row := s.rowFrom(company, nil)
+		return &row, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	row := s.rowFrom(company, &cred)
+	return &row, nil
+}
+
+func applyCredentialInput(row *models.CompanyAccessCredential, in CompanyAccessCredentialUpdateInput) {
+	row.Dig = strings.TrimSpace(in.Dig)
+	row.SolUsuario = strings.TrimSpace(in.SolUsuario)
+	row.SolClave = strings.TrimSpace(in.SolClave)
+	row.BnlCuenta = strings.TrimSpace(in.BnlCuenta)
+	row.BnlDNI = strings.TrimSpace(in.BnlDNI)
+	row.BnlClaveDetracciones = strings.TrimSpace(in.BnlClaveDetracciones)
+	row.AfpUsuario = strings.TrimSpace(in.AfpUsuario)
+	row.AfpClave = strings.TrimSpace(in.AfpClave)
+	row.RnpClave = strings.TrimSpace(in.RnpClave)
+	row.FacturadorLink = strings.TrimSpace(in.FacturadorLink)
+	row.FacturadorUsuario = strings.TrimSpace(in.FacturadorUsuario)
+	row.FacturadorContrasena = strings.TrimSpace(in.FacturadorContrasena)
+}
+
+func (s *CompanyAccessCredentialService) Upsert(companyID uint, in CompanyAccessCredentialUpdateInput, allowed []uint) (*CompanyAccessCredentialRow, error) {
+	if err := s.companyInScope(companyID, allowed); err != nil {
+		return nil, err
+	}
+	var company models.Company
+	if err := database.DB.Where("id = ? AND client_type = ?", companyID, models.CompanyClientTypeEstudio).
+		Preload("Assistant").Preload("Supervisor").
+		First(&company).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("empresa no encontrada")
+		}
+		return nil, err
+	}
+
+	var cred models.CompanyAccessCredential
+	err := database.DB.Where("company_id = ?", companyID).First(&cred).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		cred = models.CompanyAccessCredential{CompanyID: companyID}
+		applyCredentialInput(&cred, in)
+		if err := database.DB.Create(&cred).Error; err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	} else {
+		applyCredentialInput(&cred, in)
+		if err := database.DB.Save(&cred).Error; err != nil {
+			return nil, err
+		}
+	}
+	row := s.rowFrom(company, &cred)
+	return &row, nil
+}

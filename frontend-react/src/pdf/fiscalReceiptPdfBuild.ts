@@ -280,66 +280,6 @@ function paymentMethodDisplay(method: string): string {
   return formatPaymentMethod(method);
 }
 
-type DebtCtx = NonNullable<PosSaleDetail['debt_payment_context']>;
-
-function drawDebtPaymentContextBlock(
-  page: PDFPage,
-  y: number,
-  ctx: DebtCtx,
-  font: PDFFont,
-  fontB: PDFFont,
-  leftX: number,
-  contentW: number,
-  size: number,
-): number {
-  const conceptText =
-    (ctx.paid_concept_label ?? '').trim() ||
-    (ctx.paid_concepts?.length ? ctx.paid_concepts.join('; ') : '');
-
-  page.drawText('DETALLE DE PAGO', {
-    x: leftX,
-    y: topY(page, y + size),
-    size,
-    font: fontB,
-    color: C.black,
-  });
-  y += size + 4;
-
-  const rows: [string, string][] = [
-    ['Estado:', ctx.status_label || (ctx.is_partial_payment ? 'PAGO PARCIAL' : 'DEUDA CANCELADA')],
-  ];
-  if (ctx.document_number) rows.push(['Documento:', ctx.document_number]);
-  if (conceptText) rows.push(['Concepto(s):', conceptText]);
-  rows.push(['Monto total deuda:', moneyPen(ctx.debt_total)]);
-  rows.push(['Monto pagado (operación):', moneyPen(ctx.paid_this_operation)]);
-  rows.push(['Saldo pendiente:', moneyPen(ctx.balance_pending)]);
-
-  for (const [label, val] of rows) {
-    if (label === 'Concepto(s):') {
-      page.drawText(label, { x: leftX, y: topY(page, y + size - 1), size: size - 0.5, font: fontB, color: C.black });
-      y += size + 1;
-      const wrapped = wrapLinesByWidth(val, font, size - 0.5, contentW, 4);
-      for (const line of wrapped) {
-        page.drawText(line, { x: leftX, y: topY(page, y + size - 1), size: size - 0.5, font, color: C.black });
-        y += size;
-      }
-      y += 2;
-      continue;
-    }
-    page.drawText(label, { x: leftX, y: topY(page, y + size - 1), size: size - 0.5, font: fontB, color: C.black });
-    const vw = font.widthOfTextAtSize(val, size - 0.5);
-    page.drawText(val, {
-      x: leftX + contentW - vw,
-      y: topY(page, y + size - 1),
-      size: size - 0.5,
-      font,
-      color: C.black,
-    });
-    y += size + 2;
-  }
-  return y + 4;
-}
-
 async function embedLogo(doc: PDFDocument, url?: string): Promise<PDFImage | null> {
   try {
     const blob = await loadImageBlobForPdf(url);
@@ -693,11 +633,6 @@ export async function buildFiscalReceiptA4Pdf(
   drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, y, 9, fontB, C.black);
   y += 20;
 
-  if (receipt.debt_payment_context) {
-    y = drawDebtPaymentContextBlock(page, y, receipt.debt_payment_context, font, fontB, M, contentW, 7.5);
-    y += 6;
-  }
-
   // —— Métodos de pago ——
   const payRows = paymentMethodsForPdf(receipt);
   page.drawText('MÉTODO(S) DE PAGO:', {
@@ -940,21 +875,6 @@ export async function buildFiscalReceiptTicketPdf(
     color: C.black,
   });
   y += 14;
-
-  if (receipt.debt_payment_context) {
-    y = drawDebtPaymentContextBlock(
-      page,
-      y,
-      receipt.debt_payment_context,
-      font,
-      fontB,
-      TICKET_M,
-      TICKET_W - TICKET_M * 2,
-      6,
-    );
-    drawTicketDivider(page, y);
-    y += 8;
-  }
 
   const pays = receipt.payments ?? [];
   if (pays.length > 0) {

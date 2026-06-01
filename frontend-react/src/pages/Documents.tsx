@@ -99,6 +99,18 @@ function documentDebtNumber(doc: Document): string {
   return d || doc.number;
 }
 
+/** Concepto / ítems de la deuda (líneas del documento o descripción general). */
+function documentDebtItemLabel(doc: Document): string {
+  const items = sortedDocumentItems(doc);
+  if (items.length > 0) {
+    const parts = items.map((it) => String(it.description ?? '').trim()).filter(Boolean);
+    if (parts.length > 0) return parts.join('; ');
+  }
+  const desc = (doc.description ?? '').trim();
+  if (desc) return desc;
+  return documentDebtNumber(doc);
+}
+
 /** Periodo contable AAAA-MM (deuda manual / liquidación) o mensualidad plan. */
 function formatDebtPeriod(doc: Document): string {
   const p = (doc.accounting_period ?? '').trim() || (doc.service_month ?? '').trim();
@@ -1064,7 +1076,9 @@ const Documents = () => {
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Tipo</th>
                   <th className="px-4 py-3 whitespace-nowrap">Periodo</th>
-                  <th className="px-4 py-3 whitespace-nowrap">Documento</th>
+                  <th className="px-4 py-3 whitespace-nowrap">
+                    {initialCompanyId ? 'Concepto' : 'Documento'}
+                  </th>
                   <th className="px-4 py-3 whitespace-nowrap">Liquidación</th>
                   <th className="px-4 py-3 text-right whitespace-nowrap">Monto total</th>
                   <th className="px-4 py-3 text-right whitespace-nowrap">Pagado</th>
@@ -1128,7 +1142,14 @@ const Documents = () => {
                     <td className="px-4 py-3 text-slate-600 font-mono text-xs tabular-nums whitespace-nowrap">
                       {formatDebtPeriod(doc)}
                     </td>
-                    <td className="px-4 py-3 text-slate-700 font-mono text-xs whitespace-nowrap">{documentDebtNumber(doc)}</td>
+                    <td
+                      className={`px-4 py-3 text-slate-700 text-xs ${
+                        initialCompanyId ? 'max-w-[14rem] font-medium' : 'font-mono whitespace-nowrap'
+                      }`}
+                      title={initialCompanyId ? documentDebtItemLabel(doc) : documentDebtNumber(doc)}
+                    >
+                      {initialCompanyId ? documentDebtItemLabel(doc) : documentDebtNumber(doc)}
+                    </td>
                     <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">
                       {documentSettlementLabel(doc) ? (
                         <Link
