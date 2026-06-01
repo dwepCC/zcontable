@@ -136,6 +136,64 @@ function wrapLinesByWidth(
   return lines;
 }
 
+/** Respeta saltos de línea explícitos y luego ajusta por ancho en pt. */
+function wrapLinesByWidthMultiline(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidthPt: number,
+  maxLines: number,
+): string[] {
+  const raw = (text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!raw) return [];
+  const out: string[] = [];
+  for (const para of raw.split('\n')) {
+    const chunk = para.trim();
+    if (!chunk) {
+      if (out.length > 0 && out[out.length - 1] !== '') out.push('');
+      continue;
+    }
+    const wrapped = wrapLinesByWidth(chunk, font, size, maxWidthPt, maxLines - out.length);
+    for (const ln of wrapped) {
+      if (out.length >= maxLines) return out;
+      out.push(ln);
+    }
+  }
+  return out;
+}
+
+function drawTextInColumn(
+  page: PDFPage,
+  lines: string[],
+  x: number,
+  yTop: number,
+  w: number,
+  size: number,
+  font: PDFFont,
+  align: 'left' | 'center' | 'right',
+  lineHeight: number,
+) {
+  const pad = 2;
+  const maxW = Math.max(4, w - pad * 2);
+  const toDraw = lines.length ? lines : ['—'];
+  toDraw.forEach((line, i) => {
+    const clipped =
+      font.widthOfTextAtSize(line, size) > maxW
+        ? wrapLinesByWidth(line, font, size, maxW, 1)[0] ?? line
+        : line;
+    const tw = font.widthOfTextAtSize(clipped, size);
+    const tx =
+      align === 'center' ? x + (w - tw) / 2 : align === 'right' ? x + w - tw - pad : x + pad;
+    page.drawText(clipped, {
+      x: tx,
+      y: topY(page, yTop + i * lineHeight + size),
+      size,
+      font,
+      color: C.black,
+    });
+  });
+}
+
 function formatPaymentMethod(method: string): string {
   const m = (method ?? '').trim().toLowerCase();
   const map: Record<string, string> = {
@@ -331,29 +389,33 @@ function drawCentered(
   });
 }
 
-function estimateTicketHeight(receipt: PosSaleDetail, firm: FirmConfig | null): number {
+function estimateTicketHeight(receipt: PosSaleDetail, firm: FirmConfig | null, font: PDFFont): number {
   const lines = receipt.lines ?? [];
   const bank = firm?.statement_bank_info?.trim() || '';
+  const ticketContentW = TICKET_W - TICKET_M * 2;
+  const descColW = 72;
+  const cellSize = 5.5;
+  const descLineH = 7;
   let bankH = 0;
   if (bank) {
     for (const para of bank.split(/\n+/)) {
-      bankH += wrapLines(para.trim(), 42, 8).length * 9 + 2;
+      bankH += wrapLinesByWidthMultiline(para.trim(), font, 6, ticketContentW, 8).length * 9 + 2;
     }
     bankH += 10;
   }
   let itemsH = 14;
   for (const ln of lines) {
     const desc = ln.description || ln.product_name || '';
-    itemsH += Math.max(10, wrapLines(desc, 24, 4).length * 8);
+    const descLines = wrapLinesByWidthMultiline(desc, font, cellSize, descColW - 4, 20);
+    itemsH += Math.max(10, descLines.length * descLineH + 2);
   }
   const pays = receipt.payments?.length ?? (receipt.payment_method ? 1 : 0);
   const addrText = receipt.company?.address?.trim() || '';
-  const ticketContentW = TICKET_W - TICKET_M * 2;
   const addrValueW = ticketContentW - TICKET_KV_LABEL_W;
   const addrH =
     addrText === ''
       ? 0
-      : Math.max(1, Math.ceil(addrText.length / Math.max(10, Math.floor(addrValueW / 5)))) * 8 + 2;
+      : wrapLinesByWidthMultiline(addrText, font, 6, addrValueW, 12).length * 8 + 2;
   return Math.min(1600, Math.max(440, 300 + itemsH + bankH + pays * 11 + 70 + addrH));
 }
 
@@ -571,8 +633,25 @@ export async function buildFiscalReceiptA4Pdf(
   const lines = [...(receipt.lines ?? [])].sort(
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id,
   );
-  const rowH = 14;
-  const tableBodyH = Math.max(rowH * 8, lines.length * rowH + 4);
+  const cellSize = 6.5;
+  const lineH = 9;
+  const cellPad = 3;
+
+  type A4RowLayout = { descLines: string[]; codeLines: string[]; rowH: number };
+  const rowLayouts: A4RowLayout[] = lines.map((ln) => {
+    const desc = ln.description || ln.product_name || '—';
+    const code = ln.internal_code?.trim() || '—';
+    const descLines = wrapLinesByWidthMultiline(desc, font, cellSize, colW.desc - cellPad * 2, 30);
+    const codeLines = wrapLinesByWidthMultiline(code, font, cellSize, colW.code - cellPad * 2, 4);
+    const lineCount = Math.max(1, descLines.length, codeLines.length);
+    return {
+      descLines: descLines.length ? descLines : ['—'],
+      codeLines: codeLines.length ? codeLines : ['—'],
+      rowH: Math.max(14, lineCount * lineH + cellPad * 2),
+    };
+  });
+  const tableBodyH = Math.max(14 * 3, rowLayouts.reduce((s, r) => s + r.rowH, 0) + 4);
+
   page.drawRectangle({
     x: M,
     y: topY(page, y + tableBodyH),
@@ -583,43 +662,28 @@ export async function buildFiscalReceiptA4Pdf(
   });
 
   let rowY = y + 2;
-  for (const ln of lines) {
-    cx = M;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    const layout = rowLayouts[i];
     const unitId = ln.unit_type_id?.trim() || 'NIU';
-    const code = ln.internal_code?.trim() || '—';
-    const desc = ln.description || ln.product_name || '—';
     const qty = Number(ln.quantity).toFixed(2);
-    const cells: { text: string; w: number; align: 'left' | 'center' | 'right' }[] = [
-      { text: qty, w: colW.cant, align: 'center' },
-      { text: unitId, w: colW.unit, align: 'center' },
-      { text: code, w: colW.code, align: 'center' },
-      { text: desc, w: colW.desc, align: 'left' },
-      { text: money(ln.unit_price), w: colW.punit, align: 'right' },
-      { text: '0', w: colW.dto, align: 'right' },
-      { text: money(ln.line_total), w: colW.total, align: 'right' },
-    ];
-    for (const cell of cells) {
-      const clipped =
-        cell.align === 'left'
-          ? wrapLines(cell.text, Math.floor(cell.w / 3.8), 1)[0] ?? cell.text
-          : cell.text;
-      const tw = font.widthOfTextAtSize(clipped, 6.5);
-      const tx =
-        cell.align === 'center'
-          ? cx + (cell.w - tw) / 2
-          : cell.align === 'right'
-            ? cx + cell.w - tw - 3
-            : cx + 3;
-      page.drawText(clipped, {
-        x: tx,
-        y: topY(page, rowY + 10),
-        size: 6.5,
-        font,
-        color: C.black,
-      });
-      cx += cell.w;
-    }
-    rowY += rowH;
+
+    let cx = M;
+    drawTextInColumn(page, [qty], cx, rowY, colW.cant, cellSize, font, 'center', lineH);
+    cx += colW.cant;
+    drawTextInColumn(page, [unitId], cx, rowY, colW.unit, cellSize, font, 'center', lineH);
+    cx += colW.unit;
+    drawTextInColumn(page, layout.codeLines, cx, rowY, colW.code, cellSize, font, 'center', lineH);
+    cx += colW.code;
+    drawTextInColumn(page, layout.descLines, cx, rowY, colW.desc, cellSize, font, 'left', lineH);
+    cx += colW.desc;
+    drawTextInColumn(page, [money(ln.unit_price)], cx, rowY, colW.punit, cellSize, font, 'right', lineH);
+    cx += colW.punit;
+    drawTextInColumn(page, ['0'], cx, rowY, colW.dto, cellSize, font, 'right', lineH);
+    cx += colW.dto;
+    drawTextInColumn(page, [money(ln.line_total)], cx, rowY, colW.total, cellSize, font, 'right', lineH);
+
+    rowY += layout.rowH;
   }
   y += tableBodyH + 10;
 
@@ -718,7 +782,7 @@ export async function buildFiscalReceiptTicketPdf(
   applyReceiptPdfMetadata(doc, receipt);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontB = await doc.embedFont(StandardFonts.HelveticaBold);
-  const pageH = estimateTicketHeight(receipt, firm);
+  const pageH = estimateTicketHeight(receipt, firm, font);
   const page = doc.addPage([TICKET_W, pageH]);
   const contentW = TICKET_W - TICKET_M * 2;
 
@@ -831,38 +895,32 @@ export async function buildFiscalReceiptTicketPdf(
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id,
   );
   const cellSize = 5.5;
+  const ticketLineH = 7;
   for (const ln of lines) {
     const code = ln.internal_code?.trim() || '—';
     const unitId = ln.unit_type_id?.trim() || 'NIU';
     const desc = ln.description || ln.product_name || '—';
-    const descLines = wrapLines(desc, 24, 4);
-    const rowLines = Math.max(1, descLines.length);
-    const rowH = rowLines * 7 + 2;
+    const codeLines = wrapLinesByWidthMultiline(code, font, cellSize, col.cod.w - 2, 3);
+    const descLines = wrapLinesByWidthMultiline(desc, font, cellSize, col.desc.w - 2, 25);
+    const rowLineCount = Math.max(1, codeLines.length, descLines.length);
+    const rowH = rowLineCount * ticketLineH + 2;
 
-    const drawCell = (text: string, cx: number, w: number, align: 'left' | 'center' | 'right', lineIdx: number) => {
-      const tw = font.widthOfTextAtSize(text, cellSize);
-      const tx =
-        align === 'center'
-          ? cx + (w - tw) / 2
-          : align === 'right'
-            ? cx + w - tw
-            : cx;
-      page.drawText(text, {
-        x: tx,
-        y: topY(page, y + lineIdx * 7 + cellSize),
-        size: cellSize,
-        font,
-        color: C.black,
-      });
-    };
-
-    drawCell(code, col.cod.x, col.cod.w, 'left', 0);
-    drawCell(Number(ln.quantity).toFixed(0), col.cant.x, col.cant.w, 'center', 0);
-    drawCell(unitId, col.unit.x, col.unit.w, 'center', 0);
-    drawCell(money(ln.unit_price), col.punit.x, col.punit.w, 'right', 0);
-    drawCell(money(ln.line_total), col.total.x, col.total.w, 'right', 0);
-    const dLines = descLines.length ? descLines : ['—'];
-    dLines.forEach((dl, i) => drawCell(dl, col.desc.x, col.desc.w, 'left', i));
+    drawTextInColumn(page, codeLines.length ? codeLines : ['—'], col.cod.x, y, col.cod.w, cellSize, font, 'left', ticketLineH);
+    drawTextInColumn(page, [Number(ln.quantity).toFixed(0)], col.cant.x, y, col.cant.w, cellSize, font, 'center', ticketLineH);
+    drawTextInColumn(page, [unitId], col.unit.x, y, col.unit.w, cellSize, font, 'center', ticketLineH);
+    drawTextInColumn(page, [money(ln.unit_price)], col.punit.x, y, col.punit.w, cellSize, font, 'right', ticketLineH);
+    drawTextInColumn(page, [money(ln.line_total)], col.total.x, y, col.total.w, cellSize, font, 'right', ticketLineH);
+    drawTextInColumn(
+      page,
+      descLines.length ? descLines : ['—'],
+      col.desc.x,
+      y,
+      col.desc.w,
+      cellSize,
+      font,
+      'left',
+      ticketLineH,
+    );
     y += rowH;
   }
 
