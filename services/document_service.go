@@ -290,19 +290,9 @@ func (s *DocumentService) Update(id uint, input *models.Document) error {
 	})
 }
 
-// SQL correlacionado: saldo abierto del documento según imputaciones + pagos legacy (misma regla que DocumentPaidTotal).
+// SQL: saldo abierto persistido (post-migración final). TODO: remove legacy after final migration — fallback en EffectiveBalance para lectura API.
 func documentOpenBalancePositiveClause() string {
-	return `(
-		documents.total_amount - (
-			COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa
-				INNER JOIN payments p ON p.id = pa.payment_id AND p.deleted_at IS NULL
-				WHERE pa.document_id = documents.id AND pa.deleted_at IS NULL), 0)
-			+
-			COALESCE((SELECT SUM(p.amount) FROM payments p
-				WHERE p.document_id = documents.id AND p.deleted_at IS NULL
-				AND NOT EXISTS (SELECT 1 FROM payment_allocations pa2 WHERE pa2.payment_id = p.id AND pa2.deleted_at IS NULL)), 0)
-		)
-	) > 0.005`
+	return `(documents.balance_amount > 0.005 AND (documents.legacy_status IS NULL OR documents.legacy_status = '' OR documents.legacy_status NOT IN ('legacy_merged','archived')))`
 }
 
 func shouldFilterDocumentsWithRealOpenBalance(params DocumentListParams) bool {
@@ -463,8 +453,9 @@ func (s *DocumentService) enrichDocumentHasItems(list []models.Document) {
 func (s *DocumentService) List(params DocumentListParams) ([]models.Document, error) {
 	var list []models.Document
 	q := database.DB.Model(&models.Document{})
+	q = debtsvc.ScopeActiveDocuments(q)
 	q = s.applyDocumentListFilters(q, params)
-	if err := q.Preload("Company").Order("issue_date DESC, id DESC").Find(&list).Error; err != nil {
+	if err := q.Preload("Company").Preload("TaxSettlement").Order("issue_date DESC, id DESC").Find(&list).Error; err != nil {
 		return nil, err
 	}
 	s.enrichDocumentDisplayNumbers(list)
@@ -482,6 +473,7 @@ func (s *DocumentService) ListPaged(params DocumentListParams, page int, perPage
 	}
 
 	base := database.DB.Model(&models.Document{})
+	base = debtsvc.ScopeActiveDocuments(base)
 	base = s.applyDocumentListFilters(base, params)
 
 	var total int64
@@ -489,7 +481,7 @@ func (s *DocumentService) ListPaged(params DocumentListParams, page int, perPage
 		return nil, 0, err
 	}
 
-	q := base.Preload("Company")
+	q := base.Preload("Company").Preload("TaxSettlement")
 	if params.IncludeItems && params.CompanyID != 0 {
 		q = q.Preload("Items", func(db *gorm.DB) *gorm.DB {
 			return db.Order("sort_order ASC, id ASC")
@@ -556,8 +548,13 @@ func (s *DocumentService) ListCompaniesDebtSummaryPaged(params DocumentListParam
 		}
 		var openSum float64
 		for _, d := range docs {
-			paid := DocumentPaidTotal(database.DB, d.ID)
-			ob := d.TotalAmount - paid
+			if !debtsvc.IsActiveDebt(&d) {
+				continue
+			}
+			ob := d.BalanceAmount
+			if ob <= 0.005 {
+				ob = debtsvc.NewService().EffectiveBalance(database.DB, &d)
+			}
 			if ob > 0 && !math.IsNaN(ob) {
 				openSum += math.Round(ob*100) / 100
 			}

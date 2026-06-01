@@ -32,6 +32,29 @@ func ParseDEULIQNumber(number string) (settlementID uint, ok bool) {
 	return uint(sid), true
 }
 
+// ParseDEULIQFull extrae tax_settlement_id y tax_settlement_line id desde DEU-LIQ-{settlementId}-{lineId}.
+func ParseDEULIQFull(number string) (settlementID, lineID uint, ok bool) {
+	n := strings.TrimSpace(number)
+	const prefix = "DEU-LIQ-"
+	if !strings.HasPrefix(n, prefix) {
+		return 0, 0, false
+	}
+	rest := strings.TrimPrefix(n, prefix)
+	parts := strings.Split(rest, "-")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	sid, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil || sid == 0 {
+		return 0, 0, false
+	}
+	lid, err := strconv.ParseUint(parts[len(parts)-1], 10, 32)
+	if err != nil || lid == 0 {
+		return uint(sid), 0, false
+	}
+	return uint(sid), uint(lid), true
+}
+
 // IsLegacySettlementClone indica deuda generada con patrón DEU-LIQ (pre-refactor).
 func IsLegacySettlementClone(d *models.Document) bool {
 	if d == nil {
@@ -251,9 +274,9 @@ type SettlementDebtRow struct {
 // ListLinkedDebts deudas con tax_settlement_id = settlementID.
 func (s *Service) ListLinkedDebts(tx *gorm.DB, settlementID uint) ([]SettlementDebtRow, error) {
 	var docs []models.Document
-	if err := tx.Where("tax_settlement_id = ?", settlementID).
-		Order("issue_date ASC, id ASC").
-		Find(&docs).Error; err != nil {
+	q := tx.Where("tax_settlement_id = ?", settlementID)
+	ScopeActiveDocuments(q)
+	if err := q.Order("issue_date ASC, id ASC").Find(&docs).Error; err != nil {
 		return nil, err
 	}
 	return s.toSettlementDebtRows(tx, docs), nil
@@ -265,6 +288,7 @@ func (s *Service) ListUnlinkedOpenDebts(tx *gorm.DB, companyID uint) ([]Settleme
 	if err := tx.Where("company_id = ? AND tax_settlement_id IS NULL", companyID).
 		Where("status NOT IN ?", []string{StatusPaid, StatusCancelled}).
 		Where("balance_amount > ?", MoneyEpsilon).
+		Where("legacy_status IS NULL OR legacy_status = '' OR legacy_status NOT IN ?", []string{LegacyStatusMerged, LegacyStatusArchived}).
 		Order("issue_date ASC, id ASC").
 		Find(&docs).Error; err != nil {
 		return nil, err
@@ -378,7 +402,7 @@ func (s *Service) toSettlementDebtRows(tx *gorm.DB, docs []models.Document) []Se
 		out = append(out, SettlementDebtRow{
 			DocumentID:       d.ID,
 			Number:           d.Number,
-			Description:      strings.TrimSpace(d.Description),
+			Description:      SanitizeDocumentDescription(d.Description),
 			TotalAmount:      d.TotalAmount,
 			BalanceAmount:    bal,
 			Status:           d.Status,

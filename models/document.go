@@ -30,6 +30,8 @@ type Document struct {
 	AccountingPeriod string         `gorm:"size:64;index" json:"accounting_period"` // periodo contable (legacy + display)
 	Status           string         `gorm:"size:50;not null" json:"status"`           // pendiente, parcial, pagado, anulado
 	Source           string         `gorm:"size:50;not null" json:"source"`           // tukifac, manual, recurrente_plan, liquidacion
+	LegacyStatus     string         `gorm:"size:32;index;default:''" json:"legacy_status,omitempty"` // vacío=activo; legacy_merged, legacy_promoted, archived
+	MergedIntoDocumentID *uint      `gorm:"index" json:"merged_into_document_id,omitempty"`
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`

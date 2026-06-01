@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	migDocumentsRecalcStatusV1   = "documents_v1_recalc_status_from_payments"
-	migDocumentsDomainV2Backfill = "documents_v2_debt_domain_backfill"
+	migDocumentsRecalcStatusV1      = "documents_v1_recalc_status_from_payments"
+	migDocumentsDomainV2Backfill    = "documents_v2_debt_domain_backfill"
+	migDocumentsLegacyConsolidation = "documents_v3_legacy_consolidation"
+	migDocumentsReceiptFreeze       = "documents_v4_fiscal_receipt_snapshot_freeze"
 )
 
 // RunDocumentMigrations migraciones idempotentes de deudas (datos).
@@ -28,6 +30,8 @@ func RunDocumentMigrations(db *gorm.DB) error {
 	}{
 		{migDocumentsRecalcStatusV1, migrateDocumentsRecalcStatusFromPayments},
 		{migDocumentsDomainV2Backfill, migrateDocumentsDebtDomainV2Backfill},
+		{migDocumentsLegacyConsolidation, migrateLegacyDEULIQConsolidationStep},
+		{migDocumentsReceiptFreeze, migrateReceiptSnapshotFreeze},
 	}
 	for _, step := range steps {
 		if err := applyDocumentMigrationOnce(db, step.name, step.fn); err != nil {
@@ -127,6 +131,22 @@ func migrateDocumentsDebtDomainV2Backfill(db *gorm.DB) error {
 	}
 	if warnPeriod > 0 {
 		log.Printf("[migrate %s] %d documentos sin periodo parseable (YYYY-MM)", migDocumentsDomainV2Backfill, warnPeriod)
+	}
+	return nil
+}
+
+func migrateLegacyDEULIQConsolidationStep(db *gorm.DB) error {
+	report, err := debtsvc.RunLegacyDEULIQConsolidation(db, false)
+	if err != nil {
+		return err
+	}
+	log.Printf("[migrate %s] merged=%d promoted=%d conflicts=%d balances=%d",
+		migDocumentsLegacyConsolidation, len(report.Merged), len(report.Promoted), len(report.Conflicts), report.BalancesNormalized)
+	for _, c := range report.Conflicts {
+		log.Printf("[migrate %s] conflict %s (id=%d): %s", migDocumentsLegacyConsolidation, c.LegacyNumber, c.LegacyDocumentID, c.Reason)
+	}
+	if len(report.Conflicts) > 0 {
+		return fmt.Errorf("%d conflictos en consolidación legacy (ver log)", len(report.Conflicts))
 	}
 	return nil
 }

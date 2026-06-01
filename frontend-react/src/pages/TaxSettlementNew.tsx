@@ -3,6 +3,7 @@ import { Link, useMatch, useNavigate, useSearchParams } from 'react-router-dom';
 import SearchableSelect from '../components/SearchableSelect';
 import { companiesService } from '../services/companies';
 import { taxSettlementsService } from '../services/taxSettlements';
+import { stripLegacyMigrationNotes } from '../utils/documentDebtUi';
 import type { Company, SettlementPreviewLine } from '../types/dashboard';
 import { auth } from '../services/auth';
 import { P } from '../rbac/codes';
@@ -276,8 +277,8 @@ const TaxSettlementNew = () => {
             key: `d-${row.document_id}-${i}`,
             line_type: 'document_ref' as const,
             document_id: row.document_id,
-            concept: row.concept || `Cargo #${row.document_id}`,
-            amount: String(row.amount),
+            concept: stripLegacyMigrationNotes(row.concept || '') || `Deuda ${row.document_id}`,
+            amount: Number.isFinite(row.amount) && row.amount > 0 ? row.amount.toFixed(2) : '',
             period_ym: lineYm,
             period_manual,
           };

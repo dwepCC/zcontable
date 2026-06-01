@@ -88,3 +88,10 @@ func TestIsLegacySettlementClone(t *testing.T) {
 		t.Fatal("expected not legacy")
 	}
 }
+
+func TestSanitizeDocumentDescription(t *testing.T) {
+	got := debtsvc.SanitizeDocumentDescription("Honorarios enero [legacy_promoted→canónico]")
+	if got != "Honorarios enero" {
+		t.Fatalf("sanitize=%q", got)
+	}
+}

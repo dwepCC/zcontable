@@ -48,14 +48,6 @@ func (s *Service) ValidateAllocationsTx(tx *gorm.DB, companyID uint, lines []Pay
 		return errors.New("indique al menos una imputación")
 	}
 	seen := map[uint]struct{}{}
-	var settlementDocIDs map[uint]struct{}
-	if taxSettlementID != nil && *taxSettlementID > 0 {
-		var err error
-		settlementDocIDs, err = s.settlementDocumentIDs(tx, *taxSettlementID)
-		if err != nil {
-			return err
-		}
-	}
 	for _, ln := range lines {
 		if ln.DocumentID == 0 || ln.Amount <= 0 {
 			return errors.New("cada imputación requiere documento y monto válido")
@@ -79,38 +71,13 @@ func (s *Service) ValidateAllocationsTx(tx *gorm.DB, companyID uint, lines []Pay
 		if ln.Amount > bal+MoneyEpsilon {
 			return errors.New("el monto excede el saldo de un documento imputado")
 		}
-		if settlementDocIDs != nil {
-			if _, ok := settlementDocIDs[ln.DocumentID]; !ok {
-				return errors.New("el pago desde liquidación solo puede imputar deudas vinculadas a esa liquidación")
+		if taxSettlementID != nil && *taxSettlementID > 0 {
+			if d.TaxSettlementID != nil && *d.TaxSettlementID != 0 && *d.TaxSettlementID != *taxSettlementID {
+				return fmt.Errorf("la deuda %s ya está vinculada a otra liquidación", strings.TrimSpace(d.Number))
 			}
 		}
 	}
 	return nil
-}
-
-func (s *Service) settlementDocumentIDs(tx *gorm.DB, settlementID uint) (map[uint]struct{}, error) {
-	var lines []models.TaxSettlementLine
-	if err := tx.Where("tax_settlement_id = ?", settlementID).Find(&lines).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[uint]struct{})
-	for _, ln := range lines {
-		if ln.DocumentID != nil && *ln.DocumentID > 0 {
-			out[*ln.DocumentID] = struct{}{}
-		}
-	}
-	// También documentos con tax_settlement_id directo (vinculados fuera de línea)
-	var docs []models.Document
-	if err := tx.Where("tax_settlement_id = ?", settlementID).Select("id").Find(&docs).Error; err != nil {
-		return nil, err
-	}
-	for _, d := range docs {
-		out[d.ID] = struct{}{}
-	}
-	if len(out) == 0 {
-		return nil, errors.New("la liquidación no tiene deudas vinculadas para imputar")
-	}
-	return out, nil
 }
 
 // ApplyPaymentTx crea payment + allocations y actualiza balance_amount/status (transaccional).
@@ -169,6 +136,11 @@ func (s *Service) ApplyPaymentTx(tx *gorm.DB, in ApplyPaymentInput) (uint, error
 			return 0, fmt.Errorf("actualizar saldo documento %d: %w", ln.DocumentID, err)
 		}
 	}
+	if in.TaxSettlementID != nil && *in.TaxSettlementID > 0 {
+		if err := s.linkPaymentDebtsToSettlement(tx, *in.TaxSettlementID, in.CompanyID, in.Lines); err != nil {
+			return 0, err
+		}
+	}
 	return pay.ID, nil
 }
 
@@ -196,4 +168,79 @@ func (s *Service) RevertPaymentAllocationsTx(tx *gorm.DB, paymentID uint) ([]uin
 		}
 	}
 	return docIDs, nil
+}
+
+// linkPaymentDebtsToSettlement vincula deudas independientes pagadas desde una liquidación emitida.
+func (s *Service) linkPaymentDebtsToSettlement(tx *gorm.DB, settlementID, companyID uint, lines []PaymentAllocationLine) error {
+	var ts models.TaxSettlement
+	if err := tx.First(&ts, settlementID).Error; err != nil {
+		return fmt.Errorf("liquidación inválida")
+	}
+	if ts.CompanyID != companyID {
+		return errors.New("la liquidación no corresponde a la empresa")
+	}
+	for _, ln := range lines {
+		if ln.DocumentID == 0 {
+			continue
+		}
+		if _, err := s.linkDocumentToSettlement(tx, ln.DocumentID, companyID, settlementID); err != nil {
+			return err
+		}
+		if err := s.ensureSettlementLineForDocument(tx, &ts, ln.DocumentID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) ensureSettlementLineForDocument(tx *gorm.DB, ts *models.TaxSettlement, documentID uint) error {
+	if ts == nil || documentID == 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&models.TaxSettlementLine{}).
+		Where("tax_settlement_id = ? AND document_id = ?", ts.ID, documentID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	var d models.Document
+	if err := tx.First(&d, documentID).Error; err != nil {
+		return err
+	}
+	var maxOrder int
+	if err := tx.Model(&models.TaxSettlementLine{}).Where("tax_settlement_id = ?", ts.ID).
+		Select("COALESCE(MAX(sort_order),0)").Scan(&maxOrder).Error; err != nil {
+		return err
+	}
+	concept := SanitizeDocumentDescription(d.Description)
+	if concept == "" {
+		concept = "Deuda " + strings.TrimSpace(d.Number)
+	}
+	if len(concept) > 512 {
+		concept = concept[:509] + "…"
+	}
+	periodYM := strings.TrimSpace(d.AccountingPeriod)
+	if periodYM == "" {
+		periodYM = strings.TrimSpace(d.ServiceMonth)
+	}
+	if periodYM == "" {
+		periodYM = strings.TrimSpace(ts.LiquidationPeriod)
+	}
+	if len(periodYM) > 64 {
+		periodYM = periodYM[:64]
+	}
+	docID := documentID
+	line := models.TaxSettlementLine{
+		TaxSettlementID: ts.ID,
+		LineType:        models.TaxSettlementLineDocRef,
+		DocumentID:      &docID,
+		Concept:         concept,
+		Amount:          d.TotalAmount,
+		SortOrder:       maxOrder + 1,
+		PeriodYM:        periodYM,
+	}
+	return tx.Create(&line).Error
 }

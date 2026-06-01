@@ -11,7 +11,10 @@ import {
   getLogoPngBlobForPdf,
   taxSettlementPdfFilename,
 } from '../pdf/taxSettlementDocument';
-import { formatDocumentPeriod, formatMoneyPen } from '../utils/documentDebtUi';
+import {
+  formatMoneyPen,
+  stripLegacyMigrationNotes,
+} from '../utils/documentDebtUi';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OperationsKeyDialog from '../components/OperationsKeyDialog';
 
@@ -469,7 +472,9 @@ const TaxSettlementDetail = () => {
                       <tr key={d.document_id}>
                         <td className="px-3 py-2">
                           <span className="font-mono text-xs text-slate-500">{d.number}</span>
-                          <p className="text-slate-800 truncate max-w-[14rem]">{d.description || '—'}</p>
+                          <p className="text-slate-800 truncate max-w-[14rem]">
+                            {stripLegacyMigrationNotes(d.description || '') || '—'}
+                          </p>
                         </td>
                         <td className="px-3 py-2 tabular-nums text-xs">{formatDebtPeriod(d)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatMoneyPen(d.balance_amount)}</td>
@@ -513,7 +518,9 @@ const TaxSettlementDetail = () => {
                       <tr key={d.document_id}>
                         <td className="px-3 py-2">
                           <span className="font-mono text-xs text-slate-500">{d.number}</span>
-                          <p className="text-slate-800 truncate max-w-[12rem]">{d.description || '—'}</p>
+                          <p className="text-slate-800 truncate max-w-[12rem]">
+                            {stripLegacyMigrationNotes(d.description || '') || '—'}
+                          </p>
                         </td>
                         <td className="px-3 py-2 tabular-nums text-xs">{formatDebtPeriod(d)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatMoneyPen(d.balance_amount)}</td>
@@ -563,7 +570,7 @@ const TaxSettlementDetail = () => {
             {(row.lines ?? []).map((ln) => (
               <tr key={ln.id ?? `${ln.concept}-${ln.sort_order}`}>
                 <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
-                <td className="px-4 py-3 text-slate-800">{ln.concept}</td>
+                <td className="px-4 py-3 text-slate-800">{stripLegacyMigrationNotes(ln.concept || '') || '—'}</td>
                 <td className="px-4 py-3 text-slate-600 tabular-nums text-xs font-mono">
                   {(() => {
                     const p = (ln.period_ym ?? '').trim();

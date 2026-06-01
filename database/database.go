@@ -48,6 +48,7 @@ func AutoMigrate() error {
 		&models.Contact{},
 		&models.Document{},
 		&models.DocumentItem{},
+		&models.DocumentConsolidationLog{},
 		&models.Payment{},
 		&models.PaymentAllocation{},
 		&models.FirmConfig{},

@@ -182,7 +182,7 @@ func (s *PaymentService) CreateFromParams(p *PaymentCreateParams) (uint, error) 
 		mode = "manual"
 	} else if mode == "fifo" {
 		var err error
-		lines, err = s.buildFIFOAllocations(p.CompanyID, p.Amount, p.AllowUnallocatedRemainder)
+		lines, err = s.buildFIFOAllocations(p.CompanyID, p.Amount, p.AllowUnallocatedRemainder, p.TaxSettlementID)
 		if err != nil {
 			return 0, err
 		}
@@ -257,12 +257,14 @@ func (s *PaymentService) CreateFromParams(p *PaymentCreateParams) (uint, error) 
 	return paymentID, err
 }
 
-func (s *PaymentService) buildFIFOAllocations(companyID uint, amount float64, allowPartial bool) ([]PaymentAllocationInput, error) {
+func (s *PaymentService) buildFIFOAllocations(companyID uint, amount float64, allowPartial bool, taxSettlementID *uint) ([]PaymentAllocationInput, error) {
 	var docs []models.Document
-	err := database.DB.
-		Where("company_id = ? AND status IN ?", companyID, []string{"pendiente", "parcial"}).
-		Order("issue_date ASC, id ASC").
-		Find(&docs).Error
+	q := database.DB.
+		Where("company_id = ? AND status IN ?", companyID, []string{"pendiente", "parcial"})
+	if taxSettlementID != nil && *taxSettlementID > 0 {
+		q = q.Where("tax_settlement_id = ?", *taxSettlementID)
+	}
+	err := q.Order("issue_date ASC, id ASC").Find(&docs).Error
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +295,9 @@ func (s *PaymentService) buildFIFOAllocations(companyID uint, amount float64, al
 		return nil, errors.New("no hay deuda pendiente suficiente para aplicar todo el monto (FIFO)")
 	}
 	if len(lines) == 0 && !allowPartial {
+		if taxSettlementID != nil && *taxSettlementID > 0 {
+			return nil, errors.New("no hay deudas vinculadas a esta liquidación con saldo pendiente (FIFO)")
+		}
 		return nil, errors.New("no hay documentos pendientes para aplicar FIFO")
 	}
 	return lines, nil

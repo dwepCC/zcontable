@@ -1,11 +1,40 @@
--- Auditoría dominio de deudas (Fase 1+2)
+-- Auditoría dominio de deudas (post-consolidación legacy)
 -- Ejecutar antes y después del backfill para comparar resúmenes.
 
 SELECT '=== RESUMEN ===' AS section;
 
-SELECT 'deu_liq_duplicados' AS metric, COUNT(*) AS cnt
+SELECT 'deu_liq_total' AS metric, COUNT(*) AS cnt
 FROM documents
 WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%';
+
+SELECT 'deu_liq_legacy_pending' AS metric, COUNT(*) AS cnt
+FROM documents
+WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%'
+  AND (legacy_status IS NULL OR legacy_status = '' OR legacy_status NOT IN ('legacy_merged','archived','legacy_promoted'))
+  AND status <> 'anulado';
+
+SELECT 'deu_liq_promoted_canonical' AS metric, COUNT(*) AS cnt
+FROM documents
+WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%' AND legacy_status = 'legacy_promoted';
+
+SELECT 'deu_liq_merged_archived' AS metric, COUNT(*) AS cnt
+FROM documents
+WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%' AND legacy_status = 'legacy_merged';
+
+SELECT 'duplicidad_real_deu_liq_vs_canon' AS metric, COUNT(*) AS cnt
+FROM documents legacy
+WHERE legacy.deleted_at IS NULL AND legacy.number LIKE 'DEU-LIQ-%'
+  AND (legacy.legacy_status IS NULL OR legacy.legacy_status = '' OR legacy.legacy_status NOT IN ('legacy_merged','archived','legacy_promoted'))
+  AND legacy.status <> 'anulado'
+  AND EXISTS (
+    SELECT 1 FROM documents sibling
+    WHERE sibling.deleted_at IS NULL AND sibling.id <> legacy.id
+      AND sibling.company_id = legacy.company_id
+      AND sibling.tax_settlement_id = legacy.tax_settlement_id
+      AND ABS(sibling.total_amount - legacy.total_amount) <= 0.02
+      AND sibling.number NOT LIKE 'DEU-LIQ-%'
+      AND sibling.status <> 'anulado'
+  );
 
 SELECT 'tax_settlement_id_faltante_en_liquidacion' AS metric, COUNT(*) AS cnt
 FROM tax_settlement_lines tsl

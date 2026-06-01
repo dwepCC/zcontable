@@ -81,8 +81,14 @@ export function debtCollectionBadge(doc: Document): DebtBadgeInfo {
   return { label: 'Pendiente', className: 'bg-amber-50 text-amber-900 border-amber-200' };
 }
 
-export function formatMoneyPen(n: number): string {
-  return `S/ ${n.toFixed(2)}`;
+export function formatMoneyPen(n: number | null | undefined): string {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  return `S/ ${v.toFixed(2)}`;
+}
+
+/** Quita marcas internas de migración legacy en descripciones (consolidación DEU-LIQ). */
+export function stripLegacyMigrationNotes(text: string): string {
+  return text.replace(/\s*\[legacy_(?:promoted|merged|archived)[^\]]*\]/gi, '').trim();
 }
 
 /** Periodo MM/YYYY desde has_period o legacy YYYY-MM. */

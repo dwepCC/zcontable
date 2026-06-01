@@ -486,6 +486,10 @@ func applyDebtPaymentContextForDetail(rec *models.TukifacFiscalReceipt) {
 		rec.DebtPaymentContext = buildDebtPaymentContextFromStoredLines(rec)
 		return
 	}
+	// TODO: remove legacy after final migration — no recalcular deuda viva si hay pago vinculado sin snapshot
+	if rec.LinkedPaymentID != nil && *rec.LinkedPaymentID > 0 {
+		return
+	}
 	enrichDebtPaymentContext(rec)
 }
 

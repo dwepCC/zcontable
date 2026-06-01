@@ -11,6 +11,12 @@ import (
 // AuditSummary resultado de validación de integridad del dominio de deudas.
 type AuditSummary struct {
 	DEULIQCount              int64 `json:"deu_liq_count"`
+	DEULIQActiveCount        int64 `json:"deu_liq_active_count"`
+	DEULIQMergedCount        int64 `json:"deu_liq_merged_count"`
+	DEULIQPromotedCount      int64 `json:"deu_liq_promoted_count"`
+	LegacyPendingCount       int64 `json:"legacy_pending_count"`
+	DuplicateSettlementGroups int64 `json:"duplicate_settlement_groups"`
+	FragileReceipts          int64 `json:"fragile_receipts"`
 	MissingSettlementLink    int64 `json:"missing_settlement_link"`
 	OrphanSettlementDocs     int64 `json:"orphan_settlement_docs"`
 	NegativeBalance          int64 `json:"negative_balance"`
@@ -33,6 +39,78 @@ func RunIntegrityAudit(db *gorm.DB) (*AuditSummary, error) {
 		return nil, err
 	}
 	s.DEULIQCount = c.N
+
+	c = cnt{}
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM documents
+		WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%'
+		  AND (legacy_status IS NULL OR legacy_status = '' OR legacy_status NOT IN ('legacy_merged','archived','legacy_promoted'))
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.DEULIQActiveCount = c.N
+
+	c = cnt{}
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM documents
+		WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%' AND legacy_status = 'legacy_merged'
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.DEULIQMergedCount = c.N
+
+	c = cnt{}
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM documents
+		WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%' AND legacy_status = 'legacy_promoted'
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.DEULIQPromotedCount = c.N
+
+	c = cnt{}
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM documents
+		WHERE deleted_at IS NULL AND number LIKE 'DEU-LIQ-%'
+		  AND (legacy_status IS NULL OR legacy_status = '' OR legacy_status NOT IN ('legacy_merged','archived','legacy_promoted'))
+		  AND status <> 'anulado'
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.LegacyPendingCount = c.N
+
+	c = cnt{}
+	// Duplicidad real: DEU-LIQ pendiente con deuda hermana activa (misma liquidación y monto).
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM documents legacy
+		WHERE legacy.deleted_at IS NULL AND legacy.number LIKE 'DEU-LIQ-%'
+		  AND (legacy.legacy_status IS NULL OR legacy.legacy_status = '' OR legacy.legacy_status NOT IN ('legacy_merged','archived','legacy_promoted'))
+		  AND legacy.status <> 'anulado'
+		  AND EXISTS (
+		    SELECT 1 FROM documents sibling
+		    WHERE sibling.deleted_at IS NULL AND sibling.id <> legacy.id
+		      AND sibling.company_id = legacy.company_id
+		      AND sibling.tax_settlement_id = legacy.tax_settlement_id
+		      AND ABS(sibling.total_amount - legacy.total_amount) <= 0.02
+		      AND sibling.number NOT LIKE 'DEU-LIQ-%'
+		      AND (sibling.legacy_status IS NULL OR sibling.legacy_status = '' OR sibling.legacy_status NOT IN ('legacy_merged','archived'))
+		      AND sibling.status <> 'anulado'
+		  )
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.DuplicateSettlementGroups = c.N
+
+	c = cnt{}
+	if err := db.Raw(`
+		SELECT COUNT(*) AS n FROM tukifac_fiscal_receipts r
+		WHERE r.deleted_at IS NULL AND r.linked_payment_id IS NOT NULL
+		  AND (r.debt_payment_context_json IS NULL OR TRIM(r.debt_payment_context_json) = '')
+		  AND NOT EXISTS (SELECT 1 FROM fiscal_receipt_lines l WHERE l.fiscal_receipt_id = r.id)
+	`).Scan(&c).Error; err != nil {
+		return nil, err
+	}
+	s.FragileReceipts = c.N
 
 	c = cnt{}
 	if err := db.Raw(`
@@ -106,7 +184,8 @@ func RunIntegrityAudit(db *gorm.DB) (*AuditSummary, error) {
 	s.InconsistentStatus = c.N
 
 	s.HasIssues = s.MissingSettlementLink > 0 || s.OrphanSettlementDocs > 0 ||
-		s.NegativeBalance > 0 || s.InconsistentBalance > 0 || s.InvalidAllocations > 0 || s.InconsistentStatus > 0
+		s.NegativeBalance > 0 || s.InconsistentBalance > 0 || s.InvalidAllocations > 0 || s.InconsistentStatus > 0 ||
+		s.LegacyPendingCount > 0 || s.DuplicateSettlementGroups > 0 || s.FragileReceipts > 0
 	return s, nil
 }
 
@@ -129,6 +208,7 @@ type DocumentStatementRow struct {
 // ListDocumentReportRows deudas con saldo persistido para reportes (Fase 6).
 func (s *Service) ListDocumentReportRows(db *gorm.DB, companyID uint, allowedCompanyIDs []uint) ([]DocumentStatementRow, error) {
 	q := db.Model(&models.Document{}).Where("status <> ?", StatusCancelled)
+	ScopeActiveDocuments(q)
 	if companyID > 0 {
 		q = q.Where("company_id = ?", companyID)
 	} else if allowedCompanyIDs != nil {

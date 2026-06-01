@@ -24,6 +24,10 @@ import type { PosSaleDetail } from '../services/posSales';
 import { resolveBackendUrl } from '../api/client';
 import { parseTukifacReceiptViewLinks, type TukifacReceiptViewLinks } from '../utils/tukifacReceiptLinks';
 import { isLocalFiscalReceipt } from '../utils/fiscalReceiptLocal';
+import {
+  documentBalanceAmount,
+  stripLegacyMigrationNotes,
+} from '../utils/documentDebtUi';
 
 function getErrorMessage(e: unknown): string {
   if (!e || typeof e !== 'object') return 'Error al guardar el pago';
@@ -68,7 +72,7 @@ function debtPeriodLabel(d: Document): string {
  * Quita sufijos de cantidad duplicados en el texto del concepto (si el monto va aparte en la UI).
  */
 function stripConceptQuantityNoise(s: string): string {
-  let t = s.trim();
+  let t = stripLegacyMigrationNotes(s);
   t = t.replace(/\s*[·•]\s*[Cc]ant\.?\s*:?\s*\d+([.,]\d+)?\s*$/u, '');
   t = t.replace(/\s*\(\s*[Cc]ant\.?\s*:?\s*\d+([.,]\d+)?\s*\)\s*$/u, '');
   t = t.replace(/\s*[×x]\s*\d+([.,]\d+)?\s*$/u, '');
@@ -96,8 +100,8 @@ function debtSelectLabel(d: Document, opts?: { omitAmount?: boolean }): string {
   const period = debtPeriodLabel(d);
   let label = joinDebtDescAndPeriod(desc || 'Sin descripción', period);
   if (!omitAmount) {
-    const amt = Number.isFinite(d.total_amount) ? d.total_amount.toFixed(2) : '0.00';
-    label = `${label} · S/ ${amt}`;
+    const bal = documentBalanceAmount(d);
+    label = `${label} · S/ ${bal.toFixed(2)}`;
   }
   return label;
 }
@@ -295,9 +299,15 @@ const PaymentForm = () => {
   const selectedDebtTotal = useMemo(() => {
     if (applyMode !== 'single' || !documentId) return null;
     const d = documents.find((x) => String(x.id) === documentId);
-    if (!d || !Number.isFinite(d.total_amount)) return null;
-    return d.total_amount;
+    if (!d) return null;
+    return documentBalanceAmount(d);
   }, [applyMode, documentId, documents]);
+
+  const resolveDebtBalance = (docId: string): number => {
+    const d = documents.find((x) => String(x.id) === docId);
+    if (d) return documentBalanceAmount(d);
+    return 0;
+  };
 
   const handleAttachmentFileChange = async (file: File | null) => {
     if (!file) return;
@@ -549,16 +559,6 @@ const PaymentForm = () => {
     if (
       settlementLink &&
       Number(companyId) === settlementLink.companyId &&
-      effectivePaymentType === 'applied' &&
-      applyMode !== 'manual'
-    ) {
-      setError('Pago desde liquidación: use imputación manual a las deudas vinculadas.');
-      return;
-    }
-
-    if (
-      settlementLink &&
-      Number(companyId) === settlementLink.companyId &&
       effectivePaymentType === 'on_account'
     ) {
       setError('Este pago está vinculado a una liquidación: debe imputar montos a las deudas (una deuda, FIFO o manual).');
@@ -579,14 +579,6 @@ const PaymentForm = () => {
         if (lines.length === 0) {
           setError('Indique al menos una línea de imputación manual');
           return;
-        }
-        if (settlementLink && settlementAllowedDocIdsRef.current.size > 0) {
-          for (const l of lines) {
-            if (!settlementAllowedDocIdsRef.current.has(l.document_id)) {
-              setError('Desde liquidación solo puede imputar deudas vinculadas a esa liquidación.');
-              return;
-            }
-          }
         }
         const sum = lines.reduce((a, l) => a + l.amount, 0);
         if (Math.abs(sum - amountNum) > 0.02) {
@@ -842,7 +834,12 @@ const PaymentForm = () => {
                   Una deuda
                 </label>
                 <label className="inline-flex items-center gap-2 cursor-pointer">
-                  <input type="radio" className="text-primary-600" checked={applyMode === 'fifo'} onChange={() => setApplyMode('fifo')} />
+                  <input
+                    type="radio"
+                    className="text-primary-600"
+                    checked={applyMode === 'fifo'}
+                    onChange={() => setApplyMode('fifo')}
+                  />
                   FIFO
                 </label>
                 <label className="inline-flex items-center gap-2 cursor-pointer">
@@ -850,9 +847,20 @@ const PaymentForm = () => {
                   Manual
                 </label>
               </div>
+              {settlementLink ? (
+                <p className="text-xs text-slate-600 bg-primary-50/60 border border-primary-100 rounded-lg px-3 py-2">
+                  Pago vinculado a liquidación {settlementLink.number ? `«${settlementLink.number}»` : `#${settlementLink.id}`}.
+                  <span className="block mt-1">
+                    <strong>FIFO:</strong> solo deudas ya vinculadas a esta liquidación (más antiguas primero).
+                    <strong className="font-semibold"> Una deuda / Manual:</strong> también puede incluir deudas independientes; al guardar se vinculan a la liquidación.
+                  </span>
+                </p>
+              ) : null}
               {applyMode === 'fifo' ? (
                 <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                  Se aplicará el monto pagado a las deudas más antiguas hasta agotar el importe.
+                  {settlementLink
+                    ? 'Se aplicará el monto a las deudas vinculadas a esta liquidación, de la más antigua a la más reciente.'
+                    : 'Se aplicará el monto pagado a las deudas abiertas de la empresa, de la más antigua a la más reciente.'}
                 </p>
               ) : null}
               {applyMode === 'single' ? (
@@ -865,7 +873,13 @@ const PaymentForm = () => {
                     name="document_id"
                     value={documentId}
                     disabled={!companyId}
-                    onChange={setDocumentId}
+                    onChange={(v) => {
+                      setDocumentId(v);
+                      const bal = resolveDebtBalance(v);
+                      if (bal > 0 && (!amount.trim() || Number(amount) <= 0)) {
+                        setAmount(bal.toFixed(2));
+                      }
+                    }}
                     placeholder="Selecciona una deuda…"
                     searchPlaceholder="Buscar deuda..."
                     options={singleDebtSelectOptions}
@@ -884,7 +898,12 @@ const PaymentForm = () => {
                         value={row.doc}
                         onChange={(v) => {
                           const n = [...manualAlloc];
-                          n[idx] = { ...n[idx], doc: v };
+                          const bal = resolveDebtBalance(v);
+                          n[idx] = {
+                            ...n[idx],
+                            doc: v,
+                            amt: v && bal > 0 ? bal.toFixed(2) : n[idx].amt,
+                          };
                           setManualAlloc(n);
                         }}
                         placeholder="Deuda"
@@ -952,7 +971,7 @@ const PaymentForm = () => {
                     ) : null}
                     {applyMode === 'single' && selectedDebtTotal != null ? (
                       <div className="flex flex-wrap justify-between gap-2 py-1.5 border-b border-slate-100">
-                        <dt className="text-slate-600">Total deuda seleccionada</dt>
+                        <dt className="text-slate-600">Saldo deuda seleccionada</dt>
                         <dd className="font-semibold tabular-nums text-slate-900">S/ {selectedDebtTotal.toFixed(2)}</dd>
                       </div>
                     ) : null}

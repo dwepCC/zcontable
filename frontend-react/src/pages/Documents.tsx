@@ -105,6 +105,13 @@ function formatDebtPeriod(doc: Document): string {
   return p || '—';
 }
 
+function documentSettlementLabel(doc: Document): string {
+  const n = (doc.tax_settlement?.number ?? '').trim();
+  if (n) return n;
+  if (doc.tax_settlement_id && doc.tax_settlement_id > 0) return `#${doc.tax_settlement_id}`;
+  return '';
+}
+
 /** Mes-año legible estilo extracto (ej. marzo-2026); vacío si no hay periodo en el documento. */
 function formatAccountingPeriodHuman(doc: Document): string {
   const raw =
@@ -1058,6 +1065,7 @@ const Documents = () => {
                   <th className="px-4 py-3">Tipo</th>
                   <th className="px-4 py-3 whitespace-nowrap">Periodo</th>
                   <th className="px-4 py-3 whitespace-nowrap">Documento</th>
+                  <th className="px-4 py-3 whitespace-nowrap">Liquidación</th>
                   <th className="px-4 py-3 text-right whitespace-nowrap">Monto total</th>
                   <th className="px-4 py-3 text-right whitespace-nowrap">Pagado</th>
                   <th className="px-4 py-3 text-right whitespace-nowrap">Saldo</th>
@@ -1071,7 +1079,7 @@ const Documents = () => {
               (useGroupedLayout ? companySummaries.length === 0 : documents.length === 0) ? (
                  <tr>
                    <td
-                     colSpan={useGroupedLayout ? 6 : 10}
+                     colSpan={useGroupedLayout ? 6 : 11}
                      className="px-4 py-6 text-center text-slate-500 text-sm"
                    >
                      <i className="fas fa-spinner fa-spin mr-2"></i> Cargando deudas...
@@ -1121,6 +1129,19 @@ const Documents = () => {
                       {formatDebtPeriod(doc)}
                     </td>
                     <td className="px-4 py-3 text-slate-700 font-mono text-xs whitespace-nowrap">{documentDebtNumber(doc)}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">
+                      {documentSettlementLabel(doc) ? (
+                        <Link
+                          to={`/tax-settlements/${doc.tax_settlement_id ?? doc.tax_settlement?.id}`}
+                          className="font-medium text-primary-700 hover:text-primary-900 hover:underline"
+                          title="Ver liquidación"
+                        >
+                          {documentSettlementLabel(doc)}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-slate-800 font-semibold whitespace-nowrap tabular-nums">
                       {formatMoneyPen(doc.total_amount)}
                     </td>
@@ -1187,7 +1208,7 @@ const Documents = () => {
               ) : (
                 <tr>
                   <td
-                    colSpan={useGroupedLayout ? 6 : 10}
+                    colSpan={useGroupedLayout ? 6 : 11}
                     className="px-4 py-6 text-center text-slate-500 text-sm"
                   >
                     {loading ? 'Cargando...' : 'No hay deudas registradas.'}

@@ -34,7 +34,7 @@ type SettlementPreviewLine struct {
 }
 
 func documentPreviewConcept(d models.Document) string {
-	concept := strings.TrimSpace(d.Description)
+	concept := debtsvc.SanitizeDocumentDescription(d.Description)
 	if len(d.Items) == 0 {
 		return concept
 	}
@@ -66,8 +66,13 @@ func (s *TaxSettlementService) PreviewOpenDocuments(companyID uint, asOf *time.T
 	}
 	out := make([]SettlementPreviewLine, 0, len(docs))
 	for _, d := range docs {
-		paid := DocumentPaidTotal(database.DB, d.ID)
-		bal := d.TotalAmount - paid
+		if !debtsvc.IsActiveDebt(&d) {
+			continue
+		}
+		bal := d.BalanceAmount
+		if bal <= 0.005 {
+			bal = debtsvc.NewService().EffectiveBalance(database.DB, &d)
+		}
 		if bal <= 0.005 {
 			continue
 		}
@@ -649,7 +654,7 @@ func (s *TaxSettlementService) PaymentSuggestions(settlementID uint) (*PaymentSu
 		out.Lines = append(out.Lines, PaymentSuggestionLine{
 			DocumentID:           *ln.DocumentID,
 			Amount:               sug,
-			Concept:              strings.TrimSpace(ln.Concept),
+			Concept:              debtsvc.SanitizeDocumentDescription(strings.TrimSpace(ln.Concept)),
 			SettlementLineAmount: ln.Amount,
 			DocumentNumber:       strings.TrimSpace(d.Number),
 			PeriodYM:             pYM,
@@ -828,9 +833,9 @@ func (s *TaxSettlementService) LinkDebtToDraft(settlementID uint, in LinkDebtInp
 	if amt > bal+0.005 {
 		return nil, errors.New("el monto excede el saldo de la deuda")
 	}
-	concept := strings.TrimSpace(in.Concept)
+	concept := debtsvc.SanitizeDocumentDescription(strings.TrimSpace(in.Concept))
 	if concept == "" {
-		concept = strings.TrimSpace(doc.Description)
+		concept = debtsvc.SanitizeDocumentDescription(doc.Description)
 	}
 	if concept == "" {
 		concept = "Deuda " + strings.TrimSpace(doc.Number)

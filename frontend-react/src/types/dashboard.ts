@@ -121,6 +121,13 @@ export interface Document {
   period_month?: number;
   period_year?: number;
   tax_settlement_id?: number;
+  /** Liquidación vinculada (precargada en listados). */
+  tax_settlement?: {
+    id: number;
+    number?: string;
+    liquidation_period?: string;
+    status?: string;
+  };
   items?: DocumentItem[];
   /** Presente en API de listado/detalle: si existen filas en `document_items`. */
   has_items?: boolean;
