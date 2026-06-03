@@ -6,8 +6,8 @@ export interface CompanyAccessCredentialRow {
   dig: string;
   ruc: string;
   business_name: string;
-  assistant_name: string;
-  supervisor_name: string;
+  assistant_username: string;
+  supervisor_username: string;
   sol_usuario: string;
   sol_clave: string;
   bnl_cuenta: string;
@@ -24,7 +24,7 @@ export interface CompanyAccessCredentialRow {
 
 export type CompanyAccessCredentialUpdateInput = Omit<
   CompanyAccessCredentialRow,
-  'company_id' | 'code' | 'ruc' | 'business_name' | 'assistant_name' | 'supervisor_name' | 'credentials_updated_at'
+  'company_id' | 'code' | 'ruc' | 'business_name' | 'assistant_username' | 'supervisor_username' | 'credentials_updated_at'
 >;
 
 export interface CompanyAccessCredentialListResponse {

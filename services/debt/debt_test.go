@@ -94,4 +94,10 @@ func TestSanitizeDocumentDescription(t *testing.T) {
 	if got != "Honorarios enero" {
 		t.Fatalf("sanitize=%q", got)
 	}
+	got = debtsvc.SanitizeDocumentDescription(
+		"ASESORÍA CONTABLE [legacy_merged→DEU-LIQ-32-57 id=57], ASESORÍA CONTABLE [legacy_merged→DEU-LIQ-32-57 id=57], ASESORÍA CONTABLE [legacy_promoted→canónico]",
+	)
+	if got != "ASESORÍA CONTABLE" {
+		t.Fatalf("dedupe sanitize=%q", got)
+	}
 }

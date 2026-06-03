@@ -36,16 +36,13 @@ import {
   documentPaidAmount,
   documentCanReceivePayment,
   formatMoneyPen,
+  stripLegacyMigrationNotes,
 } from '../utils/documentDebtUi';
 import { configService } from '../services/config';
 import { fiscalReceiptsService } from '../services/fiscalReceipts';
 import type { PosSaleDetail } from '../services/posSales';
 import { parseTukifacReceiptViewLinks, type TukifacReceiptViewLinks } from '../utils/tukifacReceiptLinks';
 import { isLocalFiscalReceipt } from '../utils/fiscalReceiptLocal';
-
-const pad2 = (n: number) => String(n).padStart(2, '0');
-
-const formatDateInput = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 type DocumentWithPayments = Document & { payments?: Payment[] };
 
@@ -103,10 +100,12 @@ function documentDebtNumber(doc: Document): string {
 function documentDebtItemLabel(doc: Document): string {
   const items = sortedDocumentItems(doc);
   if (items.length > 0) {
-    const parts = items.map((it) => String(it.description ?? '').trim()).filter(Boolean);
+    const parts = items
+      .map((it) => stripLegacyMigrationNotes(String(it.description ?? '')))
+      .filter(Boolean);
     if (parts.length > 0) return parts.join('; ');
   }
-  const desc = (doc.description ?? '').trim();
+  const desc = stripLegacyMigrationNotes((doc.description ?? '').trim());
   if (desc) return desc;
   return documentDebtNumber(doc);
 }
@@ -171,7 +170,7 @@ function debtPeriodDisplay(doc: Document): string {
 
 /** Descripción de línea + periodo humano para textos de pago / resumen. */
 function debtLineSummary(doc: Document, itemDescription: string): string {
-  const desc = String(itemDescription ?? '').trim() || '—';
+  const desc = stripLegacyMigrationNotes(String(itemDescription ?? '').trim()) || '—';
   const human = formatAccountingPeriodHuman(doc);
   if (!human) return desc;
   return `${desc} (${human})`;
@@ -193,7 +192,7 @@ function defaultPayDescriptionFromDoc(d: Document): string {
     const parts = items.map((it) => debtLineSummary(d, it.description)).filter((s) => s && s !== '—');
     if (parts.length > 0) return parts.join('; ');
   }
-  return (d.description ?? '').trim();
+  return stripLegacyMigrationNotes((d.description ?? '').trim());
 }
 
 /** Etiqueta textual del tipo de deuda (tablas sin JSX). */
@@ -234,7 +233,7 @@ function flattenCompanyDocumentsToLines(docs: Document[]): CompanyDebtFlatLine[]
         rows.push({
           key: `d${doc.id}-i${it.id}`,
           ...base,
-          description: it.description,
+          description: stripLegacyMigrationNotes(it.description ?? ''),
           amount: Number.isFinite(it.amount) ? it.amount : 0,
         });
       }
@@ -242,7 +241,7 @@ function flattenCompanyDocumentsToLines(docs: Document[]): CompanyDebtFlatLine[]
       rows.push({
         key: `d${doc.id}-single`,
         ...base,
-        description: doc.description?.trim() || '—',
+        description: stripLegacyMigrationNotes(doc.description?.trim() || '') || '—',
         amount: doc.total_amount,
       });
     }
@@ -277,13 +276,6 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   return i;
 }
 
-const getCurrentMonthRange = () => {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1);
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return { from: formatDateInput(from), to: formatDateInput(to) };
-};
-
 const Documents = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCompanyId = searchParams.get('company_id') ?? '';
@@ -294,9 +286,6 @@ const Documents = () => {
   const initialDateTo = searchParams.get('date_to') ?? '';
   const initialPage = parsePositiveInt(searchParams.get('page'), 1);
   const initialPerPage = parsePositiveInt(searchParams.get('per_page'), 20);
-  const currentMonthRange = getCurrentMonthRange();
-  const allCompaniesDefaultFrom = initialDateFrom || currentMonthRange.from;
-  const allCompaniesDefaultTo = initialDateTo || currentMonthRange.to;
 
   const resolveInitialSituation = (): CollectionSituation => {
     if (initialSituationParam) return initialSituationParam as CollectionSituation;
@@ -311,10 +300,8 @@ const Documents = () => {
 
   const [companyId, setCompanyId] = useState(initialCompanyId);
   const [situation, setSituation] = useState<CollectionSituation>(resolveInitialSituation);
-  const [dateFrom, setDateFrom] = useState(
-    initialCompanyId ? initialDateFrom : allCompaniesDefaultFrom,
-  );
-  const [dateTo, setDateTo] = useState(initialCompanyId ? initialDateTo : allCompaniesDefaultTo);
+  const [dateFrom, setDateFrom] = useState(initialDateFrom);
+  const [dateTo, setDateTo] = useState(initialDateTo);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [listMode, setListMode] = useState<DocumentsListMode>('documents');
   const [companySummaries, setCompanySummaries] = useState<CompanyDebtSummary[]>([]);
@@ -447,10 +434,7 @@ const Documents = () => {
     if (includeGroupBy && !companyId) {
       params.group_by_company = '1';
     }
-    if (!companyId) {
-      params.date_from = initialDateFrom || currentMonthRange.from;
-      params.date_to = initialDateTo || currentMonthRange.to;
-    } else if (initialDateFrom && initialDateTo) {
+    if (initialDateFrom && initialDateTo) {
       params.date_from = initialDateFrom;
       params.date_to = initialDateTo;
     }
@@ -519,27 +503,6 @@ const Documents = () => {
   }, []);
 
   useEffect(() => {
-    if (initialCompanyId) return;
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      let changed = false;
-      if (!initialDateFrom || !initialDateTo) {
-        next.set('date_from', currentMonthRange.from);
-        next.set('date_to', currentMonthRange.to);
-        changed = true;
-      }
-      return changed ? next : prev;
-    }, { replace: true });
-  }, [
-    currentMonthRange.from,
-    currentMonthRange.to,
-    initialCompanyId,
-    initialDateFrom,
-    initialDateTo,
-    setSearchParams,
-  ]);
-
-  useEffect(() => {
     setCompanyId(initialCompanyId);
     const nextSituation = (() => {
       if (initialSituationParam) return initialSituationParam as CollectionSituation;
@@ -552,13 +515,8 @@ const Documents = () => {
       return 'por_cobrar';
     })();
     setSituation(nextSituation);
-    if (initialCompanyId) {
-      setDateFrom(initialDateFrom);
-      setDateTo(initialDateTo);
-    } else {
-      setDateFrom(initialDateFrom || currentMonthRange.from);
-      setDateTo(initialDateTo || currentMonthRange.to);
-    }
+    setDateFrom(initialDateFrom);
+    setDateTo(initialDateTo);
   }, [
     initialCompanyId,
     initialDateFrom,
@@ -566,8 +524,6 @@ const Documents = () => {
     initialOverdue,
     initialStatus,
     initialSituationParam,
-    currentMonthRange.from,
-    currentMonthRange.to,
   ]);
 
   useEffect(() => {
@@ -581,8 +537,6 @@ const Documents = () => {
     initialPerPage,
     initialStatus,
     initialSituationParam,
-    currentMonthRange.from,
-    currentMonthRange.to,
   ]);
 
   const fetchDocuments = async () => {
@@ -622,8 +576,8 @@ const Documents = () => {
       setDateTo('');
       setSituation('por_cobrar');
     } else if (!v && prev) {
-      setDateFrom(currentMonthRange.from);
-      setDateTo(currentMonthRange.to);
+      setDateFrom('');
+      setDateTo('');
       setSituation('por_cobrar');
     }
   };
@@ -665,14 +619,14 @@ const Documents = () => {
   useEffect(() => {
     const filterKey = [companyId, situation, dateFrom, dateTo].join('\t');
 
-    if (companyId && ((dateFrom && !dateTo) || (!dateFrom && dateTo))) {
+    if ((dateFrom && !dateTo) || (!dateFrom && dateTo)) {
       if (!partialDateFilterWarned.current) {
         partialDateFilterWarned.current = true;
         window.dispatchEvent(
           new CustomEvent('miweb:toast', {
             detail: {
               type: 'error',
-              message: 'Indique ambas fechas (desde y hasta) o déjelas vacías para ver todo el saldo pendiente.',
+              message: 'Indique ambas fechas (desde y hasta) o déjelas vacías para ver todos los registros.',
             },
           }),
         );
@@ -692,17 +646,12 @@ const Documents = () => {
         next.delete('status');
         next.delete('overdue');
         next.set('situation', situation);
-        if (companyId) {
-          if (dateFrom && dateTo) {
-            next.set('date_from', dateFrom);
-            next.set('date_to', dateTo);
-          } else {
-            next.delete('date_from');
-            next.delete('date_to');
-          }
+        if (dateFrom && dateTo) {
+          next.set('date_from', dateFrom);
+          next.set('date_to', dateTo);
         } else {
-          next.set('date_from', dateFrom || currentMonthRange.from);
-          next.set('date_to', dateTo || currentMonthRange.to);
+          next.delete('date_from');
+          next.delete('date_to');
         }
         if (filtersJustChanged) {
           next.set('page', '1');
@@ -723,8 +672,6 @@ const Documents = () => {
     situation,
     dateFrom,
     dateTo,
-    currentMonthRange.from,
-    currentMonthRange.to,
     initialPerPage,
     setSearchParams,
   ]);

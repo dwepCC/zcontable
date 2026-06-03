@@ -9,6 +9,7 @@ import (
 
 	"miappfiber/database"
 	"miappfiber/models"
+	debtsvc "miappfiber/services/debt"
 
 	"gorm.io/gorm"
 )
@@ -83,7 +84,7 @@ func settlementLineConceptDisplay(sl *models.TaxSettlementLine) string {
 	if sl == nil {
 		return ""
 	}
-	desc := strings.TrimSpace(sl.Concept)
+	desc := debtsvc.SanitizeDocumentDescription(sl.Concept)
 	if desc == "" {
 		return ""
 	}
@@ -95,12 +96,12 @@ func settlementLineConceptDisplay(sl *models.TaxSettlementLine) string {
 
 func documentConceptBase(doc *models.Document, sl *models.TaxSettlementLine) string {
 	if sl != nil {
-		if c := strings.TrimSpace(sl.Concept); c != "" {
+		if c := debtsvc.SanitizeDocumentDescription(sl.Concept); c != "" {
 			return c
 		}
 	}
 	if doc != nil {
-		if c := strings.TrimSpace(doc.Description); c != "" {
+		if c := debtsvc.SanitizeDocumentDescription(doc.Description); c != "" {
 			return c
 		}
 	}
@@ -141,7 +142,7 @@ func buildFiscalLinesFromSettlementAllocation(doc *models.Document, allocAmount,
 }
 
 func documentItemLabel(it models.DocumentItem) string {
-	if t := strings.TrimSpace(it.Description); t != "" {
+	if t := debtsvc.SanitizeDocumentDescription(it.Description); t != "" {
 		return t
 	}
 	if it.Product != nil {

@@ -17,6 +17,7 @@ const (
 	migDocumentsDomainV2Backfill    = "documents_v2_debt_domain_backfill"
 	migDocumentsLegacyConsolidation = "documents_v3_legacy_consolidation"
 	migDocumentsReceiptFreeze       = "documents_v4_fiscal_receipt_snapshot_freeze"
+	migDocumentsStripLegacyMarks    = "documents_v5_strip_legacy_description_marks"
 )
 
 // RunDocumentMigrations migraciones idempotentes de deudas (datos).
@@ -32,6 +33,7 @@ func RunDocumentMigrations(db *gorm.DB) error {
 		{migDocumentsDomainV2Backfill, migrateDocumentsDebtDomainV2Backfill},
 		{migDocumentsLegacyConsolidation, migrateLegacyDEULIQConsolidationStep},
 		{migDocumentsReceiptFreeze, migrateReceiptSnapshotFreeze},
+		{migDocumentsStripLegacyMarks, migrateStripLegacyDescriptionMarks},
 	}
 	for _, step := range steps {
 		if err := applyDocumentMigrationOnce(db, step.name, step.fn); err != nil {

@@ -24,8 +24,8 @@ type CompanyAccessCredentialRow struct {
 	Dig       string `json:"dig"`
 	RUC       string `json:"ruc"`
 	BusinessName string `json:"business_name"`
-	AssistantName  string `json:"assistant_name"`
-	SupervisorName string `json:"supervisor_name"`
+	AssistantUsername  string `json:"assistant_username"`
+	SupervisorUsername string `json:"supervisor_username"`
 
 	SolUsuario string `json:"sol_usuario"`
 	SolClave   string `json:"sol_clave"`
@@ -77,11 +77,11 @@ type CompanyAccessCredentialUpdateInput struct {
 	FacturadorContrasena string `json:"facturador_contrasena"`
 }
 
-func userDisplayName(u *models.User) string {
+func userUsername(u *models.User) string {
 	if u == nil {
 		return ""
 	}
-	return strings.TrimSpace(u.Name)
+	return strings.TrimSpace(u.Username)
 }
 
 func (s *CompanyAccessCredentialService) companyInScope(companyID uint, allowed []uint) error {
@@ -102,8 +102,8 @@ func (s *CompanyAccessCredentialService) rowFrom(company models.Company, cred *m
 		Code:           strings.TrimSpace(company.InternalCode),
 		RUC:            strings.TrimSpace(company.RUC),
 		BusinessName:   strings.TrimSpace(company.BusinessName),
-		AssistantName:  userDisplayName(company.Assistant),
-		SupervisorName: userDisplayName(company.Supervisor),
+		AssistantUsername:  userUsername(company.Assistant),
+		SupervisorUsername: userUsername(company.Supervisor),
 	}
 	if cred != nil {
 		row.Dig = cred.Dig

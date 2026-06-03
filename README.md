@@ -150,3 +150,4 @@ Las tablas se crean automáticamente al arrancar (GORM AutoMigrate). Para refere
 - Usar variables de entorno reales (no depender de `.env` en servidor)
 - Configurar MySQL con usuario con permisos mínimos necesarios
 - Servir la app detrás de HTTPS (reverse proxy o similar)
+prueba de edplot

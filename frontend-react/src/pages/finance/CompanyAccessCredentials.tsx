@@ -120,47 +120,47 @@ const COL_GROUP = {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-700 bg-slate-200/50 border-b border-slate-200',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/80 border-b border-slate-200',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/80 border-b border-slate-200',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-slate-100 align-top max-w-[10rem] truncate bg-slate-50/60 group-hover:bg-slate-100/70',
   },
   sol: {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-sky-800 bg-sky-200/45 border-b border-sky-200/80',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-sky-800 bg-sky-100/75 border-b border-sky-200/60',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-sky-800 bg-sky-100/75 border-b border-sky-200/60',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-sky-100/80 align-top max-w-[10rem] truncate bg-sky-50/50 group-hover:bg-sky-100/55',
   },
   bnl: {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-rose-800 bg-rose-200/40 border-b border-rose-200/70',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-rose-800 bg-rose-100/70 border-b border-rose-200/50',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-rose-800 bg-rose-100/70 border-b border-rose-200/50',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-rose-100/80 align-top max-w-[10rem] truncate bg-rose-50/45 group-hover:bg-rose-100/50',
   },
   afp: {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-violet-800 bg-violet-200/40 border-b border-violet-200/70',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-violet-800 bg-violet-100/70 border-b border-violet-200/50',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-violet-800 bg-violet-100/70 border-b border-violet-200/50',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-violet-100/80 align-top max-w-[10rem] truncate bg-violet-50/45 group-hover:bg-violet-100/50',
   },
   rnp: {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-teal-800 bg-teal-200/40 border-b border-teal-200/70',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-teal-800 bg-teal-100/70 border-b border-teal-200/50',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-teal-800 bg-teal-100/70 border-b border-teal-200/50',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-teal-100/80 align-top max-w-[10rem] truncate bg-teal-50/45 group-hover:bg-teal-100/50',
   },
   facturador: {
     thGroup:
       'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-indigo-800 bg-indigo-200/40 border-b border-indigo-200/70',
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-indigo-800 bg-indigo-100/70 border-b border-indigo-200/50',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-indigo-800 bg-indigo-100/70 border-b border-indigo-200/50',
     td: 'px-2 py-2 text-xs text-slate-700 border-b border-indigo-100/80 align-top max-w-[10rem] truncate bg-indigo-50/45 group-hover:bg-indigo-100/50',
   },
   actions: {
     thCol:
-      'px-2 py-2 text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/90 border-b border-slate-200 text-right',
+      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/90 border-b border-slate-200',
     td: 'px-2 py-2 text-xs border-b border-slate-100 align-top text-right sticky right-0 bg-slate-50/90 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)] group-hover:bg-slate-100/90',
   },
 } as const;
@@ -564,8 +564,8 @@ const CompanyAccessCredentials = () => {
                       secret
                       showSecrets={showSecrets}
                     />
-                    <td className={COL_GROUP.sol.td}>{row.assistant_name || '—'}</td>
-                    <td className={COL_GROUP.sol.td}>{row.supervisor_name || '—'}</td>
+                    <td className={`${COL_GROUP.sol.td} text-center`}>{row.assistant_username || '—'}</td>
+                    <td className={`${COL_GROUP.sol.td} text-center`}>{row.supervisor_username || '—'}</td>
                     <CopyableCredentialCell value={row.bnl_cuenta} cellClass={COL_GROUP.bnl.td} mono />
                     <CopyableCredentialCell value={row.bnl_dni} cellClass={COL_GROUP.bnl.td} mono />
                     <CopyableCredentialCell
@@ -689,7 +689,7 @@ const CompanyAccessCredentials = () => {
               <fieldset className="space-y-3">
                 <legend className="text-xs font-bold uppercase text-slate-500">Claves SOL</legend>
                 <p className="text-xs text-slate-500">
-                  Asistente: {editRow.assistant_name || '—'} · Supervisor: {editRow.supervisor_name || '—'}
+                  Asistente: {editRow.assistant_username || '—'} · Supervisor: {editRow.supervisor_username || '—'}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="block text-sm sm:col-span-2">

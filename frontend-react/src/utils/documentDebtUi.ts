@@ -88,7 +88,21 @@ export function formatMoneyPen(n: number | null | undefined): string {
 
 /** Quita marcas internas de migración legacy en descripciones (consolidación DEU-LIQ). */
 export function stripLegacyMigrationNotes(text: string): string {
-  return text.replace(/\s*\[legacy_(?:promoted|merged|archived)[^\]]*\]/gi, '').trim();
+  const stripped = text.replace(/\s*\[legacy_(?:promoted|merged|archived)[^\]]*\]/gi, '').trim();
+  const parts = stripped
+    .split(/\s*[,;]\s*/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return stripped;
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(p);
+  }
+  return unique.length === 1 ? unique[0] : unique.join(', ');
 }
 
 /** Periodo MM/YYYY desde has_period o legacy YYYY-MM. */
