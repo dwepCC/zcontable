@@ -6,6 +6,7 @@ import type { FirmConfig } from '../types/dashboard';
 import { resolveBackendUrl } from '../api/client';
 import {
   CLAVES_SOL_PASTEL_PALETTE,
+  CLAVES_SOL_DIGIT_KEYS,
   DEFAULT_DIG_COLOR_MAP,
   parseDigColorMap,
   serializeDigColorMap,
@@ -581,12 +582,11 @@ const Settings = () => {
                   <div>
                     <h3 className="text-sm font-semibold text-slate-800">Colores por dígito (Claves SOL)</h3>
                     <p className="text-xs text-slate-500 mt-1">
-                      Asigne un color pastel a cada dígito (1–9). Se usa como fondo de fila en Finanzas → Claves sol y accesos.
+                      Asigne un color pastel a cada dígito (0–9). Se usa como fondo de fila en Finanzas → Claves sol y accesos.
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => {
-                      const key = String(d);
+                    {CLAVES_SOL_DIGIT_KEYS.map((key) => {
                       const selected = digColorMap[key] ?? DEFAULT_DIG_COLOR_MAP[key];
                       return (
                         <div key={key} className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">

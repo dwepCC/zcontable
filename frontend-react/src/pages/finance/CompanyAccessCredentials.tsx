@@ -12,6 +12,7 @@ import {
   type CredentialImportRowError,
 } from '../../services/companyAccessCredentials';
 import {
+  CLAVES_SOL_DIGIT_KEYS,
   getDigRowClass,
   getPaletteSwatch,
   parseDigColorMap,
@@ -123,16 +124,20 @@ function rowToForm(row: CompanyAccessCredentialRow): CompanyAccessCredentialUpda
 }
 
 const TH_GROUP =
-  'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-700 bg-slate-100 border-b border-slate-200';
+  'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-white bg-blue-900 border-b border-blue-800';
 const TH_COL =
-  'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-50 border-b border-slate-200';
+  'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-white bg-blue-900 border-b border-blue-800';
 const TD =
   'px-2 py-2 text-xs text-slate-700 border-b border-slate-100/90 align-top max-w-[10rem] truncate';
 const TD_ACTIONS =
   'px-2 py-2 text-xs border-b border-slate-100/90 align-top text-right sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]';
 
 const FILTER_SECTION =
-  'rounded-lg border border-slate-200 bg-slate-50/50 p-3 min-w-0 flex flex-col';
+  'rounded-lg border border-slate-200 bg-slate-50/50 min-w-0 flex flex-col overflow-hidden';
+
+const FILTER_SECTION_TITLE = 'text-xs font-semibold text-slate-700 px-2 pt-2 mb-1.5 shrink-0';
+
+const FILTER_SECTION_BODY = 'px-2 pb-2';
 
 function filterChipClass(active: boolean, compact = false): string {
   return [
@@ -158,11 +163,11 @@ function FilterUserGrid({
 }) {
   return (
     <div className={`${FILTER_SECTION} flex-1`}>
-      <p className="text-xs font-semibold text-slate-700 mb-2 shrink-0">{title}</p>
+      <p className={FILTER_SECTION_TITLE}>{title}</p>
       {users.length === 0 ? (
-        <p className="text-xs text-slate-400">Sin asignaciones</p>
+        <p className={`text-xs text-slate-400 ${FILTER_SECTION_BODY}`}>Sin asignaciones</p>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+        <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 ${FILTER_SECTION_BODY}`}>
           {users.map((u) => {
             const active = selectedId === u.user_id;
             const label = (u.username || '').trim() || `#${u.user_id}`;
@@ -479,9 +484,9 @@ const CompanyAccessCredentials = () => {
         ) : null}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+      <div className="overflow-hidden">
         {hasActiveFilters ? (
-          <div className="flex justify-end mb-2">
+          <div className="flex justify-end px-2 pt-1.5">
             <button
               type="button"
               onClick={clearFilters}
@@ -492,12 +497,12 @@ const CompanyAccessCredentials = () => {
           </div>
         ) : null}
         {facetsLoading ? (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 px-2 py-2">
             <i className="fas fa-spinner fa-spin mr-1" aria-hidden />
             Cargando filtros…
           </p>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-stretch">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-stretch">
             <FilterUserGrid
               title="Asistentes"
               users={facets?.assistants ?? []}
@@ -516,11 +521,10 @@ const CompanyAccessCredentials = () => {
                 setPage(1);
               }}
             />
-            <div className={`${FILTER_SECTION} w-full sm:w-[8.5rem] shrink-0`}>
-              <p className="text-xs font-semibold text-slate-700 mb-2 shrink-0">Dígitos</p>
-              <div className="grid grid-cols-3 gap-2">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => {
-                  const key = String(d);
+            <div className={`${FILTER_SECTION} w-full sm:w-[9.25rem] shrink-0`}>
+              <p className={FILTER_SECTION_TITLE}>Dígitos</p>
+              <div className={`grid grid-cols-4 gap-1.5 ${FILTER_SECTION_BODY}`}>
+                {CLAVES_SOL_DIGIT_KEYS.map((key) => {
                   const active = filterDig === key;
                   const swatch = getPaletteSwatch(digColorMap[key] ?? 'slate');
                   return (
@@ -624,7 +628,7 @@ const CompanyAccessCredentials = () => {
                 <th colSpan={3} className={TH_GROUP}>
                   Facturador
                 </th>
-                <th rowSpan={2} className={`${TH_COL} sticky right-0 bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>
+                <th rowSpan={2} className={`${TH_COL} sticky right-0 bg-blue-900 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>
                   Acciones
                 </th>
               </tr>

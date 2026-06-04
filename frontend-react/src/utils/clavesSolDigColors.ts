@@ -16,7 +16,11 @@ export const CLAVES_SOL_PASTEL_PALETTE = [
 
 export type ClavesSolPaletteId = (typeof CLAVES_SOL_PASTEL_PALETTE)[number]['id'];
 
+/** Dígitos de empresa en claves SOL (0–9), en orden de UI. */
+export const CLAVES_SOL_DIGIT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+
 export const DEFAULT_DIG_COLOR_MAP: Record<string, ClavesSolPaletteId> = {
+  '0': 'cyan',
   '1': 'sky',
   '2': 'emerald',
   '3': 'amber',
@@ -39,8 +43,7 @@ export function parseDigColorMap(json?: string | null): Record<string, ClavesSol
   if (!raw) return out;
   try {
     const parsed = JSON.parse(raw) as Record<string, string>;
-    for (let d = 1; d <= 9; d++) {
-      const key = String(d);
+    for (const key of CLAVES_SOL_DIGIT_KEYS) {
       const id = (parsed[key] ?? '').trim() as ClavesSolPaletteId;
       if (id && paletteById[id]) out[key] = id;
     }
@@ -52,8 +55,7 @@ export function parseDigColorMap(json?: string | null): Record<string, ClavesSol
 
 export function serializeDigColorMap(map: Record<string, ClavesSolPaletteId>): string {
   const payload: Record<string, string> = {};
-  for (let d = 1; d <= 9; d++) {
-    const key = String(d);
+  for (const key of CLAVES_SOL_DIGIT_KEYS) {
     payload[key] = map[key] ?? DEFAULT_DIG_COLOR_MAP[key];
   }
   return JSON.stringify(payload);
@@ -63,7 +65,7 @@ export function normalizeCompanyDig(dig?: string | null): string {
   const t = (dig ?? '').trim();
   if (!t) return '';
   const ch = t[0];
-  if (ch >= '1' && ch <= '9') return ch;
+  if (ch >= '0' && ch <= '9') return ch;
   return '';
 }
 

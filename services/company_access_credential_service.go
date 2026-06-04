@@ -244,7 +244,7 @@ func normalizeCredentialDigFilter(d string) string {
 		return ""
 	}
 	ch := d[0]
-	if ch >= '1' && ch <= '9' {
+	if ch >= '0' && ch <= '9' {
 		return string(ch)
 	}
 	return ""
