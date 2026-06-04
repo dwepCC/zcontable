@@ -5,10 +5,18 @@ import { P } from '../../rbac/codes';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import {
   companyAccessCredentialsService,
+  type CompanyAccessCredentialFilterFacets,
   type CompanyAccessCredentialRow,
   type CompanyAccessCredentialUpdateInput,
+  type CredentialFilterUserOption,
   type CredentialImportRowError,
 } from '../../services/companyAccessCredentials';
+import {
+  getDigRowClass,
+  getPaletteSwatch,
+  parseDigColorMap,
+  type ClavesSolPaletteId,
+} from '../../utils/clavesSolDigColors';
 
 function maskSecret(value: string): string {
   const v = (value ?? '').trim();
@@ -114,56 +122,67 @@ function rowToForm(row: CompanyAccessCredentialRow): CompanyAccessCredentialUpda
   };
 }
 
-/** Estilos suaves por bloque de columnas (agrupador + hijas + celdas). */
-const COL_GROUP = {
-  general: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-700 bg-slate-200/50 border-b border-slate-200',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/80 border-b border-slate-200',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-slate-100 align-top max-w-[10rem] truncate bg-slate-50/60 group-hover:bg-slate-100/70',
-  },
-  sol: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-sky-800 bg-sky-200/45 border-b border-sky-200/80',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-sky-800 bg-sky-100/75 border-b border-sky-200/60',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-sky-100/80 align-top max-w-[10rem] truncate bg-sky-50/50 group-hover:bg-sky-100/55',
-  },
-  bnl: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-rose-800 bg-rose-200/40 border-b border-rose-200/70',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-rose-800 bg-rose-100/70 border-b border-rose-200/50',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-rose-100/80 align-top max-w-[10rem] truncate bg-rose-50/45 group-hover:bg-rose-100/50',
-  },
-  afp: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-violet-800 bg-violet-200/40 border-b border-violet-200/70',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-violet-800 bg-violet-100/70 border-b border-violet-200/50',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-violet-100/80 align-top max-w-[10rem] truncate bg-violet-50/45 group-hover:bg-violet-100/50',
-  },
-  rnp: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-teal-800 bg-teal-200/40 border-b border-teal-200/70',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-teal-800 bg-teal-100/70 border-b border-teal-200/50',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-teal-100/80 align-top max-w-[10rem] truncate bg-teal-50/45 group-hover:bg-teal-100/50',
-  },
-  facturador: {
-    thGroup:
-      'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-indigo-800 bg-indigo-200/40 border-b border-indigo-200/70',
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-indigo-800 bg-indigo-100/70 border-b border-indigo-200/50',
-    td: 'px-2 py-2 text-xs text-slate-700 border-b border-indigo-100/80 align-top max-w-[10rem] truncate bg-indigo-50/45 group-hover:bg-indigo-100/50',
-  },
-  actions: {
-    thCol:
-      'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-100/90 border-b border-slate-200',
-    td: 'px-2 py-2 text-xs border-b border-slate-100 align-top text-right sticky right-0 bg-slate-50/90 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)] group-hover:bg-slate-100/90',
-  },
-} as const;
+const TH_GROUP =
+  'px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-700 bg-slate-100 border-b border-slate-200';
+const TH_COL =
+  'px-2 py-2 text-center text-[10px] font-semibold uppercase whitespace-nowrap text-slate-600 bg-slate-50 border-b border-slate-200';
+const TD =
+  'px-2 py-2 text-xs text-slate-700 border-b border-slate-100/90 align-top max-w-[10rem] truncate';
+const TD_ACTIONS =
+  'px-2 py-2 text-xs border-b border-slate-100/90 align-top text-right sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]';
+
+const FILTER_SECTION =
+  'rounded-lg border border-slate-200 bg-slate-50/50 p-3 min-w-0 flex flex-col';
+
+function filterChipClass(active: boolean, compact = false): string {
+  return [
+    compact ? 'min-h-[2.25rem] px-1 py-1' : 'min-h-[2.25rem] px-2.5 py-1.5',
+    'rounded-md border text-xs font-medium transition',
+    compact ? 'font-mono' : 'text-center break-words leading-snug',
+    active
+      ? 'border-primary-500 bg-primary-50 text-primary-900 ring-2 ring-primary-400/50'
+      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+  ].join(' ');
+}
+
+function FilterUserGrid({
+  title,
+  users,
+  selectedId,
+  onSelect,
+}: {
+  title: string;
+  users: CredentialFilterUserOption[];
+  selectedId: number | null;
+  onSelect: (id: number | null) => void;
+}) {
+  return (
+    <div className={`${FILTER_SECTION} flex-1`}>
+      <p className="text-xs font-semibold text-slate-700 mb-2 shrink-0">{title}</p>
+      {users.length === 0 ? (
+        <p className="text-xs text-slate-400">Sin asignaciones</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+          {users.map((u) => {
+            const active = selectedId === u.user_id;
+            const label = (u.username || '').trim() || `#${u.user_id}`;
+            return (
+              <button
+                key={u.user_id}
+                type="button"
+                title={label}
+                className={filterChipClass(active)}
+                onClick={() => onSelect(active ? null : u.user_id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const CompanyAccessCredentials = () => {
   const canView = useMemo(() => auth.hasPermission(P.companyCredentialsView), []);
@@ -173,6 +192,12 @@ const CompanyAccessCredentials = () => {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [perPage] = useState(20);
+  const [filterAssistantId, setFilterAssistantId] = useState<number | null>(null);
+  const [filterSupervisorId, setFilterSupervisorId] = useState<number | null>(null);
+  const [filterDig, setFilterDig] = useState<string | null>(null);
+  const [facets, setFacets] = useState<CompanyAccessCredentialFilterFacets | null>(null);
+  const [facetsLoading, setFacetsLoading] = useState(true);
+  const [digColorMap, setDigColorMap] = useState<Record<string, ClavesSolPaletteId>>(() => parseDigColorMap());
   const [rows, setRows] = useState<CompanyAccessCredentialRow[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
@@ -206,6 +231,23 @@ const CompanyAccessCredentials = () => {
           ? 'text-sm text-amber-900 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg'
           : 'text-sm text-slate-700 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg';
 
+  const hasActiveFilters =
+    filterAssistantId != null || filterSupervisorId != null || filterDig != null;
+
+  const loadFacets = useCallback(async () => {
+    if (!canView) return;
+    try {
+      setFacetsLoading(true);
+      const data = await companyAccessCredentialsService.filterFacets();
+      setFacets(data);
+      setDigColorMap(parseDigColorMap(data.claves_sol_dig_colors_json));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFacetsLoading(false);
+    }
+  }, [canView]);
+
   const load = useCallback(async (opts?: { page?: number }) => {
     if (!canView) return;
     const targetPage = opts?.page ?? page;
@@ -216,6 +258,9 @@ const CompanyAccessCredentials = () => {
         q: q.trim().length >= 2 ? q.trim() : undefined,
         page: targetPage,
         per_page: perPage,
+        assistant_user_id: filterAssistantId ?? undefined,
+        supervisor_user_id: filterSupervisorId ?? undefined,
+        dig: filterDig ?? undefined,
       });
       setRows(res.data ?? []);
       setTotal(res.total ?? 0);
@@ -226,7 +271,18 @@ const CompanyAccessCredentials = () => {
     } finally {
       setLoading(false);
     }
-  }, [canView, q, page, perPage]);
+  }, [canView, q, page, perPage, filterAssistantId, filterSupervisorId, filterDig]);
+
+  const clearFilters = () => {
+    setFilterAssistantId(null);
+    setFilterSupervisorId(null);
+    setFilterDig(null);
+    setPage(1);
+  };
+
+  useEffect(() => {
+    void loadFacets();
+  }, [loadFacets]);
 
   useEffect(() => {
     void load();
@@ -408,19 +464,14 @@ const CompanyAccessCredentials = () => {
   }
 
   return (
-    <div className={PAGE_WORKSPACE_CLASS}>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">Claves sol y accesos</h2>
-          <p className="text-sm text-slate-500">
-            Credenciales extendidas por empresa. Asistente y supervisor se muestran desde la ficha de empresa.
-          </p>
-        </div>
+    <div className={`${PAGE_WORKSPACE_CLASS} !space-y-3`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-slate-800">Claves sol y accesos</h2>
         {canImport ? (
           <button
             type="button"
             onClick={() => setImportOpen(true)}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full border border-emerald-300 bg-white text-emerald-800 text-sm font-medium shadow-sm hover:bg-emerald-50"
+            className="inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-full border border-emerald-300 bg-white text-emerald-800 text-sm font-medium shadow-sm hover:bg-emerald-50"
           >
             <i className="fas fa-file-excel text-xs" aria-hidden />
             Importar Excel
@@ -428,7 +479,73 @@ const CompanyAccessCredentials = () => {
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+        {hasActiveFilters ? (
+          <div className="flex justify-end mb-2">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs font-medium text-primary-700 hover:text-primary-900 hover:underline"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+        ) : null}
+        {facetsLoading ? (
+          <p className="text-xs text-slate-500">
+            <i className="fas fa-spinner fa-spin mr-1" aria-hidden />
+            Cargando filtros…
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-stretch">
+            <FilterUserGrid
+              title="Asistentes"
+              users={facets?.assistants ?? []}
+              selectedId={filterAssistantId}
+              onSelect={(id) => {
+                setFilterAssistantId(id);
+                setPage(1);
+              }}
+            />
+            <FilterUserGrid
+              title="Supervisores"
+              users={facets?.supervisors ?? []}
+              selectedId={filterSupervisorId}
+              onSelect={(id) => {
+                setFilterSupervisorId(id);
+                setPage(1);
+              }}
+            />
+            <div className={`${FILTER_SECTION} w-full sm:w-[8.5rem] shrink-0`}>
+              <p className="text-xs font-semibold text-slate-700 mb-2 shrink-0">Dígitos</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => {
+                  const key = String(d);
+                  const active = filterDig === key;
+                  const swatch = getPaletteSwatch(digColorMap[key] ?? 'slate');
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      title={`Dígito ${key}`}
+                      className={`${filterChipClass(active, true)} flex flex-col items-center justify-center gap-0.5`}
+                      onClick={() => {
+                        setFilterDig(active ? null : key);
+                        setPage(1);
+                      }}
+                    >
+                      <span className={`w-3.5 h-3.5 rounded-sm ${swatch}`} aria-hidden />
+                      <span>{key}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
           <input
@@ -451,9 +568,6 @@ const CompanyAccessCredentials = () => {
           />
           Mostrar contraseñas
         </label>
-        <p className="w-full text-xs text-slate-500 sm:w-auto sm:ml-auto">
-          Clic en usuario, clave o cuenta de los bloques SOL, Banco, AFP, RNP y Facturador para copiar.
-        </p>
       </div>
 
       {error ? (
@@ -492,46 +606,46 @@ const CompanyAccessCredentials = () => {
           <table className="min-w-[1400px] w-full text-left border-collapse">
             <thead>
               <tr>
-                <th colSpan={2} className={COL_GROUP.general.thGroup}>
+                <th colSpan={2} className={TH_GROUP}>
                   Columnas generales
                 </th>
-                <th colSpan={6} className={COL_GROUP.sol.thGroup}>
+                <th colSpan={6} className={TH_GROUP}>
                   Claves SOL
                 </th>
-                <th colSpan={3} className={COL_GROUP.bnl.thGroup}>
+                <th colSpan={3} className={TH_GROUP}>
                   Banco de la Nación (detracciones)
                 </th>
-                <th colSpan={2} className={COL_GROUP.afp.thGroup}>
+                <th colSpan={2} className={TH_GROUP}>
                   AFP Net
                 </th>
-                <th colSpan={1} className={COL_GROUP.rnp.thGroup}>
+                <th colSpan={1} className={TH_GROUP}>
                   RNP
                 </th>
-                <th colSpan={3} className={COL_GROUP.facturador.thGroup}>
+                <th colSpan={3} className={TH_GROUP}>
                   Facturador
                 </th>
-                <th rowSpan={2} className={`${COL_GROUP.actions.thCol} sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>
+                <th rowSpan={2} className={`${TH_COL} sticky right-0 bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>
                   Acciones
                 </th>
               </tr>
               <tr>
-                <th className={COL_GROUP.general.thCol}>Cod</th>
-                <th className={COL_GROUP.general.thCol}>Dig</th>
-                <th className={COL_GROUP.sol.thCol}>Razón social</th>
-                <th className={COL_GROUP.sol.thCol}>RUC</th>
-                <th className={COL_GROUP.sol.thCol}>Usuario</th>
-                <th className={COL_GROUP.sol.thCol}>Clave</th>
-                <th className={COL_GROUP.sol.thCol}>Asistente</th>
-                <th className={COL_GROUP.sol.thCol}>Supervisor</th>
-                <th className={COL_GROUP.bnl.thCol}>Cta</th>
-                <th className={COL_GROUP.bnl.thCol}>DNI</th>
-                <th className={COL_GROUP.bnl.thCol}>Clave detr.</th>
-                <th className={COL_GROUP.afp.thCol}>Usuario</th>
-                <th className={COL_GROUP.afp.thCol}>Clave AFP</th>
-                <th className={COL_GROUP.rnp.thCol}>Clave RNP</th>
-                <th className={COL_GROUP.facturador.thCol}>Link</th>
-                <th className={COL_GROUP.facturador.thCol}>Usuario</th>
-                <th className={COL_GROUP.facturador.thCol}>Contraseña</th>
+                <th className={TH_COL}>Cod</th>
+                <th className={TH_COL}>Dig</th>
+                <th className={TH_COL}>Razón social</th>
+                <th className={TH_COL}>RUC</th>
+                <th className={TH_COL}>Usuario</th>
+                <th className={TH_COL}>Clave</th>
+                <th className={TH_COL}>Asistente</th>
+                <th className={TH_COL}>Supervisor</th>
+                <th className={TH_COL}>Cta</th>
+                <th className={TH_COL}>DNI</th>
+                <th className={TH_COL}>Clave detr.</th>
+                <th className={TH_COL}>Usuario</th>
+                <th className={TH_COL}>Clave AFP</th>
+                <th className={TH_COL}>Clave RNP</th>
+                <th className={TH_COL}>Link</th>
+                <th className={TH_COL}>Usuario</th>
+                <th className={TH_COL}>Contraseña</th>
               </tr>
             </thead>
             <tbody>
@@ -549,57 +663,59 @@ const CompanyAccessCredentials = () => {
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row.company_id} className="group">
-                    <td className={`${COL_GROUP.general.td} font-mono`}>{row.code || '—'}</td>
-                    <td className={COL_GROUP.general.td}>{row.dig || '—'}</td>
-                    <td className={`${COL_GROUP.sol.td} max-w-[12rem] font-medium`} title={row.business_name}>
+                rows.map((row) => {
+                  const rowBg = getDigRowClass(row.dig, digColorMap);
+                  return (
+                  <tr key={row.company_id} className={`group ${rowBg}`}>
+                    <td className={`${TD} font-mono`}>{row.code || '—'}</td>
+                    <td className={TD}>{row.dig || '—'}</td>
+                    <td className={`${TD} max-w-[12rem] font-medium`} title={row.business_name}>
                       {row.business_name || '—'}
                     </td>
-                    <td className={`${COL_GROUP.sol.td} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
-                    <CopyableCredentialCell value={row.sol_usuario} cellClass={COL_GROUP.sol.td} />
+                    <td className={`${TD} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
+                    <CopyableCredentialCell value={row.sol_usuario} cellClass={TD} />
                     <CopyableCredentialCell
                       value={row.sol_clave}
-                      cellClass={COL_GROUP.sol.td}
+                      cellClass={TD}
                       secret
                       showSecrets={showSecrets}
                     />
-                    <td className={`${COL_GROUP.sol.td} text-center`}>{row.assistant_username || '—'}</td>
-                    <td className={`${COL_GROUP.sol.td} text-center`}>{row.supervisor_username || '—'}</td>
-                    <CopyableCredentialCell value={row.bnl_cuenta} cellClass={COL_GROUP.bnl.td} mono />
-                    <CopyableCredentialCell value={row.bnl_dni} cellClass={COL_GROUP.bnl.td} mono />
+                    <td className={`${TD} text-center`}>{row.assistant_username || '—'}</td>
+                    <td className={`${TD} text-center`}>{row.supervisor_username || '—'}</td>
+                    <CopyableCredentialCell value={row.bnl_cuenta} cellClass={TD} mono />
+                    <CopyableCredentialCell value={row.bnl_dni} cellClass={TD} mono />
                     <CopyableCredentialCell
                       value={row.bnl_clave_detracciones}
-                      cellClass={COL_GROUP.bnl.td}
+                      cellClass={TD}
                       secret
                       showSecrets={showSecrets}
                     />
-                    <CopyableCredentialCell value={row.afp_usuario} cellClass={COL_GROUP.afp.td} />
+                    <CopyableCredentialCell value={row.afp_usuario} cellClass={TD} />
                     <CopyableCredentialCell
                       value={row.afp_clave}
-                      cellClass={COL_GROUP.afp.td}
+                      cellClass={TD}
                       secret
                       showSecrets={showSecrets}
                     />
                     <CopyableCredentialCell
                       value={row.rnp_clave}
-                      cellClass={COL_GROUP.rnp.td}
+                      cellClass={TD}
                       secret
                       showSecrets={showSecrets}
                     />
                     <CopyableCredentialCell
                       value={row.facturador_link}
-                      cellClass={COL_GROUP.facturador.td}
+                      cellClass={TD}
                       linkStyle
                     />
-                    <CopyableCredentialCell value={row.facturador_usuario} cellClass={COL_GROUP.facturador.td} />
+                    <CopyableCredentialCell value={row.facturador_usuario} cellClass={TD} />
                     <CopyableCredentialCell
                       value={row.facturador_contrasena}
-                      cellClass={COL_GROUP.facturador.td}
+                      cellClass={TD}
                       secret
                       showSecrets={showSecrets}
                     />
-                    <td className={COL_GROUP.actions.td}>
+                    <td className={`${TD_ACTIONS} ${rowBg}`}>
                       <button
                         type="button"
                         title={canManage ? 'Editar credenciales' : 'Ver credenciales'}
@@ -611,7 +727,8 @@ const CompanyAccessCredentials = () => {
                       </button>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

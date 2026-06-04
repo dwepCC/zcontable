@@ -4,7 +4,6 @@ import { ACTIVITY_KINDS, ACTIVITY_STATUSES, PRIORITIES } from './calendarUtils';
 
 export type ActivityFormData = {
   name: string;
-  description: string;
   activity_kind: string;
   start_day: number;
   end_day: number;
@@ -49,7 +48,7 @@ const ActivityModal = ({ open, title, initial, lastDayOfMonth, saving, onClose, 
       <div className="relative w-full max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
         <div className="px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <p className="text-sm text-slate-500 mt-0.5">La actividad se mostrará como bloque continuo en el calendario.</p>
+          <p className="text-sm text-slate-500 mt-0.5">La actividad aparece en cada día de su rango. Arrástrela en el calendario para cambiar fechas.</p>
         </div>
 
         <form
@@ -65,23 +64,13 @@ const ActivityModal = ({ open, title, initial, lastDayOfMonth, saving, onClose, 
           }}
         >
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">Nombre de actividad</span>
+            <span className="font-medium text-slate-700">Descripción</span>
             <input
               required
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500"
               placeholder="Ej. Generación de NPS"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="font-medium text-slate-700">Descripción (opcional)</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              rows={2}
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 resize-none"
             />
           </label>
 

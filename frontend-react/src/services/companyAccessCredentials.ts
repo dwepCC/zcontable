@@ -1,11 +1,24 @@
 import client from '../api/client';
 
+export interface CredentialFilterUserOption {
+  user_id: number;
+  username: string;
+}
+
+export interface CompanyAccessCredentialFilterFacets {
+  assistants: CredentialFilterUserOption[];
+  supervisors: CredentialFilterUserOption[];
+  claves_sol_dig_colors_json?: string;
+}
+
 export interface CompanyAccessCredentialRow {
   company_id: number;
   code: string;
   dig: string;
   ruc: string;
   business_name: string;
+  assistant_user_id?: number;
+  supervisor_user_id?: number;
   assistant_username: string;
   supervisor_username: string;
   sol_usuario: string;
@@ -57,7 +70,21 @@ export interface CredentialImportCommitResult {
 }
 
 export const companyAccessCredentialsService = {
-  async list(params?: { q?: string; page?: number; per_page?: number }): Promise<CompanyAccessCredentialListResponse> {
+  async filterFacets(): Promise<CompanyAccessCredentialFilterFacets> {
+    const res = await client.get<{ data: CompanyAccessCredentialFilterFacets }>(
+      '/finance/company-credentials/filter-facets',
+    );
+    return res.data.data;
+  },
+
+  async list(params?: {
+    q?: string;
+    page?: number;
+    per_page?: number;
+    assistant_user_id?: number;
+    supervisor_user_id?: number;
+    dig?: string;
+  }): Promise<CompanyAccessCredentialListResponse> {
     const res = await client.get<CompanyAccessCredentialListResponse>('/finance/company-credentials/', { params });
     return res.data;
   },

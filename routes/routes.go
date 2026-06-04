@@ -240,6 +240,7 @@ func Setup(app *fiber.App) {
 	// Claves de acceso por empresa (Finanzas)
 	creds := api.Group("/finance/company-credentials")
 	creds.Get("/", middleware.RequirePermission(rbac.CompanyCredentialsView), credCtrl.ListAPI)
+	creds.Get("/filter-facets", middleware.RequirePermission(rbac.CompanyCredentialsView), credCtrl.FilterFacetsAPI)
 	creds.Get("/import/template", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportTemplateAPI)
 	creds.Post("/import", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportAPI)
 	creds.Get("/:companyId", middleware.RequirePermission(rbac.CompanyCredentialsView), credCtrl.GetAPI)

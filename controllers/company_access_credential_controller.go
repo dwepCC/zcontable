@@ -47,8 +47,17 @@ func (ctrl *CompanyAccessCredentialController) ListAPI(c fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	perPage, _ := strconv.Atoi(c.Query("per_page", "20"))
 
+	assistantID, _ := strconv.ParseUint(strings.TrimSpace(c.Query("assistant_user_id", "")), 10, 64)
+	supervisorID, _ := strconv.ParseUint(strings.TrimSpace(c.Query("supervisor_user_id", "")), 10, 64)
+
 	out, err := ctrl.svc.List(services.CompanyAccessCredentialListParams{
-		Q: c.Query("q", ""), Page: page, PerPage: perPage, AllowedCompanyIDs: allowed,
+		Q:                 c.Query("q", ""),
+		Page:              page,
+		PerPage:           perPage,
+		AllowedCompanyIDs: allowed,
+		AssistantUserID:   uint(assistantID),
+		SupervisorUserID:  uint(supervisorID),
+		Dig:               c.Query("dig", ""),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -60,6 +69,21 @@ func (ctrl *CompanyAccessCredentialController) ListAPI(c fiber.Ctx) error {
 		"per_page":    out.PerPage,
 		"total_pages": out.TotalPages,
 	})
+}
+
+func (ctrl *CompanyAccessCredentialController) FilterFacetsAPI(c fiber.Ctx) error {
+	allowed, err := ctrl.allowedCompanyIDs(c)
+	if err != nil {
+		if fe, ok := err.(*fiber.Error); ok {
+			return c.Status(fe.Code).JSON(fiber.Map{"error": fe.Message})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error de acceso"})
+	}
+	out, err := ctrl.svc.FilterFacets(allowed)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": out})
 }
 
 func (ctrl *CompanyAccessCredentialController) GetAPI(c fiber.Ctx) error {

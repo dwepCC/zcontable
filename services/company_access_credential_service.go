@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"miappfiber/database"
@@ -24,6 +25,8 @@ type CompanyAccessCredentialRow struct {
 	Dig       string `json:"dig"`
 	RUC       string `json:"ruc"`
 	BusinessName string `json:"business_name"`
+	AssistantUserID    *uint  `json:"assistant_user_id,omitempty"`
+	SupervisorUserID   *uint  `json:"supervisor_user_id,omitempty"`
 	AssistantUsername  string `json:"assistant_username"`
 	SupervisorUsername string `json:"supervisor_username"`
 
@@ -51,6 +54,22 @@ type CompanyAccessCredentialListParams struct {
 	Page              int
 	PerPage           int
 	AllowedCompanyIDs []uint
+	AssistantUserID   uint
+	SupervisorUserID  uint
+	Dig               string
+}
+
+// CredentialFilterUserOption usuario para filtros de asistente/supervisor.
+type CredentialFilterUserOption struct {
+	UserID   uint   `json:"user_id"`
+	Username string `json:"username"`
+}
+
+// CompanyAccessCredentialFilterFacets opciones de filtro y colores por dígito.
+type CompanyAccessCredentialFilterFacets struct {
+	Assistants           []CredentialFilterUserOption `json:"assistants"`
+	Supervisors          []CredentialFilterUserOption `json:"supervisors"`
+	ClavesSolDigColorsJSON string                     `json:"claves_sol_dig_colors_json,omitempty"`
 }
 
 type CompanyAccessCredentialListResult struct {
@@ -98,10 +117,12 @@ func (s *CompanyAccessCredentialService) companyInScope(companyID uint, allowed 
 
 func (s *CompanyAccessCredentialService) rowFrom(company models.Company, cred *models.CompanyAccessCredential) CompanyAccessCredentialRow {
 	row := CompanyAccessCredentialRow{
-		CompanyID:      company.ID,
-		Code:           strings.TrimSpace(company.InternalCode),
-		RUC:            strings.TrimSpace(company.RUC),
-		BusinessName:   strings.TrimSpace(company.BusinessName),
+		CompanyID:          company.ID,
+		Code:               strings.TrimSpace(company.InternalCode),
+		RUC:                strings.TrimSpace(company.RUC),
+		BusinessName:       strings.TrimSpace(company.BusinessName),
+		AssistantUserID:    company.AssistantUserID,
+		SupervisorUserID:   company.SupervisorUserID,
 		AssistantUsername:  userUsername(company.Assistant),
 		SupervisorUsername: userUsername(company.Supervisor),
 	}
@@ -160,6 +181,22 @@ func (s *CompanyAccessCredentialService) List(p CompanyAccessCredentialListParam
 		)
 	}
 
+	if p.AssistantUserID > 0 {
+		q = q.Where("assistant_user_id = ?", p.AssistantUserID)
+	}
+	if p.SupervisorUserID > 0 {
+		q = q.Where("supervisor_user_id = ?", p.SupervisorUserID)
+	}
+	if dig := normalizeCredentialDigFilter(p.Dig); dig != "" {
+		q = q.Where(
+			`EXISTS (
+				SELECT 1 FROM company_access_credentials c
+				WHERE c.company_id = companies.id AND TRIM(c.dig) = ?
+			)`,
+			dig,
+		)
+	}
+
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, err
@@ -199,6 +236,88 @@ func (s *CompanyAccessCredentialService) List(p CompanyAccessCredentialListParam
 	return &CompanyAccessCredentialListResult{
 		Rows: rows, Total: total, Page: page, PerPage: perPage, TotalPages: totalPages,
 	}, nil
+}
+
+func normalizeCredentialDigFilter(d string) string {
+	d = strings.TrimSpace(d)
+	if d == "" {
+		return ""
+	}
+	ch := d[0]
+	if ch >= '1' && ch <= '9' {
+		return string(ch)
+	}
+	return ""
+}
+
+func (s *CompanyAccessCredentialService) FilterFacets(allowed []uint) (*CompanyAccessCredentialFilterFacets, error) {
+	q := database.DB.Model(&models.Company{}).
+		Where("client_type = ?", models.CompanyClientTypeEstudio)
+	if allowed != nil {
+		if len(allowed) == 0 {
+			return &CompanyAccessCredentialFilterFacets{
+				Assistants:  []CredentialFilterUserOption{},
+				Supervisors: []CredentialFilterUserOption{},
+			}, nil
+		}
+		q = q.Where("id IN ?", allowed)
+	}
+
+	var companies []models.Company
+	if err := q.Preload("Assistant").Preload("Supervisor").Find(&companies).Error; err != nil {
+		return nil, err
+	}
+
+	assistantSeen := map[uint]struct{}{}
+	supervisorSeen := map[uint]struct{}{}
+	var assistants []CredentialFilterUserOption
+	var supervisors []CredentialFilterUserOption
+
+	for _, c := range companies {
+		if c.AssistantUserID != nil && *c.AssistantUserID > 0 {
+			if _, ok := assistantSeen[*c.AssistantUserID]; !ok {
+				assistantSeen[*c.AssistantUserID] = struct{}{}
+				assistants = append(assistants, CredentialFilterUserOption{
+					UserID:   *c.AssistantUserID,
+					Username: userUsername(c.Assistant),
+				})
+			}
+		}
+		if c.SupervisorUserID != nil && *c.SupervisorUserID > 0 {
+			if _, ok := supervisorSeen[*c.SupervisorUserID]; !ok {
+				supervisorSeen[*c.SupervisorUserID] = struct{}{}
+				supervisors = append(supervisors, CredentialFilterUserOption{
+					UserID:   *c.SupervisorUserID,
+					Username: userUsername(c.Supervisor),
+				})
+			}
+		}
+	}
+
+	sortCredentialFilterUsers(assistants)
+	sortCredentialFilterUsers(supervisors)
+
+	digColorsJSON := ""
+	if cfg, err := NewConfigService().GetFirmConfig(); err == nil && cfg != nil {
+		digColorsJSON = strings.TrimSpace(cfg.ClavesSolDigColorsJSON)
+	}
+
+	return &CompanyAccessCredentialFilterFacets{
+		Assistants:             assistants,
+		Supervisors:            supervisors,
+		ClavesSolDigColorsJSON: digColorsJSON,
+	}, nil
+}
+
+func sortCredentialFilterUsers(list []CredentialFilterUserOption) {
+	sort.Slice(list, func(i, j int) bool {
+		a := strings.ToLower(list[i].Username)
+		b := strings.ToLower(list[j].Username)
+		if a == b {
+			return list[i].UserID < list[j].UserID
+		}
+		return a < b
+	})
 }
 
 func (s *CompanyAccessCredentialService) GetByCompanyID(companyID uint, allowed []uint) (*CompanyAccessCredentialRow, error) {

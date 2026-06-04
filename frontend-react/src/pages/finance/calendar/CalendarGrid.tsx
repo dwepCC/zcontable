@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { FinanceCalendarActivity, FinanceCalendarMark } from '../../../services/financeCalendar';
-import ActivityEventBar from './ActivityEventBar';
 import {
   WEEKDAYS,
   applyActivityDatePatch,
@@ -10,7 +9,6 @@ import {
   markStyles,
   marksByDayKey,
   activitiesForDay,
-  weekSegments,
   trafficStyles,
   type ActivityDatePatch,
   type CalendarCell,
@@ -18,8 +16,7 @@ import {
 import { useCalendarDrag, type DragPreview } from './useCalendarDrag';
 
 const MAX_VISIBLE_MARKS = 2;
-const MAX_VISIBLE_ACTIVITIES = 2;
-const EVENT_ROW_H = 22;
+const MAX_VISIBLE_ACTIVITIES = 3;
 
 type Props = {
   periodYm: string;
@@ -81,10 +78,10 @@ const CalendarGrid = ({
   const weeks = useMemo(() => chunkWeeks(cells), [cells]);
   const markMap = useMemo(() => marksByDayKey(marks), [marks]);
 
-  const handleBarClick = (a: FinanceCalendarActivity, e: React.MouseEvent) => {
+  const handleActivityChipClick = (a: FinanceCalendarActivity, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (wasDragged()) {
       e.preventDefault();
-      e.stopPropagation();
       return;
     }
     onActivityClick(a, e);
@@ -106,132 +103,98 @@ const CalendarGrid = ({
       </div>
 
       <div className="divide-y divide-slate-100">
-        {weeks.map((week, wi) => {
-          const segments = weekSegments(week, displayActivities);
-          const maxLane = segments.reduce((m, s) => Math.max(m, s.lane), -1);
-          const eventRows = maxLane + 1;
-          const eventPad = eventRows > 0 ? eventRows * EVENT_ROW_H + 6 : 0;
+        {weeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7" data-week-grid>
+            {week.map((cell) => {
+              const key = localDateKey(cell.date);
+              const dayMarks = cell.inMonth ? markMap.get(key) ?? [] : [];
+              const dayActs = cell.inMonth ? activitiesForDay(displayActivities, cell.dayNum) : [];
+              const selected = cell.inMonth && selectedDay === cell.dayNum;
+              const today = cell.inMonth && isToday(cell);
+              const dropHighlight = cell.inMonth && highlightDays.has(cell.dayNum);
+              const hiddenActs = Math.max(0, dayActs.length - MAX_VISIBLE_ACTIVITIES);
 
-          return (
-            <div key={wi} data-week-grid>
-              {eventRows > 0 ? (
+              return (
                 <div
-                  className="relative grid grid-cols-7 gap-px px-0.5 pt-1"
-                  style={{
-                    minHeight: eventPad,
-                    gridTemplateRows: `repeat(${eventRows}, ${EVENT_ROW_H}px)`,
+                  key={key}
+                  role={cell.inMonth ? 'button' : undefined}
+                  tabIndex={cell.inMonth ? 0 : undefined}
+                  data-cal-day={cell.inMonth ? cell.dayNum : undefined}
+                  onClick={() => cell.inMonth && onDayClick(cell.dayNum, cell.date)}
+                  onKeyDown={(e) => {
+                    if (cell.inMonth && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      onDayClick(cell.dayNum, cell.date);
+                    }
                   }}
+                  className={`min-h-[88px] sm:min-h-[100px] border-r border-slate-100 p-1.5 text-left transition-colors duration-150 last:border-r-0 outline-none focus-visible:ring-2 focus-visible:ring-primary-400/60 ${
+                    cell.inMonth
+                      ? `hover:bg-primary-50/40 ${selected ? 'bg-primary-50/80 ring-1 ring-inset ring-primary-200' : 'bg-white'} ${
+                          dropHighlight ? 'bg-primary-100/70 ring-1 ring-inset ring-primary-300' : ''
+                        } ${canInteract ? 'cursor-pointer' : 'cursor-default'}`
+                      : 'bg-slate-50/60 cursor-default'
+                  }`}
                 >
-                  {week.map((cell, colIdx) => (
+                  <span
+                    className={`inline-flex text-xs sm:text-sm font-semibold w-7 h-7 items-center justify-center rounded-full mb-1 transition-colors ${
+                      today ? 'bg-primary-600 text-white' : cell.inMonth ? 'text-slate-700' : 'text-slate-300'
+                    } ${dropHighlight && !today ? 'bg-primary-200 text-primary-900' : ''}`}
+                  >
+                    {cell.dayNum}
+                  </span>
+
+                  {dayMarks.slice(0, MAX_VISIBLE_MARKS).map((m) => (
                     <div
-                      key={`col-${colIdx}`}
-                      data-week-col={colIdx}
-                      data-cal-day={cell.inMonth ? cell.dayNum : undefined}
-                      className="absolute top-0 bottom-0 pointer-events-none"
-                      style={{ left: `${(colIdx / 7) * 100}%`, width: `${100 / 7}%` }}
-                      aria-hidden
-                    />
-                  ))}
-                  {segments.map((seg) => (
-                    <ActivityEventBar
-                      key={`${seg.activity.id}-${seg.colStart}-${wi}`}
-                      segment={seg}
-                      canInteract={canInteract}
-                      isDragging={draggingId === seg.activity.id}
-                      previewPatch={
-                        dragPreview?.activityId === seg.activity.id ? dragPreview.patch : null
-                      }
-                      onPointerDownMove={(e, act) => startDrag(e, act, 'move')}
-                      onPointerDownResize={(e, act, mode) => startDrag(e, act, mode)}
-                      onClick={handleBarClick}
-                    />
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-7">
-                {week.map((cell) => {
-                  const key = localDateKey(cell.date);
-                  const dayMarks = cell.inMonth ? markMap.get(key) ?? [] : [];
-                  const dayActs = cell.inMonth ? activitiesForDay(displayActivities, cell.dayNum) : [];
-                  const selected = cell.inMonth && selectedDay === cell.dayNum;
-                  const today = cell.inMonth && isToday(cell);
-                  const dropHighlight = cell.inMonth && highlightDays.has(cell.dayNum);
-                  const hiddenActs = Math.max(0, dayActs.length - MAX_VISIBLE_ACTIVITIES);
-
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      disabled={!cell.inMonth}
-                      data-cal-day={cell.inMonth ? cell.dayNum : undefined}
-                      onClick={() => cell.inMonth && onDayClick(cell.dayNum, cell.date)}
-                      className={`min-h-[88px] sm:min-h-[100px] border-r border-slate-100 p-1.5 text-left transition-colors duration-150 last:border-r-0 ${
-                        cell.inMonth
-                          ? `hover:bg-primary-50/40 ${selected ? 'bg-primary-50/80 ring-1 ring-inset ring-primary-200' : 'bg-white'} ${
-                              dropHighlight ? 'bg-primary-100/70 ring-1 ring-inset ring-primary-300' : ''
-                            } ${canInteract ? 'cursor-pointer' : 'cursor-default'}`
-                          : 'bg-slate-50/60 cursor-default'
-                      }`}
+                      key={m.id}
+                      className={`text-[10px] rounded-md border px-1 py-0.5 mb-0.5 truncate ${markStyles(m.kind)}`}
+                      title={m.label}
                     >
-                      <span
-                        className={`inline-flex text-xs sm:text-sm font-semibold w-7 h-7 items-center justify-center rounded-full mb-1 transition-colors ${
-                          today ? 'bg-primary-600 text-white' : cell.inMonth ? 'text-slate-700' : 'text-slate-300'
-                        } ${dropHighlight && !today ? 'bg-primary-200 text-primary-900' : ''}`}
+                      {m.kind === 'feriado' ? '🏛 ' : m.kind === 'festividad' ? '🎉 ' : '📌 '}
+                      {m.label}
+                    </div>
+                  ))}
+
+                  {dayActs.slice(0, MAX_VISIBLE_ACTIVITIES).map((a) => {
+                    const st = trafficStyles(a.traffic_light || 'azul');
+                    const isDragging = draggingId === a.id;
+                    return (
+                      <div
+                        key={a.id}
+                        role="presentation"
+                        title={a.name}
+                        onClick={(e) => handleActivityChipClick(a, e)}
+                        onPointerDown={(e) => {
+                          if (!canInteract) return;
+                          e.stopPropagation();
+                          startDrag(e, a, 'move');
+                        }}
+                        className={`text-[10px] rounded-md border px-1 py-0.5 mb-0.5 truncate select-none touch-none ${st.bar} ${
+                          isDragging ? 'opacity-60 ring-2 ring-primary-300/50 shadow-sm' : 'hover:shadow-sm'
+                        } ${canInteract ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
                       >
-                        {cell.dayNum}
-                      </span>
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full mr-0.5 align-middle ${st.dot}`} />
+                        {a.name}
+                      </div>
+                    );
+                  })}
 
-                      {dayMarks.slice(0, MAX_VISIBLE_MARKS).map((m) => (
-                        <div
-                          key={m.id}
-                          className={`text-[10px] rounded-md border px-1 py-0.5 mb-0.5 truncate ${markStyles(m.kind)}`}
-                          title={m.label}
-                        >
-                          {m.kind === 'feriado' ? '🏛 ' : m.kind === 'festividad' ? '🎉 ' : '📌 '}
-                          {m.label}
-                        </div>
-                      ))}
-
-                      {dayActs.slice(0, MAX_VISIBLE_ACTIVITIES).map((a) => {
-                        const st = trafficStyles(a.traffic_light || 'azul');
-                        return (
-                          <div
-                            key={a.id}
-                            className={`hidden sm:block text-[10px] rounded-md border px-1 py-0.5 mb-0.5 truncate ${st.bar}`}
-                            title={a.name}
-                          >
-                            {a.name}
-                          </div>
-                        );
-                      })}
-
-                      {hiddenActs > 0 ? (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOverflowClick(cell.dayNum);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.stopPropagation();
-                              onOverflowClick(cell.dayNum);
-                            }
-                          }}
-                          className="text-[10px] text-primary-700 font-medium hover:underline"
-                        >
-                          +{hiddenActs} más
-                        </span>
-                      ) : null}
+                  {hiddenActs > 0 ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOverflowClick(cell.dayNum);
+                      }}
+                      className="text-[10px] text-primary-700 font-medium hover:underline"
+                    >
+                      +{hiddenActs} más
                     </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

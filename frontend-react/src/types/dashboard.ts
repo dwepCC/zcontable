@@ -310,6 +310,8 @@ export interface FirmConfig {
   statement_payment_qr_caption?: string;
   /** true si ya hay clave de operaciones registrada (el hash no se expone). */
   operations_key_configured?: boolean;
+  /** JSON colores pastel por dígito 1–9 para claves SOL (p. ej. {"1":"sky","2":"emerald"}). */
+  claves_sol_dig_colors_json?: string;
   created_at?: string;
   updated_at?: string;
 }

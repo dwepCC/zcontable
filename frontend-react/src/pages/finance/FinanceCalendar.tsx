@@ -27,7 +27,6 @@ import {
 
 const emptyActivityForm = (day: number): ActivityFormData => ({
   name: '',
-  description: '',
   activity_kind: 'nps',
   start_day: day,
   end_day: day,
@@ -82,11 +81,12 @@ const FinanceCalendar = () => {
     setActivities(detail?.activities ?? []);
   }, [detail?.activities]);
 
-  const loadDetail = useCallback(async () => {
-    if (!periodYm) return;
+  const loadDetail = useCallback(async (ym?: string) => {
+    const target = (ym ?? periodYm).trim();
+    if (!target) return;
     try {
       setLoading(true);
-      setDetail(await financeCalendarService.get(periodYm));
+      setDetail(await financeCalendarService.get(target));
       setMsg('');
     } catch {
       setDetail(null);
@@ -232,12 +232,13 @@ const FinanceCalendar = () => {
 
   const saveActivity = async (data: ActivityFormData) => {
     if (!detail) return;
+    const payload = { ...data, description: '' };
     setSaving(true);
     try {
       if (activityModal.edit) {
-        await financeCalendarService.updateActivity(activityModal.edit.id, data);
+        await financeCalendarService.updateActivity(activityModal.edit.id, payload);
       } else {
-        await financeCalendarService.addActivity(detail.id, data);
+        await financeCalendarService.addActivity(detail.id, payload);
       }
       setActivityModal({ open: false });
       await loadDetail();
@@ -328,7 +329,6 @@ const FinanceCalendar = () => {
   const activityInitial: ActivityFormData = activityModal.edit
     ? {
         name: activityModal.edit.name,
-        description: activityModal.edit.description ?? '',
         activity_kind: activityModal.edit.activity_kind,
         start_day: activityModal.edit.start_day || activityModal.edit.due_day,
         end_day: activityModal.edit.end_day || activityModal.edit.due_day,
@@ -458,7 +458,11 @@ const FinanceCalendar = () => {
               try {
                 await financeCalendarService.create(ym, notes);
                 setCreateOpen(false);
-                setPeriodYm(ym);
+                if (ym !== periodYm) {
+                  setPeriodYm(ym);
+                } else {
+                  await loadDetail(ym);
+                }
                 setMsg('Calendario creado');
                 setMsgType('success');
               } catch (e: unknown) {
@@ -481,7 +485,7 @@ const FinanceCalendar = () => {
                 await financeCalendarService.duplicate(periodYm, toYm, opts);
                 setDuplicateOpen(false);
                 setPeriodYm(toYm);
-                await loadDetail();
+                await loadDetail(toYm);
                 setMsg('Calendario duplicado correctamente');
                 setMsgType('success');
               } catch {

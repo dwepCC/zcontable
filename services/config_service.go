@@ -63,6 +63,7 @@ func (s *ConfigService) UpdateFirmConfig(input *models.FirmConfig, operationsKey
 	cfg.StatementBankInfo = input.StatementBankInfo
 	cfg.StatementPaymentObservations = input.StatementPaymentObservations
 	cfg.StatementPaymentQrCaption = input.StatementPaymentQrCaption
+	cfg.ClavesSolDigColorsJSON = input.ClavesSolDigColorsJSON
 	if err := ApplyOperationsKeyPlain(cfg, operationsKeyPlain); err != nil {
 		return nil, err
 	}

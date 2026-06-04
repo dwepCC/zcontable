@@ -25,6 +25,8 @@ type FirmConfig struct {
 	StatementPaymentQrCaption      string `gorm:"size:120" json:"statement_payment_qr_caption"`
 	OperationsKeyHash              string `gorm:"type:text" json:"-"`
 	OperationsKeyConfigured        bool   `gorm:"-" json:"operations_key_configured"`
+	// JSON {"1":"sky","2":"emerald",...} colores pastel por dígito (claves SOL).
+	ClavesSolDigColorsJSON string `gorm:"type:text" json:"claves_sol_dig_colors_json,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
