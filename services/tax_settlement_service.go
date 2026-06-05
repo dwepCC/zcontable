@@ -55,6 +55,11 @@ func documentPreviewConcept(d models.Document) string {
 }
 
 func (s *TaxSettlementService) PreviewOpenDocuments(companyID uint, asOf *time.Time) ([]SettlementPreviewLine, error) {
+	debtSvc := debtsvc.NewService()
+	closedOrigins, err := debtSvc.ClosedSettlementDebtOrigins(database.DB, companyID)
+	if err != nil {
+		return nil, err
+	}
 	var docs []models.Document
 	q := database.DB.Where("company_id = ? AND status IN ?", companyID, []string{"pendiente", "parcial"}).
 		Preload("Items", func(db *gorm.DB) *gorm.DB {
@@ -67,6 +72,13 @@ func (s *TaxSettlementService) PreviewOpenDocuments(companyID uint, asOf *time.T
 	out := make([]SettlementPreviewLine, 0, len(docs))
 	for _, d := range docs {
 		if !debtsvc.IsActiveDebt(&d) {
+			continue
+		}
+		skip, err := debtSvc.IsExcludedFromAutoPreview(database.DB, &d, closedOrigins)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
 			continue
 		}
 		bal := d.BalanceAmount
@@ -685,6 +697,9 @@ func (s *TaxSettlementService) Delete(id uint) error {
 		}).First(&ts, id).Error; err != nil {
 			return err
 		}
+		if ts.Status == models.TaxSettlementStatusClosed {
+			return errors.New("no se puede eliminar una liquidación cerrada; es un registro histórico")
+		}
 
 		if ts.Status == models.TaxSettlementStatusIssued {
 			if err := s.revertSettlementPaymentsAndFiscal(tx, &ts); err != nil {
@@ -720,6 +735,9 @@ func (s *TaxSettlementService) RevertToDraft(id uint) (*models.TaxSettlement, er
 		}
 		if ts.Status == models.TaxSettlementStatusDraft {
 			return nil
+		}
+		if ts.Status == models.TaxSettlementStatusClosed {
+			return errors.New("no se puede revertir una liquidación cerrada")
 		}
 		if ts.Status != models.TaxSettlementStatusIssued {
 			return errors.New("solo se puede revertir una liquidación emitida")
@@ -764,10 +782,11 @@ func (s *TaxSettlementService) revertSettlementPaymentsAndFiscal(tx *gorm.DB, ts
 
 // SettlementDebtsContext deudas vinculadas y abiertas no vinculadas para editar/emitir liquidación.
 type SettlementDebtsContext struct {
-	TaxSettlementID uint                        `json:"tax_settlement_id"`
-	CompanyID       uint                        `json:"company_id"`
-	Linked          []debtsvc.SettlementDebtRow `json:"linked"`
-	Unlinked        []debtsvc.SettlementDebtRow `json:"unlinked"`
+	TaxSettlementID            uint                        `json:"tax_settlement_id"`
+	CompanyID                  uint                        `json:"company_id"`
+	Linked                     []debtsvc.SettlementDebtRow `json:"linked"`
+	Unlinked                   []debtsvc.SettlementDebtRow `json:"unlinked"`
+	PendingFromPreviousCount   int                         `json:"pending_from_previous_count"`
 }
 
 func (s *TaxSettlementService) DebtsContext(settlementID uint) (*SettlementDebtsContext, error) {
@@ -776,7 +795,7 @@ func (s *TaxSettlementService) DebtsContext(settlementID uint) (*SettlementDebts
 		return nil, err
 	}
 	debtSvc := debtsvc.NewService()
-	linked, err := debtSvc.ListLinkedDebts(database.DB, ts.ID)
+	linked, err := debtSvc.ListDebtsForSettlementView(database.DB, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -784,11 +803,18 @@ func (s *TaxSettlementService) DebtsContext(settlementID uint) (*SettlementDebts
 	if err != nil {
 		return nil, err
 	}
+	prevCount := 0
+	for _, row := range unlinked {
+		if row.FromPreviousSettlement {
+			prevCount++
+		}
+	}
 	return &SettlementDebtsContext{
-		TaxSettlementID: ts.ID,
-		CompanyID:       ts.CompanyID,
-		Linked:          linked,
-		Unlinked:        unlinked,
+		TaxSettlementID:          ts.ID,
+		CompanyID:                  ts.CompanyID,
+		Linked:                     linked,
+		Unlinked:                   unlinked,
+		PendingFromPreviousCount:   prevCount,
 	}, nil
 }
 
@@ -823,8 +849,8 @@ func (s *TaxSettlementService) LinkDebtToDraft(settlementID uint, in LinkDebtInp
 	if bal <= debtsvc.MoneyEpsilon {
 		return nil, errors.New("la deuda no tiene saldo pendiente")
 	}
-	if doc.TaxSettlementID != nil && *doc.TaxSettlementID != 0 && *doc.TaxSettlementID != ts.ID {
-		return nil, errors.New("la deuda ya está vinculada a otra liquidación")
+	if err := debtSvc.AssertCanLinkDocumentToSettlement(database.DB, &doc, ts.ID); err != nil {
+		return nil, err
 	}
 	amt := in.Amount
 	if amt <= 0 {
@@ -865,4 +891,56 @@ func (s *TaxSettlementService) LinkDebtToDraft(settlementID uint, in LinkDebtInp
 		return nil, err
 	}
 	return s.GetByID(settlementID)
+}
+
+// PendingDebtsFromClosedSettlements deudas abiertas liberadas de liquidaciones cerradas (para alertas al crear nueva).
+func (s *TaxSettlementService) PendingDebtsFromClosedSettlements(companyID uint) (int, []debtsvc.SettlementDebtRow, error) {
+	debtSvc := debtsvc.NewService()
+	unlinked, err := debtSvc.ListUnlinkedOpenDebts(database.DB, companyID)
+	if err != nil {
+		return 0, nil, err
+	}
+	out := make([]debtsvc.SettlementDebtRow, 0)
+	for _, row := range unlinked {
+		if row.FromPreviousSettlement {
+			out = append(out, row)
+		}
+	}
+	return len(out), out, nil
+}
+
+// Close pasa una liquidación emitida a cerrada: congela el historial de deudas y libera saldos pendientes.
+func (s *TaxSettlementService) Close(id uint) (*models.TaxSettlement, error) {
+	var outID uint
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var ts models.TaxSettlement
+		if err := tx.Preload("Lines", func(db *gorm.DB) *gorm.DB {
+			return db.Order("sort_order ASC, id ASC")
+		}).First(&ts, id).Error; err != nil {
+			return err
+		}
+		if ts.Status == models.TaxSettlementStatusClosed {
+			outID = ts.ID
+			return nil
+		}
+		if ts.Status != models.TaxSettlementStatusIssued {
+			return errors.New("solo se pueden cerrar liquidaciones emitidas")
+		}
+		debtSvc := debtsvc.NewService()
+		if err := debtSvc.SnapshotAndReleaseOpenDebtsOnClose(tx, ts.ID, ts.Lines); err != nil {
+			return err
+		}
+		now := time.Now()
+		ts.Status = models.TaxSettlementStatusClosed
+		ts.ClosedAt = &now
+		if err := tx.Save(&ts).Error; err != nil {
+			return err
+		}
+		outID = ts.ID
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetByID(outID)
 }

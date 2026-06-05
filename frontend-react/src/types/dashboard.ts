@@ -274,6 +274,7 @@ export interface TaxSettlement {
   period_from?: string | null;
   period_to?: string | null;
   status: string;
+  closed_at?: string | null;
   notes?: string;
   pdt621_json?: string;
   total_honorarios: number;

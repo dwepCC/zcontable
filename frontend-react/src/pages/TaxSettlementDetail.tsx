@@ -32,6 +32,8 @@ const TaxSettlementDetail = () => {
   const [error, setError] = useState('');
   const [emitting, setEmitting] = useState(false);
   const [emitDialogOpen, setEmitDialogOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteKeyOpen, setDeleteKeyOpen] = useState(false);
@@ -125,6 +127,43 @@ const TaxSettlementDetail = () => {
       });
     }
   }, [loading, row, location.hash]);
+
+  const settlementStatusLabel = (s: string) => {
+    if (s === 'emitida') return 'Emitida';
+    if (s === 'borrador') return 'Borrador';
+    if (s === 'cerrada') return 'Cerrada';
+    if (s === 'anulada') return 'Anulada';
+    return s;
+  };
+
+  const performClose = async () => {
+    if (!settlementId) return;
+    setClosing(true);
+    try {
+      const updated = await taxSettlementsService.close(settlementId);
+      setRow(updated);
+      setCloseDialogOpen(false);
+      await reloadDebtsContext();
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'success',
+            message: 'Liquidación cerrada. Quedó como registro histórico; las deudas pendientes pueden incorporarse a una nueva liquidación.',
+          },
+        }),
+      );
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : 'Error al cerrar';
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', { detail: { type: 'error', message: typeof msg === 'string' ? msg : 'Error al cerrar' } }),
+      );
+    } finally {
+      setClosing(false);
+    }
+  };
 
   const performEmit = async () => {
     if (!settlementId) return;
@@ -301,9 +340,7 @@ const TaxSettlementDetail = () => {
               <span className="text-slate-500">Sin datos de empresa</span>
             )}
             <span className="mx-2 text-slate-300">·</span>
-            <span className="text-slate-500">
-              {row.status === 'emitida' ? 'Emitida' : row.status === 'borrador' ? 'Borrador' : row.status}
-            </span>
+            <span className="text-slate-500">{settlementStatusLabel(row.status)}</span>
           </p>
         </div>
 
@@ -346,6 +383,21 @@ const TaxSettlementDetail = () => {
               <span className="hidden sm:inline">Liquidación saldada</span>
             </span>
           ) : null}
+          {row.status === 'emitida' && canUpdate ? (
+            <button
+              type="button"
+              onClick={() => setCloseDialogOpen(true)}
+              disabled={closing}
+              className={`${btnBase} border-slate-500 bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50`}
+            >
+              {closing ? (
+                <i className="fas fa-spinner fa-spin text-xs shrink-0" aria-hidden />
+              ) : (
+                <i className="fas fa-lock text-xs shrink-0" aria-hidden />
+              )}
+              Cerrar liquidación
+            </button>
+          ) : null}
           <Link
             to={`/payments/new?company_id=${row.company_id}`}
             className={`${btnBase} border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
@@ -382,7 +434,7 @@ const TaxSettlementDetail = () => {
             <i className={`fas ${exportingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'} text-xs shrink-0`} aria-hidden />
             {exportingPdf ? 'Generando PDF…' : 'PDF cliente'}
           </button>
-          {canUpdate ? (
+          {canUpdate && row.status !== 'cerrada' ? (
             <button
               type="button"
               onClick={() => setEditKeyOpen(true)}
@@ -392,7 +444,7 @@ const TaxSettlementDetail = () => {
               Editar
             </button>
           ) : null}
-          {canDelete ? (
+          {canDelete && row.status !== 'cerrada' ? (
             <button
               type="button"
               onClick={() => setDeleteDialogOpen(true)}
@@ -426,7 +478,14 @@ const TaxSettlementDetail = () => {
             <p className="text-slate-700 whitespace-pre-wrap">{row.notes}</p>
           </div>
         ) : null}
-        {row.status === 'emitida' ? (
+        {row.status === 'cerrada' ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <i className="fas fa-lock text-slate-500 mr-2" aria-hidden />
+            Liquidación cerrada
+            {row.closed_at ? ` el ${row.closed_at.slice(0, 10)}` : ''}. Registro histórico: no se puede editar ni eliminar. Las deudas muestran el estado al momento del cierre.
+          </div>
+        ) : null}
+        {row.status === 'emitida' || row.status === 'cerrada' ? (
           <div className="flex flex-wrap gap-4 pt-2 border-t border-slate-100">
             <div>
               <span className="text-xs font-medium text-slate-500">Honorarios / cargos</span>
@@ -448,7 +507,9 @@ const TaxSettlementDetail = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
-              <h3 className="text-sm font-semibold text-slate-800">Deudas vinculadas</h3>
+              <h3 className="text-sm font-semibold text-slate-800">
+                Deudas vinculadas{row.status === 'cerrada' ? ' (histórico al cierre)' : ''}
+              </h3>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -478,7 +539,12 @@ const TaxSettlementDetail = () => {
                         </td>
                         <td className="px-3 py-2 tabular-nums text-xs">{formatDebtPeriod(d)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatMoneyPen(d.balance_amount)}</td>
-                        <td className="px-3 py-2 capitalize text-slate-600">{d.status}</td>
+                        <td className="px-3 py-2 capitalize text-slate-600">
+                          {d.status}
+                          {d.historical_view ? (
+                            <span className="ml-1 text-[10px] uppercase text-slate-400">(cierre)</span>
+                          ) : null}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -487,10 +553,15 @@ const TaxSettlementDetail = () => {
             </div>
           </section>
 
+          {row.status !== 'cerrada' ? (
           <section className="bg-white rounded-xl border border-amber-100 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/80">
               <h3 className="text-sm font-semibold text-amber-950">Deudas pendientes no vinculadas</h3>
-              {debtsCtx.unlinked.length > 0 ? (
+              {(debtsCtx.pending_from_previous_count ?? 0) > 0 ? (
+                <p className="text-xs text-amber-900 mt-1">
+                  Hay {debtsCtx.pending_from_previous_count} deuda(s) pendiente(s) de liquidaciones cerradas anteriores. Incorpórelas manualmente si corresponde.
+                </p>
+              ) : debtsCtx.unlinked.length > 0 ? (
                 <p className="text-xs text-amber-900 mt-1">Existen deudas pendientes no incluidas en esta liquidación.</p>
               ) : null}
             </div>
@@ -521,6 +592,12 @@ const TaxSettlementDetail = () => {
                           <p className="text-slate-800 truncate max-w-[12rem]">
                             {stripLegacyMigrationNotes(d.description || '') || '—'}
                           </p>
+                          {d.from_previous_settlement && d.source_settlement_number ? (
+                            <p className="text-[10px] text-amber-800 mt-0.5">
+                              De liquidación {d.source_settlement_number}
+                              {d.source_settlement_period ? ` (${d.source_settlement_period})` : ''}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 tabular-nums text-xs">{formatDebtPeriod(d)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatMoneyPen(d.balance_amount)}</td>
@@ -543,6 +620,7 @@ const TaxSettlementDetail = () => {
               </table>
             </div>
           </section>
+          ) : null}
         </div>
       ) : null}
 
@@ -602,6 +680,23 @@ const TaxSettlementDetail = () => {
           if (!emitting) setEmitDialogOpen(false);
         }}
         onConfirm={() => void performEmit()}
+      />
+
+      <ConfirmDialog
+        open={closeDialogOpen}
+        title="Cerrar liquidación"
+        message={
+          row
+            ? `¿Cerrar la liquidación «${row.number?.trim() || '—'}»? Quedará como registro histórico inmutable. Se conservará el estado de cada deuda al momento del cierre. Las deudas con saldo pendiente podrán incorporarse manualmente a una nueva liquidación.`
+            : ''
+        }
+        confirmLabel="Sí, cerrar"
+        cancelLabel="Cancelar"
+        loading={closing}
+        onClose={() => {
+          if (!closing) setCloseDialogOpen(false);
+        }}
+        onConfirm={() => void performClose()}
       />
 
       <ConfirmDialog

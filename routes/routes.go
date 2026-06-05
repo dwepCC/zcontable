@@ -170,6 +170,7 @@ func Setup(app *fiber.App) {
 
 	// Liquidaciones de impuestos
 	api.Get("/companies/:id/settlements/preview", middleware.RequirePermission(rbac.TaxSettlementsPreview), taxSettleCtrl.PreviewSettlementsAPI)
+	api.Get("/companies/:id/settlements/pending-from-closed", middleware.RequirePermission(rbac.TaxSettlementsPreview), taxSettleCtrl.PendingFromClosedAPI)
 	api.Get("/tax-settlements", middleware.RequirePermission(rbac.TaxSettlementsList), taxSettleCtrl.ListAPI)
 	api.Post("/tax-settlements", middleware.RequirePermission(rbac.TaxSettlementsCreate), taxSettleCtrl.CreateAPI)
 	api.Get("/tax-settlements/:id/payment-suggestions", middleware.RequirePermission(rbac.TaxSettlementsPaymentSuggestions), taxSettleCtrl.PaymentSuggestionsAPI)
@@ -179,6 +180,7 @@ func Setup(app *fiber.App) {
 	api.Put("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.UpdateAPI)
 	api.Post("/tax-settlements/:id/revert-to-draft", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.RevertToDraftAPI)
 	api.Post("/tax-settlements/:id/emit", middleware.RequirePermission(rbac.TaxSettlementsEmit), taxSettleCtrl.EmitAPI)
+	api.Post("/tax-settlements/:id/close", middleware.RequirePermission(rbac.TaxSettlementsUpdate), taxSettleCtrl.CloseAPI)
 	api.Delete("/tax-settlements/:id", middleware.RequirePermission(rbac.TaxSettlementsDelete), taxSettleCtrl.DeleteAPI)
 
 	// Supervisores contables

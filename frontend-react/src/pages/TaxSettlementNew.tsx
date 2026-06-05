@@ -137,6 +137,7 @@ const TaxSettlementNew = () => {
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
+  const [pendingFromClosedCount, setPendingFromClosedCount] = useState(0);
   const [issueDate, setIssueDate] = useState(() => formatDateInput(new Date()));
   const [liquidationPeriod, setLiquidationPeriod] = useState(() => previousMonthYMFromDate(new Date()));
   const liquidationPeriodManualRef = useRef(false);
@@ -296,10 +297,12 @@ const TaxSettlementNew = () => {
     const id = Number(companyId);
     if (!Number.isFinite(id) || id <= 0) {
       setLines([]);
+      setPendingFromClosedCount(0);
       return;
     }
     const t = window.setTimeout(() => {
       void loadPreviewForCompany(id, { silent: true });
+      void taxSettlementsService.pendingFromClosed(id).then((r) => setPendingFromClosedCount(r.count)).catch(() => setPendingFromClosedCount(0));
     }, 450);
     return () => window.clearTimeout(t);
   }, [companyId, loadPreviewForCompany, isEdit]);
@@ -507,6 +510,13 @@ const TaxSettlementNew = () => {
       </div>
 
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+
+      {!isEdit && pendingFromClosedCount > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <i className="fas fa-exclamation-triangle mr-2 text-amber-600" aria-hidden />
+          Hay <strong>{pendingFromClosedCount}</strong> deuda(s) pendiente(s) de liquidaciones cerradas anteriores. No se importan automáticamente: después de crear el borrador, incorpórelas desde el detalle de la liquidación.
+        </div>
+      ) : null}
 
       <form
         onSubmit={(e) => void submit(e)}

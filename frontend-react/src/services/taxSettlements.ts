@@ -76,6 +76,11 @@ export interface SettlementDebtRow {
   has_period: boolean;
   period_month?: number;
   period_year?: number;
+  source_settlement_id?: number;
+  source_settlement_number?: string;
+  source_settlement_period?: string;
+  from_previous_settlement?: boolean;
+  historical_view?: boolean;
 }
 
 export interface SettlementDebtsContext {
@@ -83,6 +88,7 @@ export interface SettlementDebtsContext {
   company_id: number;
   linked: SettlementDebtRow[];
   unlinked: SettlementDebtRow[];
+  pending_from_previous_count?: number;
 }
 
 export const taxSettlementsService = {
@@ -137,6 +143,18 @@ export const taxSettlementsService = {
   async emit(id: number): Promise<TaxSettlement> {
     const res = await client.post<TaxSettlement>(`/tax-settlements/${id}/emit`, {});
     return res.data;
+  },
+
+  async close(id: number): Promise<TaxSettlement> {
+    const res = await client.post<TaxSettlement>(`/tax-settlements/${id}/close`, {});
+    return res.data;
+  },
+
+  async pendingFromClosed(companyId: number): Promise<{ count: number; items: SettlementDebtRow[] }> {
+    const res = await client.get<{ count: number; data: SettlementDebtRow[] }>(
+      `/companies/${companyId}/settlements/pending-from-closed`,
+    );
+    return { count: res.data?.count ?? 0, items: res.data?.data ?? [] };
   },
 
   async paymentSuggestions(id: number): Promise<PaymentSuggestionsResponse> {

@@ -159,7 +159,7 @@ func (s *CompanyAccessCredentialService) List(p CompanyAccessCredentialListParam
 	}
 
 	q := database.DB.Model(&models.Company{}).
-		Where("client_type = ?", models.CompanyClientTypeEstudio).
+		Where("client_type = ? AND status = ?", models.CompanyClientTypeEstudio, "activo").
 		Preload("Assistant").
 		Preload("Supervisor")
 
@@ -252,7 +252,7 @@ func normalizeCredentialDigFilter(d string) string {
 
 func (s *CompanyAccessCredentialService) FilterFacets(allowed []uint) (*CompanyAccessCredentialFilterFacets, error) {
 	q := database.DB.Model(&models.Company{}).
-		Where("client_type = ?", models.CompanyClientTypeEstudio)
+		Where("client_type = ? AND status = ?", models.CompanyClientTypeEstudio, "activo")
 	if allowed != nil {
 		if len(allowed) == 0 {
 			return &CompanyAccessCredentialFilterFacets{
@@ -325,7 +325,7 @@ func (s *CompanyAccessCredentialService) GetByCompanyID(companyID uint, allowed 
 		return nil, err
 	}
 	var company models.Company
-	if err := database.DB.Where("id = ? AND client_type = ?", companyID, models.CompanyClientTypeEstudio).
+	if err := database.DB.Where("id = ? AND client_type = ? AND status = ?", companyID, models.CompanyClientTypeEstudio, "activo").
 		Preload("Assistant").Preload("Supervisor").
 		First(&company).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -366,7 +366,7 @@ func (s *CompanyAccessCredentialService) Upsert(companyID uint, in CompanyAccess
 		return nil, err
 	}
 	var company models.Company
-	if err := database.DB.Where("id = ? AND client_type = ?", companyID, models.CompanyClientTypeEstudio).
+	if err := database.DB.Where("id = ? AND client_type = ? AND status = ?", companyID, models.CompanyClientTypeEstudio, "activo").
 		Preload("Assistant").Preload("Supervisor").
 		First(&company).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

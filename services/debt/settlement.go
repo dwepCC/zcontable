@@ -184,9 +184,8 @@ func (s *Service) linkDocumentToSettlement(tx *gorm.DB, documentID, companyID, s
 	if d.CompanyID != companyID {
 		return 0, errors.New("el documento no pertenece a la empresa de la liquidación")
 	}
-	// TODO: remove after migration — permitir re-vincular si ya estaba en otra liquidación anulada
-	if d.TaxSettlementID != nil && *d.TaxSettlementID != 0 && *d.TaxSettlementID != settlementID {
-		return 0, fmt.Errorf("la deuda %s ya está vinculada a otra liquidación", d.Number)
+	if err := s.assertCanLinkDocumentToSettlement(tx, &d, settlementID); err != nil {
+		return 0, err
 	}
 	if err := tx.Model(&models.Document{}).Where("id = ?", documentID).
 		Update("tax_settlement_id", settlementID).Error; err != nil {
@@ -269,6 +268,11 @@ type SettlementDebtRow struct {
 	HasPeriod        bool    `json:"has_period"`
 	PeriodMonth      *int16  `json:"period_month,omitempty"`
 	PeriodYear       *int16  `json:"period_year,omitempty"`
+	SourceSettlementID       *uint  `json:"source_settlement_id,omitempty"`
+	SourceSettlementNumber   string `json:"source_settlement_number,omitempty"`
+	SourceSettlementPeriod   string `json:"source_settlement_period,omitempty"`
+	FromPreviousSettlement   bool   `json:"from_previous_settlement,omitempty"`
+	HistoricalView           bool   `json:"historical_view,omitempty"`
 }
 
 // ListLinkedDebts deudas con tax_settlement_id = settlementID.
@@ -300,7 +304,7 @@ func (s *Service) ListUnlinkedOpenDebts(tx *gorm.DB, companyID uint) ([]Settleme
 			filtered = append(filtered, row)
 		}
 	}
-	return filtered, nil
+	return s.enrichUnlinkedWithClosedOrigins(tx, companyID, filtered)
 }
 
 // CleanupSettlementDebtsNotInLines desvincula o elimina deudas ya no referenciadas en líneas del borrador.

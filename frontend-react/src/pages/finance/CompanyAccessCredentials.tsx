@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'reac
 import { createPortal } from 'react-dom';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
+import Pagination from '../../components/Pagination';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import {
   companyAccessCredentialsService,
@@ -196,7 +197,7 @@ const CompanyAccessCredentials = () => {
 
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
-  const [perPage] = useState(20);
+  const [perPage, setPerPage] = useState(20);
   const [filterAssistantId, setFilterAssistantId] = useState<number | null>(null);
   const [filterSupervisorId, setFilterSupervisorId] = useState<number | null>(null);
   const [filterDig, setFilterDig] = useState<string | null>(null);
@@ -205,7 +206,6 @@ const CompanyAccessCredentials = () => {
   const [digColorMap, setDigColorMap] = useState<Record<string, ClavesSolPaletteId>>(() => parseDigColorMap());
   const [rows, setRows] = useState<CompanyAccessCredentialRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -269,7 +269,6 @@ const CompanyAccessCredentials = () => {
       });
       setRows(res.data ?? []);
       setTotal(res.total ?? 0);
-      setTotalPages(res.total_pages ?? 0);
     } catch (e) {
       console.error(e);
       setError('No se pudo cargar el listado de claves.');
@@ -282,6 +281,15 @@ const CompanyAccessCredentials = () => {
     setFilterAssistantId(null);
     setFilterSupervisorId(null);
     setFilterDig(null);
+    setPage(1);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    setPage(nextPage);
+  };
+
+  const handlePerPageChange = (nextPerPage: number) => {
+    setPerPage(nextPerPage);
     setPage(1);
   };
 
@@ -549,7 +557,7 @@ const CompanyAccessCredentials = () => {
         )}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+      <div className="flex flex-wrap items-center gap-3 bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
           <input
@@ -563,7 +571,7 @@ const CompanyAccessCredentials = () => {
             placeholder="RUC, razón social o código (mín. 2 caracteres)…"
           />
         </div>
-        <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none shrink-0">
           <input
             type="checkbox"
             checked={showSecrets}
@@ -572,6 +580,15 @@ const CompanyAccessCredentials = () => {
           />
           Mostrar contraseñas
         </label>
+        <div
+          className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-1 shrink-0 min-w-[9.5rem]"
+          aria-live="polite"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Empresas</p>
+          <p className="text-lg font-semibold text-slate-800 tabular-nums leading-tight mt-0.5">
+            {loading ? '—' : total}
+          </p>
+        </div>
       </div>
 
       {error ? (
@@ -610,7 +627,7 @@ const CompanyAccessCredentials = () => {
           <table className="min-w-[1400px] w-full text-left border-collapse">
             <thead>
               <tr>
-                <th colSpan={2} className={TH_GROUP}>
+                <th colSpan={3} className={TH_GROUP}>
                   Columnas generales
                 </th>
                 <th colSpan={6} className={TH_GROUP}>
@@ -633,6 +650,7 @@ const CompanyAccessCredentials = () => {
                 </th>
               </tr>
               <tr>
+                <th className={TH_COL}>N°</th>
                 <th className={TH_COL}>Cod</th>
                 <th className={TH_COL}>Dig</th>
                 <th className={TH_COL}>Razón social</th>
@@ -655,22 +673,24 @@ const CompanyAccessCredentials = () => {
             <tbody>
               {loading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={19} className="px-4 py-8 text-center text-slate-500 text-sm">
                     <i className="fas fa-spinner fa-spin mr-2" aria-hidden />
                     Cargando…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={19} className="px-4 py-8 text-center text-slate-500 text-sm">
                     No hay empresas para mostrar.
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => {
+                rows.map((row, index) => {
                   const rowBg = getDigRowClass(row.dig, digColorMap);
+                  const rowNum = (page - 1) * perPage + index + 1;
                   return (
                   <tr key={row.company_id} className={`group ${rowBg}`}>
+                    <td className={`${TD} text-center text-slate-500 tabular-nums w-10`}>{rowNum}</td>
                     <td className={`${TD} font-mono`}>{row.code || '—'}</td>
                     <td className={TD}>{row.dig || '—'}</td>
                     <td className={`${TD} max-w-[12rem] font-medium`} title={row.business_name}>
@@ -737,31 +757,15 @@ const CompanyAccessCredentials = () => {
             </tbody>
           </table>
         </div>
-        {totalPages > 1 ? (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-600">
-            <span>
-              {total} empresa(s) · página {page} de {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="px-3 py-1 rounded-lg border border-slate-200 disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                type="button"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded-lg border border-slate-200 disabled:opacity-40"
-              >
-                Siguiente
-              </button>
-            </div>
-          </div>
-        ) : null}
+        <div className="px-4 sm:px-6 py-4 border-t border-slate-100">
+          <Pagination
+            page={page}
+            perPage={perPage}
+            total={total}
+            onPageChange={handlePageChange}
+            onPerPageChange={handlePerPageChange}
+          />
+        </div>
       </div>
 
       {editOpen && editRow
