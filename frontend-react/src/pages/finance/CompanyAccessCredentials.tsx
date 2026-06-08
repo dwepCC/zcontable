@@ -136,15 +136,23 @@ const TD_ACTIONS =
 const FILTER_SECTION =
   'rounded-lg border border-slate-200 bg-slate-50/50 min-w-0 flex flex-col overflow-hidden';
 
-const FILTER_SECTION_TITLE = 'text-xs font-semibold text-slate-700 px-2 pt-2 mb-1.5 shrink-0';
+const FILTER_SECTION_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-slate-500 px-2 pt-1.5 mb-1 shrink-0';
 
-const FILTER_SECTION_BODY = 'px-2 pb-2';
+const FILTER_SECTION_BODY = 'px-2 pb-1.5';
 
-function filterChipClass(active: boolean, compact = false): string {
+function filterChipClass(active: boolean, variant: 'default' | 'user' = 'default'): string {
+  if (variant === 'user') {
+    return [
+      'w-full px-1.5 py-0.5 rounded border text-[10px] font-normal leading-snug',
+      'text-left whitespace-normal break-words',
+      active
+        ? 'border-primary-400 bg-primary-50 text-primary-800'
+        : 'border-slate-200/90 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+    ].join(' ');
+  }
   return [
-    compact ? 'min-h-[2.25rem] px-1 py-1' : 'min-h-[2.25rem] px-2.5 py-1.5',
-    'rounded-md border text-xs font-medium transition',
-    compact ? 'font-mono' : 'text-center break-words leading-snug',
+    'min-h-[2.25rem] px-2.5 py-1.5 rounded-md border text-xs font-medium transition',
+    'text-center break-words leading-snug',
     active
       ? 'border-primary-500 bg-primary-50 text-primary-900 ring-2 ring-primary-400/50'
       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -166,9 +174,9 @@ function FilterUserGrid({
     <div className={`${FILTER_SECTION} flex-1`}>
       <p className={FILTER_SECTION_TITLE}>{title}</p>
       {users.length === 0 ? (
-        <p className={`text-xs text-slate-400 ${FILTER_SECTION_BODY}`}>Sin asignaciones</p>
+        <p className={`text-[10px] text-slate-400 ${FILTER_SECTION_BODY}`}>Sin asignaciones</p>
       ) : (
-        <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 ${FILTER_SECTION_BODY}`}>
+        <div className={`grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1 ${FILTER_SECTION_BODY}`}>
           {users.map((u) => {
             const active = selectedId === u.user_id;
             const label = (u.username || '').trim() || `#${u.user_id}`;
@@ -176,8 +184,7 @@ function FilterUserGrid({
               <button
                 key={u.user_id}
                 type="button"
-                title={label}
-                className={filterChipClass(active)}
+                className={filterChipClass(active, 'user')}
                 onClick={() => onSelect(active ? null : u.user_id)}
               >
                 {label}
@@ -529,9 +536,9 @@ const CompanyAccessCredentials = () => {
                 setPage(1);
               }}
             />
-            <div className={`${FILTER_SECTION} w-full sm:w-[9.25rem] shrink-0`}>
+            <div className={`${FILTER_SECTION} w-full sm:w-[11rem] shrink-0`}>
               <p className={FILTER_SECTION_TITLE}>Dígitos</p>
-              <div className={`grid grid-cols-4 gap-1.5 ${FILTER_SECTION_BODY}`}>
+              <div className={`grid grid-cols-5 gap-1 ${FILTER_SECTION_BODY}`}>
                 {CLAVES_SOL_DIGIT_KEYS.map((key) => {
                   const active = filterDig === key;
                   const swatch = getPaletteSwatch(digColorMap[key] ?? 'slate');
@@ -540,14 +547,19 @@ const CompanyAccessCredentials = () => {
                       key={key}
                       type="button"
                       title={`Dígito ${key}`}
-                      className={`${filterChipClass(active, true)} flex flex-col items-center justify-center gap-0.5`}
+                      className={[
+                        'flex h-7 w-full items-center justify-center rounded border text-[10px] font-bold font-mono text-slate-800',
+                        swatch,
+                        active
+                          ? 'ring-2 ring-primary-500 ring-offset-1 border-primary-500'
+                          : 'border-slate-300/70 hover:brightness-95',
+                      ].join(' ')}
                       onClick={() => {
                         setFilterDig(active ? null : key);
                         setPage(1);
                       }}
                     >
-                      <span className={`w-3.5 h-3.5 rounded-sm ${swatch}`} aria-hidden />
-                      <span>{key}</span>
+                      {key}
                     </button>
                   );
                 })}
@@ -696,7 +708,7 @@ const CompanyAccessCredentials = () => {
                     <td className={`${TD} max-w-[12rem] font-medium`} title={row.business_name}>
                       {row.business_name || '—'}
                     </td>
-                    <td className={`${TD} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
+                    <CopyableCredentialCell value={row.ruc} cellClass={`${TD} whitespace-nowrap`} mono />
                     <CopyableCredentialCell value={row.sol_usuario} cellClass={TD} />
                     <CopyableCredentialCell
                       value={row.sol_clave}

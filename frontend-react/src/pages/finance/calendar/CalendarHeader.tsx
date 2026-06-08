@@ -17,6 +17,7 @@ type Props = {
   onExportPdf: () => void;
   onCloseCalendar: () => void;
   onReopenCalendar: () => void;
+  onAddActivity?: () => void;
 };
 
 const CalendarHeader = ({
@@ -34,6 +35,7 @@ const CalendarHeader = ({
   onExportPdf,
   onCloseCalendar,
   onReopenCalendar,
+  onAddActivity,
 }: Props) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -178,6 +180,18 @@ const CalendarHeader = ({
                 <i className="fas fa-file-pdf text-[10px] text-red-600" aria-hidden />
               )}
               PDF
+            </button>
+          ) : null}
+
+          {hasCalendar && canEdit && onAddActivity ? (
+            <button
+              type="button"
+              onClick={onAddActivity}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 text-white text-xs font-medium shadow-sm hover:bg-emerald-700 transition-colors"
+              title="Crear actividad (también puede hacer doble clic en un día)"
+            >
+              <i className="fas fa-plus text-[10px]" aria-hidden />
+              Nueva actividad
             </button>
           ) : null}
 
