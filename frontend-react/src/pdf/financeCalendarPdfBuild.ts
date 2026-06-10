@@ -20,7 +20,6 @@ export const CALENDAR_PDF_PUBLIC_FOOTER_LOGO = 'calendario-pdf-logo.png';
 const GREEN = rgb(0.08, 0.38, 0.18);
 const NAVY = rgb(0.05, 0.12, 0.38);
 const WHITE = rgb(1, 1, 1);
-const BLACK = rgb(0.1, 0.1, 0.1);
 const RED = rgb(0.75, 0.12, 0.12);
 const BLUE = rgb(0.1, 0.35, 0.65);
 const BORDER = rgb(0.82, 0.82, 0.82);
@@ -259,7 +258,6 @@ function drawPageHeader(
 
 function drawPageFooter(
   page: PDFPage,
-  font: PDFFont,
   fontBold: PDFFont,
   leftImg: PDFImage | null,
   rightImg: PDFImage | null,
@@ -454,7 +452,7 @@ export async function buildFinanceCalendarPdf(
 
   const pages = doc.getPages();
   const lastPage = pages[pages.length - 1]!;
-  drawPageFooter(lastPage, font, fontBold, footerLeftImg, footerLogoImg, notice);
+  drawPageFooter(lastPage, fontBold, footerLeftImg, footerLogoImg, notice);
 
   return doc.save();
 }
