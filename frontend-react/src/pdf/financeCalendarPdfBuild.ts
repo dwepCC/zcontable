@@ -10,7 +10,7 @@ import {
   formatPeriodPdfTitle,
   localDateKey,
   marksByDayKey,
-  activityColorHex,
+  activityTextDisplayColor,
 } from '../pages/finance/calendar/calendarUtils';
 
 /** Imágenes fijas en `frontend-react/public/` para el pie del PDF del calendario. */
@@ -200,7 +200,7 @@ function markColor(kind: string) {
 }
 
 function activityTextPdfColor(hex?: string) {
-  const h = activityColorHex(hex).replace('#', '');
+  const h = activityTextDisplayColor(hex).replace('#', '');
   return rgb(
     parseInt(h.slice(0, 2), 16) / 255,
     parseInt(h.slice(2, 4), 16) / 255,

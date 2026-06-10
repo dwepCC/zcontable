@@ -185,8 +185,8 @@ const CalendarGrid = ({
                             e.stopPropagation();
                             startDrag(e, a, 'move');
                           }}
-                          className={`text-[10px] leading-snug rounded-md border px-1 py-0.5 mb-0.5 select-none touch-none break-words whitespace-normal ${
-                            isDragging ? 'opacity-60 ring-2 ring-primary-300/50 shadow-sm' : 'hover:shadow-sm hover:brightness-95'
+                          className={`text-[10px] leading-snug rounded-md border px-1 py-0.5 mb-0.5 select-none touch-none break-words whitespace-normal font-bold ${
+                            isDragging ? 'opacity-60 ring-2 ring-primary-300/50 shadow-sm' : 'hover:bg-slate-50'
                           } cursor-pointer`}
                           style={chipStyle}
                           title="Clic para ver detalle"

@@ -34,7 +34,7 @@ export const MARK_KINDS = [
   { value: 'importante', label: 'Fecha importante' },
 ];
 
-/** Colores de fondo que el usuario puede elegir por actividad. */
+/** Colores sólidos/oscuros para el texto de actividades en el calendario web. */
 export const ACTIVITY_COLORS = [
   { value: '#0f172a', label: 'Negro' },
   { value: '#1d4ed8', label: 'Azul' },
@@ -72,15 +72,25 @@ function parseHexColor(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-/** Estilo del chip de actividad: color en fondo y borde, texto con contraste. */
-export function activityChipStyle(color?: string): CSSProperties {
+/** Oscurece colores claros/pasteles para que el texto sea legible y sólido. */
+export function activityTextDisplayColor(color?: string): string {
   const hex = activityColorHex(color);
   const { r, g, b } = parseHexColor(hex);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  if (luminance <= 0.55) return hex;
+  const factor = 0.42;
+  const toHex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${toHex(r * factor)}${toHex(g * factor)}${toHex(b * factor)}`;
+}
+
+/** Estilo del chip de actividad: color sólido en el texto (negrita), fondo neutro. */
+export function activityChipStyle(color?: string): CSSProperties {
+  const textColor = activityTextDisplayColor(color);
   return {
-    backgroundColor: hex,
-    borderColor: hex,
-    color: luminance > 0.62 ? '#0f172a' : '#ffffff',
+    color: textColor,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    fontWeight: 700,
   };
 }
 

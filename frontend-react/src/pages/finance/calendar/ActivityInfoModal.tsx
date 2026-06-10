@@ -94,7 +94,7 @@ const ActivityInfoModal = ({
             <dd className="text-slate-800">{priorityLabel(activity.priority)}</dd>
             <dt className="text-slate-500">Estado</dt>
             <dd className="text-slate-800">{statusLabel(activity.status || 'pendiente')}</dd>
-            <dt className="text-slate-500">Color de fondo</dt>
+            <dt className="text-slate-500">Color del texto</dt>
             <dd className="flex items-center gap-2 text-slate-800">
               <span
                 className="inline-block min-w-[4.5rem] rounded-md border px-2 py-0.5 text-xs font-medium"

@@ -93,7 +93,7 @@ const DaySidePanel = ({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p
-                        className="font-medium break-words whitespace-normal inline-block rounded-md border px-2 py-0.5 text-xs"
+                        className="font-bold break-words whitespace-normal inline-block rounded-md border px-2 py-0.5 text-xs"
                         style={activityChipStyle(a.text_color)}
                       >
                         {a.name}

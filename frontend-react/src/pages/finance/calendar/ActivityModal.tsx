@@ -156,7 +156,7 @@ const ActivityModal = ({ open, title, initial, lastDayOfMonth, saving, onClose, 
           </div>
 
           <div className="block text-sm">
-            <span className="font-medium text-slate-700">Color de fondo en el calendario</span>
+            <span className="font-medium text-slate-700">Color del texto en el calendario</span>
             <div className="mt-2 flex flex-wrap gap-2">
               {ACTIVITY_COLORS.map((c) => {
                 const selected = form.text_color === c.value;
