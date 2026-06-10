@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveAs } from 'file-saver';
 import { buildFinanceCalendarPdf, financeCalendarPdfFilename } from '../../pdf/financeCalendarPdfBuild';
+import { configService } from '../../services/config';
 import {
   financeCalendarService,
   type CalendarComplianceSummary,
@@ -303,7 +304,8 @@ const FinanceCalendar = () => {
     if (!detail) return;
     setPdfLoading(true);
     try {
-      const bytes = await buildFinanceCalendarPdf(detail);
+      const firm = await configService.getFirmBranding().catch(() => null);
+      const bytes = await buildFinanceCalendarPdf(detail, { firmLogoUrl: firm?.logo_url });
       const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
       saveAs(blob, financeCalendarPdfFilename(detail.period_ym));
       setMsg('PDF generado correctamente');

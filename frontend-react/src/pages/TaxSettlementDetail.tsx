@@ -9,6 +9,7 @@ import { P } from '../rbac/codes';
 import {
   generateTaxSettlementPdfBlob,
   getLogoPngBlobForPdf,
+  settlementTotalsForPdf,
   taxSettlementPdfFilename,
 } from '../pdf/taxSettlementDocument';
 import {
@@ -116,6 +117,37 @@ const TaxSettlementDetail = () => {
       setLinkingDebtId(null);
     }
   };
+
+  const settlementTotals = useMemo(() => {
+    if (!row) return null;
+    const t = settlementTotalsForPdf(row);
+    return {
+      honorarios: t.honorarios,
+      impuestos: t.impuestos,
+      total: t.total,
+    };
+  }, [row]);
+
+  const lineBreakdown = useMemo(() => {
+    let subDeudas = 0;
+    let subManual = 0;
+    for (const ln of row?.lines ?? []) {
+      const amount = Number(ln.amount) || 0;
+      if (ln.line_type === 'document_ref') subDeudas += amount;
+      else subManual += amount;
+    }
+    return { subDeudas, subManual, total: subDeudas + subManual };
+  }, [row?.lines]);
+
+  const linkedDebtsTotal = useMemo(
+    () => (debtsCtx?.linked ?? []).reduce((sum, d) => sum + (Number(d.balance_amount) || 0), 0),
+    [debtsCtx?.linked],
+  );
+
+  const unlinkedDebtsTotal = useMemo(
+    () => (debtsCtx?.unlinked ?? []).reduce((sum, d) => sum + (Number(d.balance_amount) || 0), 0),
+    [debtsCtx?.unlinked],
+  );
 
   useEffect(() => {
     if (loading || !row) return;
@@ -485,19 +517,19 @@ const TaxSettlementDetail = () => {
             {row.closed_at ? ` el ${row.closed_at.slice(0, 10)}` : ''}. Registro histórico: no se puede editar ni eliminar. Las deudas muestran el estado al momento del cierre.
           </div>
         ) : null}
-        {row.status === 'emitida' || row.status === 'cerrada' ? (
+        {settlementTotals && ((row.lines?.length ?? 0) > 0 || row.status === 'emitida' || row.status === 'cerrada') ? (
           <div className="flex flex-wrap gap-4 pt-2 border-t border-slate-100">
             <div>
               <span className="text-xs font-medium text-slate-500">Honorarios / cargos</span>
-              <p className="text-lg font-semibold tabular-nums">S/ {row.total_honorarios.toFixed(2)}</p>
+              <p className="text-lg font-semibold tabular-nums">S/ {settlementTotals.honorarios.toFixed(2)}</p>
             </div>
             <div>
               <span className="text-xs font-medium text-slate-500">Fiscal (PDT)</span>
-              <p className="text-lg font-semibold tabular-nums">S/ {row.total_impuestos.toFixed(2)}</p>
+              <p className="text-lg font-semibold tabular-nums">S/ {settlementTotals.impuestos.toFixed(2)}</p>
             </div>
             <div>
               <span className="text-xs font-medium text-slate-500">Total</span>
-              <p className="text-lg font-semibold tabular-nums text-primary-800">S/ {row.total_general.toFixed(2)}</p>
+              <p className="text-lg font-semibold tabular-nums text-primary-800">S/ {settlementTotals.total.toFixed(2)}</p>
             </div>
           </div>
         ) : null}
@@ -549,6 +581,19 @@ const TaxSettlementDetail = () => {
                     ))
                   )}
                 </tbody>
+                {debtsCtx.linked.length > 0 ? (
+                  <tfoot className="border-t border-slate-200 bg-slate-50/90">
+                    <tr>
+                      <td colSpan={2} className="px-3 py-2 text-right text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                        Total saldo vinculado
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">
+                        {formatMoneyPen(linkedDebtsTotal)}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </div>
           </section>
@@ -617,6 +662,22 @@ const TaxSettlementDetail = () => {
                     ))
                   )}
                 </tbody>
+                {debtsCtx.unlinked.length > 0 ? (
+                  <tfoot className="border-t border-amber-200 bg-amber-50/80">
+                    <tr>
+                      <td
+                        colSpan={2}
+                        className="px-3 py-2 text-right text-xs font-semibold text-amber-950 uppercase tracking-wide"
+                      >
+                        Total saldo pendiente
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-950">
+                        {formatMoneyPen(unlinkedDebtsTotal)}
+                      </td>
+                      {row.status === 'borrador' && canUpdate ? <td /> : null}
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </div>
           </section>
@@ -645,22 +706,62 @@ const TaxSettlementDetail = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {(row.lines ?? []).map((ln) => (
-              <tr key={ln.id ?? `${ln.concept}-${ln.sort_order}`}>
-                <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
-                <td className="px-4 py-3 text-slate-800">{stripLegacyMigrationNotes(ln.concept || '') || '—'}</td>
-                <td className="px-4 py-3 text-slate-600 tabular-nums text-xs font-mono">
-                  {(() => {
-                    const p = (ln.period_ym ?? '').trim();
-                    if (p) return p;
-                    if (ln.period_date && ln.period_date.length >= 10) return ln.period_date.slice(0, 10);
-                    return row.liquidation_period || '—';
-                  })()}
+            {(row.lines ?? []).length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-slate-500">
+                  Sin líneas en esta liquidación.
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium">S/ {ln.amount.toFixed(2)}</td>
               </tr>
-            ))}
+            ) : (
+              (row.lines ?? []).map((ln) => (
+                <tr key={ln.id ?? `${ln.concept}-${ln.sort_order}`}>
+                  <td className="px-4 py-3 text-slate-600">{lineTypeLabel(ln.line_type)}</td>
+                  <td className="px-4 py-3 text-slate-800">{stripLegacyMigrationNotes(ln.concept || '') || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 tabular-nums text-xs font-mono">
+                    {(() => {
+                      const p = (ln.period_ym ?? '').trim();
+                      if (p) return p;
+                      if (ln.period_date && ln.period_date.length >= 10) return ln.period_date.slice(0, 10);
+                      return row.liquidation_period || '—';
+                    })()}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium">S/ {Number(ln.amount).toFixed(2)}</td>
+                </tr>
+              ))
+            )}
           </tbody>
+          {(row.lines?.length ?? 0) > 0 ? (
+            <tfoot className="border-t border-slate-200 bg-slate-50/90 text-sm">
+              {lineBreakdown.subDeudas > 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-4 py-2 text-right text-slate-600">
+                    Subtotal deudas cargadas
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium text-slate-800">
+                    S/ {lineBreakdown.subDeudas.toFixed(2)}
+                  </td>
+                </tr>
+              ) : null}
+              {lineBreakdown.subManual > 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-4 py-2 text-right text-slate-600">
+                    Subtotal conceptos / servicios
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium text-slate-800">
+                    S/ {lineBreakdown.subManual.toFixed(2)}
+                  </td>
+                </tr>
+              ) : null}
+              <tr>
+                <td colSpan={3} className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Total líneas
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-base font-bold text-primary-800">
+                  S/ {lineBreakdown.total.toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
+          ) : null}
         </table>
         </div>
       </section>

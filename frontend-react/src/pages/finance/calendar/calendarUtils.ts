@@ -105,6 +105,12 @@ export function formatPeriodLabel(ym: string): string {
   return `${MONTH_NAMES[m - 1]} ${y}`;
 }
 
+/** Título del PDF del calendario, p. ej. «Junio-2026». */
+export function formatPeriodPdfTitle(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTH_NAMES[m - 1]}-${y}`;
+}
+
 /** Solo nombre del mes (sin año), para navegación compacta. */
 export function formatMonthName(ym: string): string {
   const m = Number(ym.split('-')[1]);
