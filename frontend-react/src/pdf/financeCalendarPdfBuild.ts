@@ -26,14 +26,28 @@ const BORDER = rgb(0.82, 0.82, 0.82);
 const LIGHT = rgb(0.96, 0.96, 0.96);
 
 const M = 28;
-const TOP_HEADER_H = 46;
+/** Espacio entre margen superior y inicio de la grilla (título justo encima). */
+const TOP_HEADER_H = 32;
+const TITLE_SIZE = 34;
+const TITLE_GRID_GAP = 5;
 const FOOTER_OJO_H = 16;
 const FOOTER_ROW_H = 68;
+const FOOTER_COL_PAD = 6;
+/** Logo zContable (pie derecho): más pequeño que el ancho de columna. */
+const FOOTER_LOGO_MAX_W = 168;
+const FOOTER_LOGO_MAX_H = 54;
+const CELL_PAD_X = 4;
 const FOOTER_TOTAL = FOOTER_OJO_H + FOOTER_ROW_H + 6;
 const HEADER_H = 22;
+/** Espacio entre la fila de días (LUNES–DOMINGO) y la primera semana del calendario. */
+const WEEKDAY_HEADER_BOTTOM_GAP = 8;
 const DAY_BAR_H = 14;
-const FONT = 6;
-const LINE_H = FONT + 2;
+const MARK_FONT = 6;
+const MARK_LINE_H = MARK_FONT + 2;
+/** Actividades: más grandes y en negrita para que el rojo (y otros colores) se lean en impresión. */
+const ACTIVITY_FONT = 7.5;
+const ACTIVITY_LINE_H = ACTIVITY_FONT + 2.5;
+const ACTIVITY_MAX_LINES = 5;
 const MIN_ROW_BODY_H = 48;
 const ROW_GAP = 1;
 const PAGE_W = 842;
@@ -41,12 +55,16 @@ const PAGE_H = 595;
 
 const FOOTER_NOTICE = 'REVISAR BUZONES LOS DIAS MIERCOLES Y SABADO';
 
-type PdfLine = { text: string; color: ReturnType<typeof rgb> };
+type PdfLine = {
+  text: string;
+  color: ReturnType<typeof rgb>;
+  kind: 'mark' | 'activity';
+};
 
 type WeekCellData = {
   cell: ReturnType<typeof buildMonthGrid>[number];
   lines: PdfLine[];
-  maxChars: number;
+  innerW: number;
 };
 
 export type FinanceCalendarPdfOptions = {
@@ -109,12 +127,105 @@ async function embedImageBytes(
   return tryEmbedPngJpeg(doc, new Uint8Array(await png.arrayBuffer()));
 }
 
-function countVisualLines(lines: PdfLine[], maxChars: number): number {
-  let n = 0;
-  for (const item of lines) {
-    n += wrapLines(item.text, maxChars, 2).length;
+function maxLinesForKind(kind: PdfLine['kind']): number {
+  return kind === 'activity' ? ACTIVITY_MAX_LINES : 2;
+}
+
+function lineHeightForKind(kind: PdfLine['kind']): number {
+  return kind === 'activity' ? ACTIVITY_LINE_H : MARK_LINE_H;
+}
+
+function fontSizeForKind(kind: PdfLine['kind']): number {
+  return kind === 'activity' ? ACTIVITY_FONT : MARK_FONT;
+}
+
+function fontForKind(kind: PdfLine['kind'], font: PDFFont, fontBold: PDFFont): PDFFont {
+  return kind === 'activity' ? fontBold : font;
+}
+
+/** Ajuste de líneas por ancho real en pt (evita que el texto bold se salga de la celda). */
+function wrapLinesByWidth(
+  text: string,
+  face: PDFFont,
+  size: number,
+  maxWidthPt: number,
+  maxLines: number,
+): string[] {
+  const t = (text ?? '').trim();
+  if (!t || maxWidthPt <= 4) return [];
+
+  const fits = (s: string) => face.widthOfTextAtSize(s, size) <= maxWidthPt;
+  const lines: string[] = [];
+  let cur = '';
+
+  const flush = () => {
+    if (!cur) return;
+    lines.push(cur);
+    cur = '';
+  };
+
+  const pushLongToken = (token: string) => {
+    let chunk = '';
+    for (const ch of token) {
+      const next = chunk + ch;
+      if (fits(next)) {
+        chunk = next;
+      } else {
+        if (chunk) {
+          flush();
+          if (lines.length >= maxLines) return;
+        }
+        chunk = fits(ch) ? ch : '…';
+      }
+    }
+    cur = chunk;
+  };
+
+  for (const word of t.split(/\s+/).filter(Boolean)) {
+    if (lines.length >= maxLines) break;
+    const next = cur ? `${cur} ${word}` : word;
+    if (fits(next)) {
+      cur = next;
+      continue;
+    }
+    flush();
+    if (lines.length >= maxLines) break;
+    if (!fits(word)) {
+      pushLongToken(word);
+    } else {
+      cur = word;
+    }
   }
-  return n;
+  if (cur && lines.length < maxLines) lines.push(cur);
+  return lines;
+}
+
+function wrapPdfLines(
+  lines: PdfLine[],
+  innerW: number,
+  font: PDFFont,
+  fontBold: PDFFont,
+): Array<{ text: string; color: ReturnType<typeof rgb>; kind: PdfLine['kind'] }> {
+  const out: Array<{ text: string; color: ReturnType<typeof rgb>; kind: PdfLine['kind'] }> = [];
+  for (const item of lines) {
+    const size = fontSizeForKind(item.kind);
+    const face = fontForKind(item.kind, font, fontBold);
+    const wrapped = wrapLinesByWidth(item.text, face, size, innerW, maxLinesForKind(item.kind));
+    for (const text of wrapped) {
+      out.push({ text, color: item.color, kind: item.kind });
+    }
+  }
+  return out;
+}
+
+function totalTextBlockHeight(
+  lines: PdfLine[],
+  innerW: number,
+  font: PDFFont,
+  fontBold: PDFFont,
+): number {
+  const rendered = wrapPdfLines(lines, innerW, font, fontBold);
+  return rendered.reduce((sum, ln) => sum + lineHeightForKind(ln.kind), 0);
 }
 
 function buildWeekCellData(
@@ -122,29 +233,35 @@ function buildWeekCellData(
   markMap: ReturnType<typeof marksByDayKey>,
   acts: FinanceCalendarDetail['activities'],
   colW: number,
+  font: PDFFont,
+  fontBold: PDFFont,
 ): { cellData: WeekCellData[]; rowH: number } {
-  const maxChars = Math.max(8, Math.floor((colW - 1) / (FONT * 0.45)));
-  let maxVisualLines = 0;
+  const innerW = colW - 1 - CELL_PAD_X * 2;
+  let maxTextBlockH = 0;
 
   const cellData = week.map((cell) => {
     if (!cell.inMonth) {
-      return { cell, lines: [] as PdfLine[], maxChars };
+      return { cell, lines: [] as PdfLine[], innerW };
     }
     const key = localDateKey(cell.date);
     const lines: PdfLine[] = [];
     for (const m of markMap.get(key) ?? []) {
-      lines.push({ text: m.label.toUpperCase(), color: markColor(m.kind) });
+      lines.push({ text: m.label.toUpperCase(), color: markColor(m.kind), kind: 'mark' });
     }
     for (const a of activitiesForDay(acts ?? [], cell.dayNum)) {
       const { start, end } = activitySpanDays(a);
       const span = start !== end ? ` (${start}-${end})` : '';
-      lines.push({ text: `${a.name}${span}`, color: activityTextPdfColor(a.text_color) });
+      lines.push({
+        text: `${a.name}${span}`,
+        color: activityTextPdfColor(a.text_color),
+        kind: 'activity',
+      });
     }
-    maxVisualLines = Math.max(maxVisualLines, countVisualLines(lines, maxChars));
-    return { cell, lines, maxChars };
+    maxTextBlockH = Math.max(maxTextBlockH, totalTextBlockHeight(lines, innerW, font, fontBold));
+    return { cell, lines, innerW };
   });
 
-  const bodyH = Math.max(MIN_ROW_BODY_H, maxVisualLines * LINE_H + 4);
+  const bodyH = Math.max(MIN_ROW_BODY_H, maxTextBlockH + CELL_PAD_X * 2);
   const rowH = DAY_BAR_H + bodyH;
   return { cellData, rowH };
 }
@@ -199,13 +316,23 @@ function markColor(kind: string) {
   return BLUE;
 }
 
+/** Colores de actividad reforzados para impresión/PDF (rojos y tonos claros más legibles). */
 function activityTextPdfColor(hex?: string) {
   const h = activityTextDisplayColor(hex).replace('#', '');
-  return rgb(
-    parseInt(h.slice(0, 2), 16) / 255,
-    parseInt(h.slice(2, 4), 16) / 255,
-    parseInt(h.slice(4, 6), 16) / 255,
-  );
+  let r = parseInt(h.slice(0, 2), 16);
+  let g = parseInt(h.slice(2, 4), 16);
+  let b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const boost = lum < 0.45 ? 0.9 : 0.72;
+  r = Math.round(r * boost);
+  g = Math.round(g * boost);
+  b = Math.round(b * boost);
+  if (r > g * 1.35 && r > b * 1.35) {
+    r = Math.min(220, Math.max(r, 165));
+    g = Math.min(g, Math.round(g * 0.55));
+    b = Math.min(b, Math.round(b * 0.55));
+  }
+  return rgb(r / 255, g / 255, b / 255);
 }
 
 function drawImageFit(
@@ -231,6 +358,34 @@ function drawImageFit(
   });
 }
 
+/** Imagen centrada horizontal y vertical dentro de una celda del pie (3 columnas). */
+function drawImageFitInBox(
+  page: PDFPage,
+  img: PDFImage,
+  boxX: number,
+  boxTop: number,
+  boxW: number,
+  boxH: number,
+  maxW = boxW,
+  maxH = boxH,
+) {
+  const padW = Math.max(0, boxW - FOOTER_COL_PAD * 2);
+  const padH = Math.max(0, boxH - FOOTER_COL_PAD * 2);
+  const limitW = Math.min(maxW, padW);
+  const limitH = Math.min(maxH, padH);
+  const scale = Math.min(limitW / img.width, limitH / img.height, 1);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  const drawX = boxX + (boxW - w) / 2;
+  const imgTop = boxTop + (boxH - h) / 2;
+  page.drawImage(img, {
+    x: drawX,
+    y: topY(page, imgTop + h),
+    width: w,
+    height: h,
+  });
+}
+
 function drawPageHeader(
   page: PDFPage,
   title: string,
@@ -242,15 +397,16 @@ function drawPageHeader(
   const logoMaxW = 110;
 
   if (firmLogo) {
-    drawImageFit(page, firmLogo, M, 8, logoMaxW, logoMaxH, 'left');
+    drawImageFit(page, firmLogo, M, 6, logoMaxW, logoMaxH, 'left');
   }
 
-  const titleSize = 22;
-  const tw = fontTitle.widthOfTextAtSize(title, titleSize);
+  const gridTop = M + TOP_HEADER_H;
+  const titleBaselineFromTop = gridTop - TITLE_GRID_GAP;
+  const tw = fontTitle.widthOfTextAtSize(title, TITLE_SIZE);
   page.drawText(title, {
     x: (pageW - tw) / 2,
-    y: topY(page, TOP_HEADER_H / 2 + 6),
-    size: titleSize,
+    y: topY(page, titleBaselineFromTop),
+    size: TITLE_SIZE,
     font: fontTitle,
     color: NAVY,
   });
@@ -289,26 +445,37 @@ function drawPageFooter(
   const rowTop = footerTop + FOOTER_OJO_H + 4;
   const colW = contentW / 3;
   const noticeSize = 9;
-  const noticeLines = wrapLines(notice.toUpperCase(), 34, 3);
-  const noticeBlockH = noticeLines.length * (noticeSize + 3);
-  let noticeY = rowTop + (FOOTER_ROW_H - noticeBlockH) / 2 + noticeSize;
-  for (const ln of noticeLines) {
+  const noticeLineStep = noticeSize + 3;
+  const noticeMaxChars = Math.max(12, Math.floor((colW - FOOTER_COL_PAD * 2) / (noticeSize * 0.52)));
+  const noticeLines = wrapLines(notice.toUpperCase(), noticeMaxChars, 3);
+  const noticeBlockH =
+    noticeLines.length > 0 ? noticeLines.length * noticeLineStep - 3 : 0;
+  const noticeStartY = rowTop + (FOOTER_ROW_H - noticeBlockH) / 2 + noticeSize;
+  noticeLines.forEach((ln, i) => {
     const lw = fontBold.widthOfTextAtSize(ln, noticeSize);
     page.drawText(ln, {
       x: M + colW + (colW - lw) / 2,
-      y: topY(page, noticeY),
+      y: topY(page, noticeStartY + i * noticeLineStep),
       size: noticeSize,
       font: fontBold,
       color: RED,
     });
-    noticeY += noticeSize + 3;
-  }
+  });
 
   if (leftImg) {
-    drawImageFit(page, leftImg, M + 4, rowTop + 2, colW - 8, FOOTER_ROW_H - 4, 'left');
+    drawImageFitInBox(page, leftImg, M, rowTop, colW, FOOTER_ROW_H);
   }
   if (rightImg) {
-    drawImageFit(page, rightImg, M + colW * 2, rowTop + 2, colW - 4, FOOTER_ROW_H - 4, 'right');
+    drawImageFitInBox(
+      page,
+      rightImg,
+      M + colW * 2,
+      rowTop,
+      colW,
+      FOOTER_ROW_H,
+      FOOTER_LOGO_MAX_W,
+      FOOTER_LOGO_MAX_H,
+    );
   }
 }
 
@@ -319,7 +486,7 @@ export async function buildFinanceCalendarPdf(
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const fontTitle = await doc.embedFont(StandardFonts.TimesRomanBold);
+  const fontTitle = await doc.embedFont(StandardFonts.HelveticaBold);
 
   const [firmLogoBlob, footerLeftAsset, footerLogoAsset] = await Promise.all([
     loadImageBlobForPdf(options.firmLogoUrl),
@@ -352,14 +519,14 @@ export async function buildFinanceCalendarPdf(
 
   let y = M + TOP_HEADER_H;
   drawWeekdayHeader(page, y, colW, fontBold);
-  y += HEADER_H + 2;
+  y += HEADER_H + WEEKDAY_HEADER_BOTTOM_GAP;
 
   const cells = buildMonthGrid(detail.period_ym);
   const weeks = chunkWeeks(cells);
   const markMap = marksByDayKey(detail.marks ?? []);
   const acts = detail.activities ?? [];
 
-  const weekPlans = weeks.map((week) => buildWeekCellData(week, markMap, acts, colW));
+  const weekPlans = weeks.map((week) => buildWeekCellData(week, markMap, acts, colW, font, fontBold));
   let rowHeights = weekPlans.map((p) => p.rowH);
 
   const bottomReserve = M + FOOTER_TOTAL;
@@ -372,7 +539,7 @@ export async function buildFinanceCalendarPdf(
   }
 
   const drawWeekRow = (cellData: WeekCellData[], rowH: number) => {
-    cellData.forEach(({ cell, lines, maxChars }, colIdx) => {
+    cellData.forEach(({ cell, lines, innerW }, colIdx) => {
       const x = M + colIdx * colW;
       const w = colW - 1;
       const cellTop = y;
@@ -405,21 +572,25 @@ export async function buildFinanceCalendarPdf(
           color: WHITE,
         });
 
-        let ly = cellTop + DAY_BAR_H + 4;
-        for (const item of lines) {
-          const wrapped = wrapLines(item.text, maxChars, 2);
-          for (const ln of wrapped) {
-            if (ly + FONT > cellTop + rowH - 2) break;
-            const lw = font.widthOfTextAtSize(ln, FONT);
-            page.drawText(ln, {
-              x: x + Math.max(2, (w - lw) / 2),
-              y: topY(page, ly + FONT),
-              size: FONT,
-              font,
-              color: item.color,
-            });
-            ly += LINE_H;
-          }
+        const bodyTop = cellTop + DAY_BAR_H;
+        const bodyH = rowH - DAY_BAR_H;
+        const rendered = wrapPdfLines(lines, innerW, font, fontBold);
+        const textBlockH = rendered.reduce((sum, ln) => sum + lineHeightForKind(ln.kind), 0);
+        let ly = bodyTop + Math.max(CELL_PAD_X, (bodyH - textBlockH) / 2);
+        for (const item of rendered) {
+          const size = item.kind === 'activity' ? ACTIVITY_FONT : MARK_FONT;
+          const lineH = lineHeightForKind(item.kind);
+          const face = item.kind === 'activity' ? fontBold : font;
+          if (ly + size > cellTop + rowH - CELL_PAD_X) break;
+          const lw = face.widthOfTextAtSize(item.text, size);
+          page.drawText(item.text, {
+            x: x + CELL_PAD_X + Math.max(0, (innerW - lw) / 2),
+            y: topY(page, ly + size),
+            size,
+            font: face,
+            color: item.color,
+          });
+          ly += lineH;
         }
       }
     });
@@ -434,7 +605,7 @@ export async function buildFinanceCalendarPdf(
       page = doc.addPage([PAGE_W, PAGE_H]);
       y = M;
       drawWeekdayHeader(page, y, colW, fontBold);
-      y += HEADER_H + 2;
+      y += HEADER_H + WEEKDAY_HEADER_BOTTOM_GAP;
       const remaining = weeks.length - wi;
       const remainingHeights = rowHeights.slice(wi);
       const area = pageH - y - M;
