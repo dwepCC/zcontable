@@ -283,16 +283,28 @@ function splitPaymentMethodHeader(header: string): string[] {
   return [h];
 }
 
-/** Filas de métodos de pago con monto y operación (desde fiscal_receipt_payments o cabecera). */
-type PdfPaymentRow = { method: string; amount: number; operationNumber?: string };
+/** Filas de métodos de pago con monto, fecha y operación (desde fiscal_receipt_payments o cabecera). */
+type PdfPaymentRow = { method: string; amount: number; operationNumber?: string; payDate?: string };
+
+function receiptPaymentDateIso(receipt: PosSaleDetail): string {
+  const linked = (receipt.linked_payment?.date ?? '').trim();
+  if (linked) return linked.slice(0, 10);
+  return (receipt.issue_date ?? '').slice(0, 10);
+}
+
+function receiptPaymentDateLabel(receipt: PosSaleDetail): string {
+  return formatDateDDMMYYYY(receiptPaymentDateIso(receipt));
+}
 
 function paymentMethodsForPdf(receipt: PosSaleDetail): PdfPaymentRow[] {
+  const payDate = receiptPaymentDateLabel(receipt);
   const pays = receipt.payments ?? [];
   if (pays.length > 0) {
     return pays.map((p) => ({
       method: formatPaymentMethod(p.method),
       amount: Number(p.amount ?? 0),
       operationNumber: (p.operation_number ?? '').trim() || undefined,
+      payDate: payDate || undefined,
     }));
   }
   const pm = (receipt.payment_method ?? '').trim();
@@ -304,13 +316,15 @@ function paymentMethodsForPdf(receipt: PosSaleDetail): PdfPaymentRow[] {
       method: formatPaymentMethod(part),
       amount: receipt.total ?? 0,
       operationNumber: ref,
+      payDate: payDate || undefined,
     }));
   }
-  return [{ method: formatPaymentMethod(pm), amount: receipt.total ?? 0, operationNumber: ref }];
+  return [{ method: formatPaymentMethod(pm), amount: receipt.total ?? 0, operationNumber: ref, payDate: payDate || undefined }];
 }
 
 function formatPaymentPdfLine(row: PdfPaymentRow): string {
   const segments = [row.method, moneyPen(row.amount)];
+  if (row.payDate) segments.push(row.payDate);
   if (row.operationNumber) segments.push(`Op. ${row.operationNumber}`);
   return segments.join(' — ');
 }
@@ -595,10 +609,10 @@ export async function buildFiscalReceiptA4Pdf(
 
   // —— Datos cliente ——
   const issue = formatDateDDMMYYYY(receipt.issue_date ?? '');
-  const dueDate = '';
+  const paymentDate = receiptPaymentDateLabel(receipt);
   const infoRows: [string, string][] = [
     ['FECHA DE EMISIÓN:', issue || '—'],
-    ['FECHA DE VENCIMIENTO:', dueDate || '—'],
+    ['FECHA DE PAGO:', paymentDate || '—'],
     ['CLIENTE:', receipt.customer_name ?? '—'],
     [`${customerDocLabel(receipt)}:`, receipt.customer_number || '—'],
     ['DIRECCIÓN:', receipt.company?.address?.trim() || '—'],
@@ -1016,9 +1030,9 @@ export async function buildFiscalReceiptTicketPdf(
   const payRows = paymentMethodsForPdf(receipt);
   page.drawText('PAGOS:', { x: TICKET_M, y: topY(page, y + 7), size: 6.5, font: fontB, color: C.black });
   y += 9;
-  const payDate = formatDateDDMMYYYY(issue);
+  const defaultPayDate = receiptPaymentDateLabel(receipt);
   if (payRows.length === 0) {
-    page.drawText(`- ${payDate} - — - ${moneyPen(total)}`, {
+    page.drawText(`- ${defaultPayDate || '—'} - — - ${moneyPen(total)}`, {
       x: TICKET_M,
       y: topY(page, y + 7),
       size: 6,
@@ -1028,7 +1042,8 @@ export async function buildFiscalReceiptTicketPdf(
     y += 8;
   } else {
     for (const row of payRows) {
-      const line = `- ${payDate} - ${formatPaymentPdfLine(row)}`;
+      const payDate = row.payDate || defaultPayDate || '—';
+      const line = `- ${payDate} - ${formatPaymentPdfLine({ ...row, payDate: undefined })}`;
       for (const ln of wrapLines(line, 44, 3)) {
         page.drawText(ln, { x: TICKET_M, y: topY(page, y + 7), size: 6, font, color: C.black });
         y += 8;
