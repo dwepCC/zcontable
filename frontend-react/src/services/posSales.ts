@@ -66,6 +66,7 @@ export type PosSaleDetail = TukifacFiscalReceipt & {
   lines?: FiscalReceiptLine[];
   notes?: string;
   payment_method?: string;
+  payment_reference?: string;
   payments?: FiscalReceiptPaymentRow[];
   issued_by_user?: { name?: string; username?: string };
 };
