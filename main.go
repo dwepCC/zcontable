@@ -29,6 +29,10 @@ func main() {
 		log.Printf("company migrations: %v", err)
 	}
 
+	if err := database.RunSupervisorMigrations(database.DB); err != nil {
+		log.Printf("supervisor migrations: %v", err)
+	}
+
 	if err := services.EnsureDocumentMigrationsOnStartup(); err != nil {
 		log.Printf("document migrations: %v", err)
 	}
