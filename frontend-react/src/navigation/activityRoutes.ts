@@ -65,8 +65,8 @@ export type ActivityModuleMeta = {
 const ACTIVITY_MODULES: ActivityModuleMeta[] = [
   {
     id: 'sunat-inbox',
-    label: 'Buzón SOL SUNAT',
-    description: 'Lista de empresas y gestión manual de comunicados del buzón SOL.',
+    label: 'Buzón SOL SUNAT – SUNAFIL',
+    description: 'Capturas semanales de buzón SUNAT y SUNAFIL por empresa.',
     icon: 'fas fa-inbox',
     phaseLabel: 'Fase F3',
   },

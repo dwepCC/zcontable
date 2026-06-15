@@ -1130,6 +1130,7 @@ func (ctrl *SupervisorController) SunatInboxListAPI(c fiber.Ctx) error {
 	page, perPage := paginationFromQuery(c)
 	out, err := ctrl.svc.ListSunatInbox(services.SunatInboxListParams{
 		PeriodYM:          c.Query("period_ym", ""),
+		WeekStart:         c.Query("week_start", ""),
 		Status:            c.Query("status", ""),
 		Q:                 c.Query("q", ""),
 		AllowedCompanyIDs: allowed,
@@ -1143,6 +1144,7 @@ func (ctrl *SupervisorController) SunatInboxListAPI(c fiber.Ctx) error {
 		out.Rows = []services.SunatInboxListRow{}
 	}
 	return c.JSON(fiber.Map{
+		"meta": out.Meta,
 		"data": out.Rows,
 		"pagination": fiber.Map{
 			"page": out.Page, "per_page": out.PerPage, "total": out.Total, "total_pages": out.TotalPages,
@@ -1160,6 +1162,7 @@ func (ctrl *SupervisorController) SunatInboxDetailAPI(c fiber.Ctx) error {
 	if periodYM == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "period_ym requerido"})
 	}
+	weekStart := strings.TrimSpace(c.Query("week_start", ""))
 	if !hasStudioScope(c) {
 		uid, uerr := getUserID(c)
 		if uerr != nil {
@@ -1173,33 +1176,93 @@ func (ctrl *SupervisorController) SunatInboxDetailAPI(c fiber.Ctx) error {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Sin acceso a esta empresa"})
 		}
 	}
-	row, err := ctrl.svc.EnsureSunatInbox(uint(companyID), periodYM)
+	row, err := ctrl.svc.EnsureSunatInbox(uint(companyID), periodYM, weekStart)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"data": row})
 }
 
-// SunatInboxValidateAPI POST /api/supervisors/activity-modules/sunat-inbox/declarations/:declarationId/validate
-func (ctrl *SupervisorController) SunatInboxValidateAPI(c fiber.Ctx) error {
-	declarationID, err := strconv.ParseUint(c.Params("declarationId"), 10, 32)
-	if err != nil || declarationID == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "declaración inválida"})
+// SunatInboxUploadAPI POST /api/supervisors/activity-modules/sunat-inbox/companies/:companyId/slots/:slotIndex/upload
+func (ctrl *SupervisorController) SunatInboxUploadAPI(c fiber.Ctx) error {
+	companyID, err := strconv.ParseUint(c.Params("companyId"), 10, 32)
+	if err != nil || companyID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "empresa inválida"})
 	}
-	if err := ctrl.ensureDeclarationCompany(c, uint(declarationID)); err != nil {
-		if e, ok := err.(*fiber.Error); ok {
-			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+	slotIndex, err := strconv.Atoi(strings.TrimSpace(c.Params("slotIndex")))
+	if err != nil || slotIndex < 1 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "slot_index inválido"})
+	}
+	periodYM := strings.TrimSpace(c.Query("period_ym", ""))
+	if periodYM == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "period_ym requerido"})
+	}
+	weekStart := strings.TrimSpace(c.Query("week_start", ""))
+	mailboxType := strings.TrimSpace(c.FormValue("mailbox_type", ""))
+	if !hasStudioScope(c) {
+		uid, uerr := getUserID(c)
+		if uerr != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
 		}
+		ok, aerr := ctrl.svc.CanAccessCompany(uid, uint(companyID), false)
+		if aerr != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error de acceso"})
+		}
+		if !ok {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Sin acceso a esta empresa"})
+		}
+	}
+	fh, err := c.FormFile("file")
+	if err != nil || fh == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "archivo requerido"})
+	}
+	if fh.Size > 10*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "archivo máximo 10 MB"})
+	}
+	f, err := fh.Open()
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	if err := ctrl.svc.EnsureSunatInboxDeclarationType(uint(declarationID)); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	defer f.Close()
+	data := make([]byte, fh.Size)
+	if _, err := f.Read(data); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	uid, err := getUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
 	}
-	row, err := ctrl.svc.ValidateSunatInbox(uint(declarationID), uid)
+	row, err := ctrl.svc.UploadMailboxCapture(uint(companyID), periodYM, weekStart, slotIndex, mailboxType, fh.Filename, data, uid)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"data": row})
+}
+
+// SunatInboxVerifySlotAPI POST /api/supervisors/activity-modules/sunat-inbox/slots/:slotId/verify
+func (ctrl *SupervisorController) SunatInboxVerifySlotAPI(c fiber.Ctx) error {
+	slotID, err := strconv.ParseUint(c.Params("slotId"), 10, 32)
+	if err != nil || slotID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "slot inválido"})
+	}
+	var body struct {
+		MailboxType string `json:"mailbox_type"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Datos inválidos"})
+	}
+	allowed, err := ctrl.allowedCompanyIDs(c)
+	if err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	uid, err := getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No autenticado"})
+	}
+	row, err := ctrl.svc.VerifyMailboxCapture(uint(slotID), body.MailboxType, uid, allowed)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}

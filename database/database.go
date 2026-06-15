@@ -69,6 +69,7 @@ func AutoMigrate() error {
 		&models.SupervisorObservation{},
 		&models.SupervisorAttachment{},
 		&models.SupervisorNotification{},
+		&models.SupervisorMailboxCaptureSlot{},
 		&models.FinanceCalendar{},
 		&models.FinanceCalendarMark{},
 		&models.FinanceCalendarActivity{},

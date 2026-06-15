@@ -1,23 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { MailboxCaptureSlotCell } from '../../components/activity/MailboxCaptureSlotCell';
 import {
-  formatStoredAt,
-  sunatInboxStatusBadgeClass,
-  sunatInboxStatusLabel,
-  SUNAT_INBOX_STATUSES,
+  mailboxStatusBadgeClass,
+  mailboxStatusLabel,
 } from '../../components/activity/sunatInboxConfig';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { activityModulePath, type ActivityWorkspace } from '../../navigation/activityRoutes';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
 import {
-  supervisorsService,
-  type SupervisorAttachment,
-  type SupervisorDeclaration,
-  type SupervisorObservation,
-} from '../../services/supervisors';
-import { sunatInboxService, type SunatInboxDetail } from '../../services/sunatInbox';
+  sunatInboxService,
+  type MailboxType,
+  type SunatInboxCaptureSlot,
+  type SunatInboxDetail,
+} from '../../services/sunatInbox';
 import { currentPeriodYM } from '../../utils/supervisorLabels';
+import { defaultWeekStartForPeriod } from '../../utils/mailboxWeek';
+import { summarizeMailboxSlots } from '../../utils/mailboxCaptureUtils';
 import { extractApiErrorMessage } from '../../utils/apiError';
 
 type SunatInboxDetailPageProps = {
@@ -27,41 +27,20 @@ type SunatInboxDetailPageProps = {
 const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
   const { companyId: companyIdParam } = useParams();
   const companyId = Number(companyIdParam);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const periodYm = searchParams.get('period_ym') || currentPeriodYM();
-  const listPath = `${activityModulePath(workspace, 'sunat-inbox')}?period_ym=${encodeURIComponent(periodYm)}`;
+  const weekStartParam = searchParams.get('week_start') || defaultWeekStartForPeriod(periodYm);
+  const [weekStart, setWeekStart] = useState(weekStartParam);
 
-  const canUpdate = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsUpdate), []);
+  const listPath = `${activityModulePath(workspace, 'sunat-inbox')}?period_ym=${encodeURIComponent(periodYm)}&week_start=${encodeURIComponent(weekStart)}`;
+
   const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
-  const canObserve = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsObserve), []);
-  const canApprove = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
-  const canCreateObservation = useMemo(() => auth.hasPermission(P.supervisorsObservationsCreate), []);
+  const canVerify = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
 
   const [detail, setDetail] = useState<SunatInboxDetail | null>(null);
-  const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
-  const [observations, setObservations] = useState<SupervisorObservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
-  const [statusSaving, setStatusSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [obsText, setObsText] = useState('');
-  const [obsSaving, setObsSaving] = useState(false);
-  const [supervisorNotes, setSupervisorNotes] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const declaration = detail?.declaration;
-
-  const loadAttachments = useCallback(async (declarationId: number) => {
-    const rows = await supervisorsService.listAttachments(0, declarationId);
-    setAttachments(rows);
-  }, []);
-
-  const loadObservations = useCallback(async (declarationId: number) => {
-    const rows = await supervisorsService.listObservations(0, declarationId);
-    setObservations(rows);
-  }, []);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(companyId) || companyId <= 0) {
@@ -72,12 +51,11 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
     try {
       setLoading(true);
       setError('');
-      const data = await sunatInboxService.getDetail(companyId, periodYm);
+      const data = await sunatInboxService.getDetail(companyId, periodYm, weekStart);
       setDetail(data);
-      await Promise.all([
-        loadAttachments(data.declaration.id),
-        loadObservations(data.declaration.id),
-      ]);
+      if (data.week_start && data.week_start !== weekStart) {
+        setWeekStart(data.week_start);
+      }
     } catch (err) {
       console.error(err);
       setError(extractApiErrorMessage(err, 'No se pudo cargar el detalle.'));
@@ -85,101 +63,58 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
     } finally {
       setLoading(false);
     }
-  }, [companyId, periodYm, loadAttachments, loadObservations]);
+  }, [companyId, periodYm, weekStart]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const refreshDeclaration = (decl: SupervisorDeclaration) => {
-    setDetail((d) => (d ? { ...d, declaration: decl } : d));
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('period_ym', periodYm);
+        next.set('week_start', weekStart);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [periodYm, weekStart, setSearchParams]);
+
+  const patchSlot = (updated: SunatInboxCaptureSlot) => {
+    setDetail((d) => {
+      if (!d) return d;
+      const slots = d.slots.map((s) => (s.slot_index === updated.slot_index ? updated : s));
+      return { ...d, slots, summary_status: summarizeMailboxSlots(slots) };
+    });
   };
 
-  const handleStatusChange = async (status: string) => {
-    if (!declaration || !canUpdate) return;
+  const handleUpload = async (slotIndex: number, mailboxType: MailboxType, file: File) => {
     try {
-      setStatusSaving(true);
       setMsg('');
-      const updated = await supervisorsService.updateDeclaration(declaration.id, { status });
-      refreshDeclaration(updated);
-      setMsg('Estado actualizado.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo actualizar el estado.'));
-    } finally {
-      setStatusSaving(false);
-    }
-  };
-
-  const handleUpload = async (files: FileList | null) => {
-    if (!declaration || !canUpload || !files?.length) return;
-    try {
-      setUploading(true);
-      setMsg('');
-      for (const file of Array.from(files)) {
-        await supervisorsService.uploadAttachment(detail!.control_id, declaration.id, file);
-      }
-      await loadAttachments(declaration.id);
-      setMsg('Archivo(s) subido(s) correctamente.');
+      const slot = await sunatInboxService.uploadCapture(
+        companyId,
+        slotIndex,
+        file,
+        mailboxType,
+        periodYm,
+        weekStart,
+      );
+      patchSlot(slot);
+      setMsg('Archivo subido correctamente.');
     } catch (err) {
       setMsg(extractApiErrorMessage(err, 'Error al subir archivo.'));
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
     }
   };
 
-  const handleAddObservation = async () => {
-    if (!declaration || !canCreateObservation) return;
-    const body = obsText.trim();
-    if (!body) return;
+  const handleVerify = async (slotId: number, mailboxType: MailboxType) => {
     try {
-      setObsSaving(true);
       setMsg('');
-      await supervisorsService.createObservation({ declaration_id: declaration.id, body });
-      setObsText('');
-      await loadObservations(declaration.id);
-      setMsg('Observación registrada.');
+      const slot = await sunatInboxService.verifyCapture(slotId, mailboxType);
+      patchSlot(slot);
+      setMsg('Buzón verificado.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo registrar la observación.'));
-    } finally {
-      setObsSaving(false);
-    }
-  };
-
-  const handleValidate = async () => {
-    if (!declaration || !canApprove) return;
-    try {
-      setActionLoading(true);
-      setMsg('');
-      const updated = await sunatInboxService.validate(declaration.id);
-      refreshDeclaration(updated);
-      setMsg('Registro validado.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo validar.'));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleObserve = async () => {
-    if (!declaration || !canObserve) return;
-    const notes = supervisorNotes.trim();
-    if (!notes) {
-      setMsg('Ingrese el texto de la observación.');
-      return;
-    }
-    try {
-      setActionLoading(true);
-      setMsg('');
-      const updated = await supervisorsService.observeDeclaration(declaration.id, notes);
-      refreshDeclaration(updated);
-      setSupervisorNotes('');
-      await loadObservations(declaration.id);
-      setMsg('Observación registrada.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo observar.'));
-    } finally {
-      setActionLoading(false);
+      setMsg(extractApiErrorMessage(err, 'No se pudo verificar.'));
     }
   };
 
@@ -192,7 +127,7 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
     );
   }
 
-  if (error || !detail || !declaration) {
+  if (error || !detail) {
     return (
       <div className={PAGE_WORKSPACE_CLASS}>
         <Link to={listPath} className="text-sm text-primary-700 hover:underline">
@@ -205,172 +140,94 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
     );
   }
 
+  const weekOptions = detail.weeks?.length ? detail.weeks : [{ week_start: weekStart, label: weekStart }];
+
   return (
     <div className={PAGE_WORKSPACE_CLASS}>
       <Link to={listPath} className="text-sm text-primary-700 hover:underline">
         ← Volver al listado
       </Link>
 
-      <div className="mt-2">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Buzón SOL — {detail.business_name}</h1>
-        <p className="text-slate-500 mt-1 text-sm">
-          Período {periodYm} · RUC {detail.ruc} · Código {detail.code}
-          {detail.dig ? ` · Dígito ${detail.dig}` : ''}
-        </p>
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+            Buzón SOL — {detail.business_name}
+          </h1>
+          <p className="text-slate-500 mt-1 text-sm">
+            Período {periodYm} · RUC {detail.ruc} · Código {detail.code}
+            {detail.dig ? ` · Dígito ${detail.dig}` : ''}
+          </p>
+        </div>
+        <div className="min-w-[12rem]">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Semana</label>
+          <select
+            value={weekStart}
+            onChange={(e) => setWeekStart(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {weekOptions.map((w) => (
+              <option key={w.week_start} value={w.week_start}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {msg ? (
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">{msg}</div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-          <h2 className="text-sm font-semibold text-slate-800">Empresa</h2>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-slate-500">Asistente</dt>
-            <dd className="text-slate-800">{detail.assistant_username || '—'}</dd>
-            <dt className="text-slate-500">Estado</dt>
-            <dd>
-              <span
-                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${sunatInboxStatusBadgeClass(declaration.status)}`}
-              >
-                {sunatInboxStatusLabel(declaration.status)}
-              </span>
-            </dd>
-          </dl>
-          {canUpdate ? (
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Cambiar estado</label>
-              <select
-                value={declaration.status}
-                disabled={statusSaving}
-                onChange={(e) => void handleStatusChange(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                {SUNAT_INBOX_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-        </div>
-
-        {(canApprove || canObserve) && (
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <h2 className="text-sm font-semibold text-slate-800">Revisión supervisor</h2>
-            {canObserve ? (
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Observar</label>
-                <textarea
-                  value={supervisorNotes}
-                  onChange={(e) => setSupervisorNotes(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="Indique la observación…"
-                />
-                <button
-                  type="button"
-                  disabled={actionLoading}
-                  onClick={() => void handleObserve()}
-                  className="mt-2 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm font-medium hover:bg-amber-100 disabled:opacity-50"
-                >
-                  Observar
-                </button>
-              </div>
-            ) : null}
-            {canApprove ? (
-              <button
-                type="button"
-                disabled={actionLoading || declaration.status === 'validado'}
-                onClick={() => void handleValidate()}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Validar
-              </button>
-            ) : null}
-          </div>
-        )}
-      </div>
-
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-800">Evidencias ({attachments.length})</h2>
-          {canUpload ? (
-            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium cursor-pointer hover:bg-primary-700">
-              <i className="fas fa-upload" aria-hidden />
-              {uploading ? 'Subiendo…' : 'Subir archivos'}
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                accept=".pdf,image/*"
-                className="hidden"
-                disabled={uploading}
-                onChange={(e) => void handleUpload(e.target.files)}
-              />
-            </label>
-          ) : null}
-        </div>
-        {attachments.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin archivos cargados.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {attachments.map((a) => (
-              <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">
-                  <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
-                  {a.file_name}
-                </span>
-                <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
-                <a
-                  href={a.file_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary-700 text-xs font-medium shrink-0 hover:underline"
-                >
-                  Abrir
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <h2 className="text-sm font-semibold text-slate-800">Observaciones</h2>
-        {canCreateObservation ? (
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              value={obsText}
-              onChange={(e) => setObsText(e.target.value)}
-              placeholder="Nueva observación…"
-              className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-            />
-            <button
-              type="button"
-              disabled={obsSaving || !obsText.trim()}
-              onClick={() => void handleAddObservation()}
-              className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
+        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
+          <dt className="text-slate-500">Asistente</dt>
+          <dd className="text-slate-800">{detail.assistant_username || '—'}</dd>
+          <dt className="text-slate-500">Cargas / semana</dt>
+          <dd className="text-slate-800 tabular-nums">{detail.captures_per_week}</dd>
+          <dt className="text-slate-500">Resumen semana</dt>
+          <dd>
+            <span
+              className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${mailboxStatusBadgeClass(detail.summary_status)}`}
             >
-              Agregar
-            </button>
-          </div>
-        ) : null}
-        {observations.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin observaciones.</p>
-        ) : (
-          <ul className="space-y-2">
-            {observations.map((o) => (
-              <li key={o.id} className="text-sm border border-slate-100 rounded-lg px-3 py-2 bg-slate-50/50">
-                <p className="text-slate-800">{o.body}</p>
-                <p className="text-xs text-slate-500 mt-1">{formatStoredAt(o.created_at)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
+              {mailboxStatusLabel(detail.summary_status)}
+            </span>
+          </dd>
+        </dl>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full w-full text-left">
+            <thead className="bg-slate-50">
+              <tr>
+                {detail.slots.map((slot) => (
+                  <th
+                    key={slot.slot_index}
+                    className="px-3 py-3 text-center text-xs font-semibold uppercase text-slate-500 min-w-[10rem]"
+                  >
+                    Carga {slot.slot_index}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {detail.slots.map((slot) => (
+                  <td key={slot.slot_index} className="px-3 py-3 border-t border-slate-100 align-top">
+                    <MailboxCaptureSlotCell
+                      slot={slot}
+                      canUpload={canUpload}
+                      canVerify={canVerify}
+                      uploadKey={`detail-${companyId}-${weekStart}`}
+                      onUpload={handleUpload}
+                      onVerify={handleVerify}
+                    />
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

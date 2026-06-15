@@ -162,7 +162,7 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
           {
             to: '/supervisors/activities/sunat-inbox',
             icon: 'fas fa-inbox',
-            label: 'Buzón SOL SUNAT',
+            label: 'Buzón SOL SUNAT – SUNAFIL',
             permission: P.supervisorsControlsView,
           },
           {
@@ -242,7 +242,7 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
           {
             to: '/assistant/activities/sunat-inbox',
             icon: 'fas fa-inbox',
-            label: 'Buzón SOL SUNAT',
+            label: 'Buzón SOL SUNAT – SUNAFIL',
             permission: P.supervisorsControlsView,
           },
           {

@@ -1,5 +1,5 @@
-import AssignedCompaniesListPage from '../activity/AssignedCompaniesListPage';
+import CompanyAccessCredentials from '../finance/CompanyAccessCredentials';
 
-const AssistantCompaniesPage = () => <AssignedCompaniesListPage workspace="assistant" />;
+const AssistantCompaniesPage = () => <CompanyAccessCredentials variant="assistant" />;
 
 export default AssistantCompaniesPage;

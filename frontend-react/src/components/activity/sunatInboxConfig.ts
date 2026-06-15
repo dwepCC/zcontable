@@ -1,36 +1,58 @@
-import {
-  activityStatusBadgeClass,
-  activityStatusLabel,
-  buildStatusFilter,
-  formatStoredAt,
-} from './activityModuleShared';
+import { activityStatusBadgeClass, activityStatusLabel } from './activityModuleShared';
 
-export const SUNAT_INBOX_STATUSES = [
+export type MailboxType = 'sunat' | 'sunafil';
+
+/** Etiquetas por buzón individual (celda). */
+export const MAILBOX_CAPTURE_STATUSES = [
   { value: 'pendiente', label: 'Pendiente' },
-  { value: 'comunicado', label: 'Comunicado' },
-  { value: 'sin_culpa', label: 'Sin culpa' },
-  { value: 'no_visualizado', label: 'No visualizado' },
-  { value: 'observado', label: 'Observado' },
-  { value: 'validado', label: 'Validado' },
+  { value: 'cargado', label: 'Cargado' },
+  { value: 'verificado', label: 'Verificado' },
 ] as const;
 
-export const SUNAT_INBOX_STATUS_FILTER = buildStatusFilter(SUNAT_INBOX_STATUSES);
+/** Resumen semanal por empresa (fila). */
+export const MAILBOX_SUMMARY_STATUSES = [
+  { value: 'pendiente', label: 'Sin subidas' },
+  { value: 'parcial', label: 'Avance parcial' },
+  { value: 'cargado', label: 'Por verificar' },
+  { value: 'verificado', label: 'Semana completa' },
+] as const;
 
-const SUNAT_BADGE: Record<string, string> = {
-  validado: 'bg-emerald-100 text-emerald-800',
-  observado: 'bg-amber-100 text-amber-900',
-  comunicado: 'bg-blue-100 text-blue-800',
-  sin_culpa: 'bg-slate-100 text-slate-700',
-  no_visualizado: 'bg-orange-100 text-orange-900',
-  sin_registro: 'bg-slate-100 text-slate-500',
+/** Filtros del listado (evalúan cada buzón, no solo el resumen). */
+export const MAILBOX_LIST_STATUS_FILTER = [
+  { value: '', label: 'Todos' },
+  { value: 'pendiente', label: 'Con subidas pendientes' },
+  { value: 'parcial', label: 'Avance parcial' },
+  { value: 'cargado', label: 'Por verificar (supervisor)' },
+  { value: 'verificado', label: 'Semana verificada' },
+] as const;
+
+const MAILBOX_BADGE: Record<string, string> = {
+  pendiente: 'bg-slate-100 text-slate-700',
+  parcial: 'bg-amber-100 text-amber-900',
+  cargado: 'bg-blue-100 text-blue-800',
+  verificado: 'bg-emerald-100 text-emerald-800',
 };
 
-export function sunatInboxStatusLabel(status: string): string {
-  return activityStatusLabel(status, SUNAT_INBOX_STATUSES);
+const SUMMARY_LABEL: Record<string, string> = {
+  pendiente: 'Sin subidas',
+  parcial: 'Avance parcial',
+  cargado: 'Por verificar',
+  verificado: 'Semana completa',
+};
+
+export function mailboxStatusLabel(status: string): string {
+  if (SUMMARY_LABEL[status]) return SUMMARY_LABEL[status];
+  return activityStatusLabel(status, MAILBOX_CAPTURE_STATUSES);
 }
 
-export function sunatInboxStatusBadgeClass(status: string): string {
-  return activityStatusBadgeClass(status, SUNAT_BADGE);
+export function mailboxSideStatusLabel(status: string): string {
+  return activityStatusLabel(status, MAILBOX_CAPTURE_STATUSES);
 }
 
-export { formatStoredAt };
+export function mailboxStatusBadgeClass(status: string): string {
+  return activityStatusBadgeClass(status, MAILBOX_BADGE);
+}
+
+export function mailboxTypeLabel(type: MailboxType): string {
+  return type === 'sunat' ? 'SUNAT' : 'SUNAFIL';
+}
