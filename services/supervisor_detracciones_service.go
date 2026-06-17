@@ -34,6 +34,9 @@ type DetraccionesListRow struct {
 	Status            string     `json:"status"`
 	AttachmentCount   int64      `json:"attachment_count"`
 	LastStoredAt      *time.Time `json:"last_stored_at,omitempty"`
+	FileName          string                    `json:"file_name,omitempty"`
+	FileURL           string                    `json:"file_url,omitempty"`
+	Timeliness        DetraccionesTimelinessDTO `json:"timeliness"`
 }
 
 // DetraccionesDetail detalle tras EnsureDetracciones (lazy create).
@@ -47,6 +50,7 @@ type DetraccionesDetail struct {
 	AssistantUsername string                       `json:"assistant_username"`
 	ControlID         uint                         `json:"control_id"`
 	Declaration       models.SupervisorDeclaration `json:"declaration"`
+	Timeliness        DetraccionesTimelinessDTO    `json:"timeliness"`
 }
 
 type detraccionesListResult struct {
@@ -123,7 +127,7 @@ func (s *SupervisorService) EnsureDetracciones(companyID uint, periodYM string) 
 		return nil, err
 	}
 
-	return &DetraccionesDetail{
+	detail := &DetraccionesDetail{
 		PeriodYM:          periodYM,
 		CompanyID:         company.ID,
 		Code:              strings.TrimSpace(company.InternalCode),
@@ -133,7 +137,20 @@ func (s *SupervisorService) EnsureDetracciones(companyID uint, periodYM string) 
 		AssistantUsername: assistantUsername(company.Assistant),
 		ControlID:         ctrl.ID,
 		Declaration:       decl,
-	}, nil
+	}
+	enrichDetraccionesDetail(detail, s.detraccionesLatestStoredAt(decl.ID))
+	return detail, nil
+}
+
+func (s *SupervisorService) detraccionesLatestStoredAt(declarationID uint) *time.Time {
+	var att models.SupervisorAttachment
+	if err := database.DB.Where("declaration_id = ?", declarationID).
+		Order("created_at DESC").
+		First(&att).Error; err != nil {
+		return nil
+	}
+	t := att.CreatedAt
+	return &t
 }
 
 // ListDetracciones listado empresa+período; sin lazy create.
@@ -178,7 +195,13 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 	}
 
 	statusFilter := strings.TrimSpace(p.Status)
-	if statusFilter == models.SupervisorSunatSinRegistro {
+	if statusFilter == models.SupervisorDeclPendiente {
+		q = q.Where(`NOT EXISTS (
+			SELECT 1 FROM supervisor_monthly_controls c
+			INNER JOIN supervisor_declarations d ON d.monthly_control_id = c.id AND d.declaration_type IN ? AND d.deleted_at IS NULL
+			WHERE c.company_id = companies.id AND c.period_ym = ? AND c.deleted_at IS NULL AND d.status != ?
+		)`, types, p.PeriodYM, models.SupervisorDeclPendiente)
+	} else if statusFilter == models.SupervisorSunatSinRegistro {
 		q = q.Where(`NOT EXISTS (
 			SELECT 1 FROM supervisor_monthly_controls c
 			INNER JOIN supervisor_declarations d ON d.monthly_control_id = c.id AND d.declaration_type IN ?
@@ -240,9 +263,31 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 		DeclarationID uint
 		Cnt           int64
 		LastAt        *time.Time
+		FileName      string
+		FileURL       string
 	}
 	statsByDecl := map[uint]attStat{}
 	if len(declIDs) > 0 {
+		var atts []models.SupervisorAttachment
+		_ = database.DB.Where("declaration_id IN ?", declIDs).
+			Order("created_at DESC").
+			Find(&atts).Error
+		for _, a := range atts {
+			if a.DeclarationID == nil {
+				continue
+			}
+			did := *a.DeclarationID
+			if _, ok := statsByDecl[did]; ok {
+				continue
+			}
+			statsByDecl[did] = attStat{
+				DeclarationID: did,
+				Cnt:           0,
+				LastAt:        &a.CreatedAt,
+				FileName:      a.FileName,
+				FileURL:       a.FileURL,
+			}
+		}
 		var stats []attStat
 		_ = database.DB.Model(&models.SupervisorAttachment{}).
 			Select("declaration_id, COUNT(*) AS cnt, MAX(created_at) AS last_at").
@@ -250,7 +295,12 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 			Group("declaration_id").
 			Scan(&stats).Error
 		for _, st := range stats {
-			statsByDecl[st.DeclarationID] = st
+			cur := statsByDecl[st.DeclarationID]
+			cur.Cnt = st.Cnt
+			if st.LastAt != nil {
+				cur.LastAt = st.LastAt
+			}
+			statsByDecl[st.DeclarationID] = cur
 		}
 	}
 
@@ -261,6 +311,8 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 		credDig[cr.CompanyID] = strings.TrimSpace(cr.Dig)
 	}
 
+	deadlineCtx := findDetraccionesCalendarActivity(p.PeriodYM)
+
 	for _, co := range companies {
 		row := DetraccionesListRow{
 			CompanyID:         co.ID,
@@ -269,18 +321,21 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 			BusinessName:      strings.TrimSpace(co.BusinessName),
 			RUC:               strings.TrimSpace(co.RUC),
 			AssistantUsername: assistantUsername(co.Assistant),
-			Status:            models.SupervisorSunatSinRegistro,
+			Status:            models.SupervisorDeclPendiente,
 		}
 		if d, ok := declByCompany[co.ID]; ok {
 			cid, did := d.ControlID, d.DeclarationID
 			row.ControlID = &cid
 			row.DeclarationID = &did
-			row.Status = d.Status
+			row.Status = normalizeDetraccionesDisplayStatus(d.Status)
 			if st, ok := statsByDecl[d.DeclarationID]; ok {
 				row.AttachmentCount = st.Cnt
 				row.LastStoredAt = st.LastAt
+				row.FileName = st.FileName
+				row.FileURL = st.FileURL
 			}
 		}
+		row.Timeliness = enrichDetraccionesListRow(p.PeriodYM, row.Status, row.LastStoredAt, deadlineCtx)
 		rows = append(rows, row)
 	}
 
@@ -290,7 +345,7 @@ func (s *SupervisorService) ListDetracciones(p DetraccionesListParams) (*detracc
 	}, nil
 }
 
-// ValidateDetracciones marca la declaración detracciones como validado.
+// ValidateDetracciones marca la declaración detracciones como verificada (supervisor).
 func (s *SupervisorService) ValidateDetracciones(declarationID uint, approverID uint) (*models.SupervisorDeclaration, error) {
 	var d models.SupervisorDeclaration
 	if err := database.DB.First(&d, declarationID).Error; err != nil {
@@ -302,17 +357,92 @@ func (s *SupervisorService) ValidateDetracciones(declarationID uint, approverID 
 	if d.DeclarationType == models.SupervisorDeclDistractionsLegacy {
 		d.DeclarationType = models.SupervisorDeclDetracciones
 	}
-	if err := validateDetraccionesPreconditions(&d); err != nil {
+	if err := validateDetraccionesVerifyPreconditions(&d); err != nil {
 		return nil, err
 	}
 	old := d.Status
-	d.Status = models.SupervisorSunatValidado
+	d.Status = models.SupervisorDetraccionVerificado
 	d.ApproverUserID = &approverID
-	d.ProgressPct = detraccionesProgressFromStatus(models.SupervisorSunatValidado)
+	d.ProgressPct = detraccionesProgressFromStatus(models.SupervisorDetraccionVerificado)
 	if err := database.DB.Save(&d).Error; err != nil {
 		return nil, err
 	}
 	s.LogChange("declaration", declarationID, "status", old, d.Status, approverID)
+	return &d, nil
+}
+
+// UploadDetraccionesPDF sube el comprobante PDF y pasa el estado a cargado.
+func (s *SupervisorService) UploadDetraccionesPDF(companyID uint, periodYM, fileName string, data []byte, userID uint) (*DetraccionesDetail, error) {
+	if err := validateDetraccionesPDFFile(fileName, data); err != nil {
+		return nil, err
+	}
+	detail, err := s.EnsureDetracciones(companyID, periodYM)
+	if err != nil {
+		return nil, err
+	}
+	decl := detail.Declaration
+	if !detraccionesAllowsUpload(decl.Status) {
+		return nil, errors.New("no se puede cargar PDF en el estado actual")
+	}
+
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("declaration_id = ?", decl.ID).Delete(&models.SupervisorAttachment{}).Error; err != nil {
+			return err
+		}
+		url, err := s.StoreSupervisorUpload(fileName, data)
+		if err != nil {
+			return err
+		}
+		att := models.SupervisorAttachment{
+			FileName:         fileName,
+			FileURL:          url,
+			UploadedByUserID: userID,
+			MonthlyControlID: &detail.ControlID,
+			DeclarationID:    &decl.ID,
+		}
+		if err := tx.Create(&att).Error; err != nil {
+			return err
+		}
+		old := decl.Status
+		decl.Status = models.SupervisorDetraccionCargado
+		decl.ProgressPct = detraccionesProgressFromStatus(models.SupervisorDetraccionCargado)
+		if err := tx.Save(&decl).Error; err != nil {
+			return err
+		}
+		s.LogChange("declaration", decl.ID, "status", old, decl.Status, userID)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := database.DB.First(&decl, decl.ID).Error; err != nil {
+		return nil, err
+	}
+	detail.Declaration = decl
+	enrichDetraccionesDetail(detail, s.detraccionesLatestStoredAt(decl.ID))
+	return detail, nil
+}
+
+// SetDetraccionesSupervisorStatus permite al supervisor marcar sin_clave o no_corresponde.
+func (s *SupervisorService) SetDetraccionesSupervisorStatus(declarationID uint, status string, userID uint) (*models.SupervisorDeclaration, error) {
+	status = strings.TrimSpace(status)
+	var d models.SupervisorDeclaration
+	if err := database.DB.First(&d, declarationID).Error; err != nil {
+		return nil, errors.New("declaración no encontrada")
+	}
+	if !isDetraccionesDeclarationType(d.DeclarationType) {
+		return nil, errors.New("no es un registro de Control de Detracciones")
+	}
+	if err := validateDetraccionesSupervisorStatusTransition(d.Status, status); err != nil {
+		return nil, err
+	}
+	old := d.Status
+	d.Status = status
+	d.ProgressPct = detraccionesProgressFromStatus(status)
+	if err := database.DB.Save(&d).Error; err != nil {
+		return nil, err
+	}
+	s.LogChange("declaration", declarationID, "status", old, d.Status, userID)
 	return &d, nil
 }
 

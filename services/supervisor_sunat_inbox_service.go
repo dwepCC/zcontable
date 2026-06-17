@@ -36,12 +36,13 @@ type SunatInboxListParams struct {
 
 // SunatInboxMailboxSide estado y archivo de un buzón en un slot.
 type SunatInboxMailboxSide struct {
-	Status       string     `json:"status"`
-	AttachmentID *uint      `json:"attachment_id,omitempty"`
-	FileName     string     `json:"file_name,omitempty"`
-	FileURL      string     `json:"file_url,omitempty"`
-	UploadedAt   *time.Time `json:"uploaded_at,omitempty"`
-	VerifiedAt   *time.Time `json:"verified_at,omitempty"`
+	Status       string              `json:"status"`
+	AttachmentID *uint               `json:"attachment_id,omitempty"`
+	FileName     string              `json:"file_name,omitempty"`
+	FileURL      string              `json:"file_url,omitempty"`
+	UploadedAt   *time.Time          `json:"uploaded_at,omitempty"`
+	VerifiedAt   *time.Time          `json:"verified_at,omitempty"`
+	Timeliness   UploadTimelinessDTO `json:"timeliness"`
 }
 
 // SunatInboxCaptureSlot slot de carga semanal (columna dinámica).
@@ -278,12 +279,8 @@ func captureSlotDTO(slot *models.SupervisorMailboxCaptureSlot, slotIndex int) Su
 	return dto
 }
 
-func buildVirtualSlots(dbSlots map[int]*models.SupervisorMailboxCaptureSlot, n int) []SunatInboxCaptureSlot {
-	out := make([]SunatInboxCaptureSlot, 0, n)
-	for i := 1; i <= n; i++ {
-		out = append(out, captureSlotDTO(dbSlots[i], i))
-	}
-	return out
+func buildVirtualSlots(dbSlots map[int]*models.SupervisorMailboxCaptureSlot, n int, ctx mailboxTimelinessCtx) []SunatInboxCaptureSlot {
+	return buildSunatInboxSlots(dbSlots, n, ctx)
 }
 
 func analyzeCaptureSlots(slots []SunatInboxCaptureSlot) (anyPendiente, anyCargado, anyVerificado, allVerificado bool) {
@@ -431,7 +428,6 @@ func (s *SupervisorService) EnsureSunatInbox(companyID uint, periodYM, weekStart
 
 	var ctrl models.SupervisorMonthlyControl
 	var decl models.SupervisorDeclaration
-	var dbSlots []models.SupervisorMailboxCaptureSlot
 
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("company_id = ? AND period_ym = ?", companyID, periodYM).First(&ctrl).Error; err != nil {
@@ -468,18 +464,29 @@ func (s *SupervisorService) EnsureSunatInbox(companyID uint, periodYM, weekStart
 			}
 		}
 		var errEnsure error
-		dbSlots, errEnsure = s.ensureMailboxSlots(tx, ctrl.ID, weekStart, slotsPerWeek)
+		_, errEnsure = s.ensureMailboxSlots(tx, ctrl.ID, weekStart, slotsPerWeek)
 		return errEnsure
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	slotMap := map[int]*models.SupervisorMailboxCaptureSlot{}
-	for i := range dbSlots {
-		slotMap[dbSlots[i].SlotIndex] = &dbSlots[i]
+	var loadedSlots []models.SupervisorMailboxCaptureSlot
+	if err := database.DB.
+		Preload("SunatAttachment").
+		Preload("SunafilAttachment").
+		Where("monthly_control_id = ? AND week_start = ?", ctrl.ID, weekStart).
+		Order("slot_index ASC").
+		Find(&loadedSlots).Error; err != nil {
+		return nil, err
 	}
-	dtoSlots := buildVirtualSlots(slotMap, slotsPerWeek)
+
+	slotMap := map[int]*models.SupervisorMailboxCaptureSlot{}
+	for i := range loadedSlots {
+		slotMap[loadedSlots[i].SlotIndex] = &loadedSlots[i]
+	}
+	timelinessCtx := mailboxTimelinessCtxFor(periodYM, weekStart, slotsPerWeek)
+	dtoSlots := buildVirtualSlots(slotMap, slotsPerWeek, timelinessCtx)
 
 	return &SunatInboxDetail{
 		PeriodYM:          periodYM,
@@ -599,15 +606,16 @@ func (s *SupervisorService) ListSunatInbox(p SunatInboxListParams) (*sunatInboxL
 	}
 
 	statusFilter := strings.TrimSpace(p.Status)
+	timelinessCtx := mailboxTimelinessCtxFor(p.PeriodYM, weekStart, slotsPerWeek)
 	filteredRows := make([]SunatInboxListRow, 0, len(allCompanies))
 	for _, co := range allCompanies {
-		dtoSlots := buildVirtualSlots(nil, slotsPerWeek)
+		dtoSlots := buildVirtualSlots(nil, slotsPerWeek, timelinessCtx)
 		var controlID, declID *uint
 		if cr, ok := ctrlByCompany[co.ID]; ok {
 			cid, did := cr.ControlID, cr.DeclarationID
 			controlID = &cid
 			declID = &did
-			dtoSlots = buildVirtualSlots(slotsByControl[cr.ControlID], slotsPerWeek)
+			dtoSlots = buildVirtualSlots(slotsByControl[cr.ControlID], slotsPerWeek, timelinessCtx)
 		}
 		summary := summarizeCaptureSlots(dtoSlots)
 		if !companyMatchesMailboxFilter(dtoSlots, statusFilter) {
@@ -765,7 +773,8 @@ func (s *SupervisorService) UploadMailboxCapture(
 		First(&slot, slot.ID).Error; err != nil {
 		return nil, err
 	}
-	dto := captureSlotDTO(&slot, slot.SlotIndex)
+	timelinessCtx := mailboxTimelinessCtxFor(periodYM, weekStartParsed, detail.CapturesPerWeek)
+	dto := enrichSunatInboxCaptureSlotTimeliness(captureSlotDTO(&slot, slot.SlotIndex), timelinessCtx)
 	return &dto, nil
 }
 
@@ -809,7 +818,8 @@ func (s *SupervisorService) VerifyMailboxCapture(slotID uint, mailboxType string
 		First(slot, slot.ID).Error; err != nil {
 		return nil, err
 	}
-	dto := captureSlotDTO(slot, slot.SlotIndex)
+	timelinessCtx := mailboxTimelinessCtxFromSlot(slot, mailboxCapturesPerWeekFromConfig())
+	dto := enrichSunatInboxCaptureSlotTimeliness(captureSlotDTO(slot, slot.SlotIndex), timelinessCtx)
 	return &dto, nil
 }
 

@@ -3,53 +3,93 @@ package services
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"miappfiber/database"
 	"miappfiber/models"
 )
 
-// detraccionesProgressFromStatus avance por estado F4.1a.
+// detraccionesProgressFromStatus avance por estado operativo simplificado.
 func detraccionesProgressFromStatus(status string) int {
 	switch status {
 	case models.SupervisorDeclPendiente:
 		return 0
-	case models.SupervisorDeclEnElaboracion:
-		return 20
-	case models.SupervisorDetraccionDepositoPendiente:
-		return 40
-	case models.SupervisorDetraccionDepositoRegistrado:
-		return 55
-	case models.SupervisorDetraccionSinOperaciones:
-		return 60
-	case models.SupervisorDeclEnRevision:
-		return 75
-	case models.SupervisorDeclObservado:
-		return 40
-	case models.SupervisorSunatValidado:
+	case models.SupervisorDetraccionCargado:
+		return 50
+	case models.SupervisorDetraccionVerificado,
+		models.SupervisorDetraccionSinClave,
+		models.SupervisorDetraccionNoCorresponde,
+		models.SupervisorSunatValidado:
 		return 100
 	default:
 		return 0
 	}
 }
 
-// detraccionesAllowedTransitions whitelist F4.1a (sin observado/validado vía PUT).
-var detraccionesAllowedTransitions = map[string][]string{
-	models.SupervisorDeclPendiente:              {models.SupervisorDeclEnElaboracion, models.SupervisorDetraccionSinOperaciones},
-	models.SupervisorDeclEnElaboracion:          {models.SupervisorDetraccionDepositoPendiente, models.SupervisorDetraccionSinOperaciones, models.SupervisorDeclEnRevision},
-	models.SupervisorDetraccionDepositoPendiente: {models.SupervisorDetraccionDepositoRegistrado, models.SupervisorDeclEnElaboracion},
-	models.SupervisorDetraccionDepositoRegistrado: {models.SupervisorDeclEnRevision, models.SupervisorDeclEnElaboracion},
-	models.SupervisorDetraccionSinOperaciones:   {models.SupervisorDeclEnRevision},
-	models.SupervisorDeclObservado:              {models.SupervisorDeclEnElaboracion},
+func detraccionesAllowsUpload(status string) bool {
+	switch status {
+	case models.SupervisorDeclPendiente, models.SupervisorDetraccionCargado:
+		return true
+	default:
+		return false
+	}
 }
 
-func detraccionesTransitionAllowed(from, to string) bool {
-	for _, t := range detraccionesAllowedTransitions[from] {
-		if t == to {
-			return true
+func detraccionesIsTerminal(status string) bool {
+	switch status {
+	case models.SupervisorDetraccionVerificado,
+		models.SupervisorDetraccionSinClave,
+		models.SupervisorDetraccionNoCorresponde,
+		models.SupervisorSunatValidado:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeDetraccionesDisplayStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "", models.SupervisorSunatSinRegistro:
+		return models.SupervisorDeclPendiente
+	case models.SupervisorSunatValidado:
+		return models.SupervisorDetraccionVerificado
+	default:
+		return status
+	}
+}
+
+// mapLegacyDetraccionesStatus convierte estados legacy F4/F4.1a al flujo simplificado.
+func mapLegacyDetraccionesStatus(oldStatus string, attachmentCount int64) (string, int) {
+	oldStatus = strings.TrimSpace(oldStatus)
+	var newStatus string
+	switch oldStatus {
+	case models.SupervisorSunatValidado, models.SupervisorDetraccionVerificado:
+		newStatus = models.SupervisorDetraccionVerificado
+	case models.SupervisorDetraccionSinClave:
+		newStatus = models.SupervisorDetraccionSinClave
+	case models.SupervisorDetraccionNoCorresponde, models.SupervisorDetraccionSinOperaciones:
+		newStatus = models.SupervisorDetraccionNoCorresponde
+	case models.SupervisorDetraccionCargado, models.SupervisorDeclEnRevision:
+		newStatus = models.SupervisorDetraccionCargado
+	case models.SupervisorDeclPendiente:
+		newStatus = models.SupervisorDeclPendiente
+	default:
+		if attachmentCount > 0 {
+			newStatus = models.SupervisorDetraccionCargado
+		} else {
+			newStatus = models.SupervisorDeclPendiente
 		}
 	}
-	return false
+	return newStatus, detraccionesProgressFromStatus(newStatus)
+}
+
+// validateDetraccionesStatusTransition bloquea cambios genéricos PUT; usar endpoints dedicados.
+func (s *SupervisorService) validateDetraccionesStatusTransition(d *models.SupervisorDeclaration, from, to, _ string) error {
+	if from == to {
+		return nil
+	}
+	return errors.New("use los endpoints de Detracciones para cambiar estado (carga PDF, verificar o estado supervisor)")
 }
 
 func countDeclarationAttachments(declarationID uint) (int64, error) {
@@ -60,126 +100,58 @@ func countDeclarationAttachments(declarationID uint) (int64, error) {
 	return n, err
 }
 
-func effectiveDeclarationNotes(current, incoming string) string {
-	if strings.TrimSpace(incoming) != "" {
-		return strings.TrimSpace(incoming)
-	}
-	return strings.TrimSpace(current)
-}
-
-// validateDetraccionesStatusTransition valida transición manual (PUT declarations).
-func (s *SupervisorService) validateDetraccionesStatusTransition(d *models.SupervisorDeclaration, from, to, incomingNotes string) error {
-	if from == to {
-		return nil
-	}
-	if to == models.SupervisorDeclObservado || to == models.SupervisorSunatValidado {
-		return errors.New("use los botones Observar o Validar del módulo de Detracciones")
-	}
-	if !detraccionesTransitionAllowed(from, to) {
-		return fmt.Errorf("transición no permitida: %s → %s", from, to)
-	}
-	notes := effectiveDeclarationNotes(d.Notes, incomingNotes)
-
-	if to == models.SupervisorDetraccionSinOperaciones && notes == "" {
-		return errors.New("indique en notas que no hay operaciones sujetas a detracción en el período")
-	}
-
-	if to == models.SupervisorDeclEnRevision {
-		if from == models.SupervisorDetraccionSinOperaciones {
-			if notes == "" {
-				return errors.New("indique en notas el motivo del período sin operaciones sujetas")
-			}
-		} else {
-			n, err := countDeclarationAttachments(d.ID)
-			if err != nil {
-				return err
-			}
-			if n < 1 {
-				return errors.New("cargue al menos una evidencia antes de enviar a revisión")
-			}
-		}
-	}
-
-	return nil
-}
-
-// observeDetraccionesDeclaration observa una declaración detracciones (solo desde en_revision).
+// observeDetraccionesDeclaration legacy — ya no aplica al flujo simplificado.
 func (s *SupervisorService) observeDetraccionesDeclaration(id uint, approverID uint, notes string) (*models.SupervisorDeclaration, error) {
-	var d models.SupervisorDeclaration
-	if err := database.DB.First(&d, id).Error; err != nil {
-		return nil, errors.New("declaración no encontrada")
-	}
-	if d.Status != models.SupervisorDeclEnRevision {
-		return nil, errors.New("solo se puede observar desde estado en revisión")
-	}
-	if strings.TrimSpace(notes) == "" {
-		return nil, errors.New("indique el texto de la observación")
-	}
-	old := d.Status
-	pct := detraccionesProgressFromStatus(models.SupervisorDeclObservado)
-	d.Status = models.SupervisorDeclObservado
-	d.Notes = strings.TrimSpace(notes)
-	d.ApproverUserID = &approverID
-	d.ProgressPct = pct
-	if err := database.DB.Save(&d).Error; err != nil {
-		return nil, err
-	}
-	s.LogChange("declaration", id, "status", old, d.Status, approverID)
-	_ = database.DB.Model(&models.SupervisorMonthlyControl{}).
-		Where("id = ?", d.MonthlyControlID).
-		Update("general_status", models.SupervisorControlObservado).Error
-	did := id
-	_, _ = s.CreateObservation(d.MonthlyControlID, did, approverID, notes)
-	return &d, nil
+	return nil, errors.New("las observaciones no aplican al flujo actual de Detracciones")
 }
 
-// validateDetraccionesPreconditions comprobaciones previas a validar.
-func validateDetraccionesPreconditions(d *models.SupervisorDeclaration) error {
-	switch d.Status {
-	case models.SupervisorDeclEnRevision:
-		n, err := countDeclarationAttachments(d.ID)
-		if err != nil {
-			return err
-		}
-		if n < 1 {
-			return errors.New("cargue al menos una evidencia antes de validar")
-		}
-	case models.SupervisorDetraccionSinOperaciones:
-		if strings.TrimSpace(d.Notes) == "" {
-			return errors.New("indique en notas que no hay operaciones sujetas antes de validar")
-		}
-	default:
-		return errors.New("solo se puede validar desde en revisión o sin operaciones sujetas")
+func validateDetraccionesVerifyPreconditions(d *models.SupervisorDeclaration) error {
+	if d.Status != models.SupervisorDetraccionCargado {
+		return errors.New("solo se puede verificar desde estado cargado")
+	}
+	n, err := countDeclarationAttachments(d.ID)
+	if err != nil {
+		return err
+	}
+	if n < 1 {
+		return errors.New("cargue el PDF antes de verificar")
 	}
 	return nil
 }
 
-// mapLegacyDetraccionesStatus convierte estados F4 legacy a F4.1a (migración).
-func mapLegacyDetraccionesStatus(oldStatus string, attachmentCount int64) (string, int) {
-	var newStatus string
-	switch oldStatus {
-	case models.SupervisorDistractionAbierto:
-		newStatus = models.SupervisorDeclPendiente
-	case models.SupervisorDistractionEnProceso:
-		newStatus = models.SupervisorDeclEnElaboracion
-	case models.SupervisorDistractionResuelto:
-		if attachmentCount >= 1 {
-			newStatus = models.SupervisorDeclEnRevision
-		} else {
-			newStatus = models.SupervisorDetraccionDepositoRegistrado
-		}
-	case models.SupervisorDistractionEscalado:
-		newStatus = models.SupervisorDeclObservado
-	case models.SupervisorDeclObservado:
-		newStatus = models.SupervisorDeclObservado
-	case models.SupervisorSunatValidado:
-		newStatus = models.SupervisorSunatValidado
-	case models.SupervisorDeclPendiente, models.SupervisorDeclEnElaboracion,
-		models.SupervisorDetraccionDepositoPendiente, models.SupervisorDetraccionDepositoRegistrado,
-		models.SupervisorDetraccionSinOperaciones, models.SupervisorDeclEnRevision:
-		newStatus = oldStatus
+func validateDetraccionesSupervisorStatus(to string) error {
+	switch to {
+	case models.SupervisorDetraccionSinClave, models.SupervisorDetraccionNoCorresponde:
+		return nil
 	default:
-		newStatus = models.SupervisorDeclPendiente
+		return fmt.Errorf("estado supervisor no permitido: %s", to)
 	}
-	return newStatus, detraccionesProgressFromStatus(newStatus)
+}
+
+func validateDetraccionesSupervisorStatusTransition(from, to string) error {
+	if err := validateDetraccionesSupervisorStatus(to); err != nil {
+		return err
+	}
+	switch from {
+	case models.SupervisorDeclPendiente, models.SupervisorDetraccionCargado:
+		return nil
+	default:
+		return fmt.Errorf("no se puede cambiar a %s desde %s", to, from)
+	}
+}
+
+func validateDetraccionesPDFFile(fileName string, data []byte) error {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
+	if ext != ".pdf" {
+		return errors.New("solo se permiten archivos PDF")
+	}
+	if len(data) < 5 || string(data[:5]) != "%PDF-" {
+		return errors.New("el archivo no es un PDF válido")
+	}
+	return nil
+}
+
+// validateDetraccionesPreconditions alias para verificación supervisor.
+func validateDetraccionesPreconditions(d *models.SupervisorDeclaration) error {
+	return validateDetraccionesVerifyPreconditions(d)
 }

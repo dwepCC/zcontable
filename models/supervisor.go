@@ -61,6 +61,11 @@ const (
 	SupervisorDetraccionDepositoPendiente   = "deposito_pendiente"
 	SupervisorDetraccionDepositoRegistrado  = "deposito_registrado"
 	SupervisorDetraccionSinOperaciones      = "sin_operaciones"
+	// Flujo operativo simplificado (Control de Detracciones).
+	SupervisorDetraccionCargado       = "cargado"
+	SupervisorDetraccionVerificado    = "verificado"
+	SupervisorDetraccionSinClave       = "sin_clave"
+	SupervisorDetraccionNoCorresponde  = "no_corresponde"
 	// Legacy F4 pre-F4.1a (solo migración / lectura histórica).
 	SupervisorDistractionAbierto   = "abierto"
 	SupervisorDistractionEnProceso = "en_proceso"

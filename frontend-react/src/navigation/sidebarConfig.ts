@@ -114,6 +114,12 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
         type: 'group',
         label: 'Catálogo',
         items: [
+          {
+            to: '/finance/activity-templates',
+            icon: 'fas fa-list-check',
+            label: 'Catálogo de actividades',
+            permission: P.financeCalendarView,
+          },
           { to: '/subscription-plans', icon: 'fas fa-layer-group', label: 'Planes', permission: P.subscriptionPlansView },
           { to: '/products', icon: 'fas fa-box-open', label: 'Productos', permission: P.productsView },
         ],
@@ -315,6 +321,12 @@ export const STUDIO_SECTION = {
   icon: 'fas fa-building-columns',
   items: [
     { to: '/settings/firm', icon: 'fas fa-gear', label: 'Configuración', permission: P.settingsFirmView },
+    {
+      to: '/settings/activity-configuration',
+      icon: 'fas fa-sliders',
+      label: 'Parametrización de actividades',
+      permission: P.settingsFirmView,
+    },
     { to: '/users', icon: 'fas fa-users-cog', label: 'Usuarios', permission: P.usersView },
     { to: '/users/roles', icon: 'fas fa-user-shield', label: 'Roles y permisos', permission: P.rbacRolesView },
     {

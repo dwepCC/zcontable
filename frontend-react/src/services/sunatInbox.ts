@@ -9,6 +9,11 @@ export interface SunatInboxMailboxSide {
   file_url?: string;
   uploaded_at?: string;
   verified_at?: string;
+  timeliness?: {
+    timeliness: string;
+    due_at?: string;
+    uploaded_at?: string;
+  };
 }
 
 export interface SunatInboxCaptureSlot {

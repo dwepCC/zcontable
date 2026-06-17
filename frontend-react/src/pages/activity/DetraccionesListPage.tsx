@@ -1,19 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Pagination from '../../components/Pagination';
 import ActivityPeriodFilter from '../../components/activity/ActivityPeriodFilter';
+import DetraccionesRowActions from '../../components/activity/DetraccionesRowActions';
 import {
   formatStoredAt,
-  detraccionesStatusBadgeClass,
-  detraccionesStatusLabel,
   DETRACCIONES_STATUS_FILTER,
 } from '../../components/activity/detraccionesConfig';
+import {
+  timelinessBadgeClass,
+  timelinessLabel,
+  timelinessRowBorderClass,
+} from '../../components/activity/timelinessConfig';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import {
   activityModulePath,
   workspaceHomePath,
   type ActivityWorkspace,
 } from '../../navigation/activityRoutes';
+import { auth } from '../../services/auth';
+import { P } from '../../rbac/codes';
 import { detraccionesService, type DetraccionesListRow } from '../../services/detracciones';
 import { currentPeriodYM } from '../../utils/supervisorLabels';
 import { extractApiErrorMessage } from '../../utils/apiError';
@@ -39,6 +45,16 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPeriod = searchParams.get('period_ym') || currentPeriodYM();
 
+  const canUpload = useMemo(
+    () => workspace === 'assistant' && auth.hasPermission(P.supervisorsAttachmentsUpload),
+    [workspace],
+  );
+  const canVerify = useMemo(
+    () => workspace === 'supervisor' && auth.hasPermission(P.supervisorsDeclarationsApprove),
+    [workspace],
+  );
+  const canSetStatus = canVerify;
+
   const [periodYm, setPeriodYm] = useState(initialPeriod);
   const [q, setQ] = useState('');
   const debouncedQ = useDebouncedValue(q, 400);
@@ -49,6 +65,7 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     setSearchParams(
@@ -97,12 +114,51 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
     return `${path}?period_ym=${encodeURIComponent(periodYm)}`;
   };
 
+  const handleUpload = async (companyId: number, file: File) => {
+    setActionError('');
+    try {
+      await detraccionesService.uploadPdf(companyId, periodYm, file);
+    } catch (err) {
+      setActionError(extractApiErrorMessage(err, 'No se pudo subir el PDF.'));
+      throw err;
+    }
+  };
+
+  const handleVerify = async (declarationId: number) => {
+    setActionError('');
+    try {
+      await detraccionesService.verify(declarationId);
+    } catch (err) {
+      setActionError(extractApiErrorMessage(err, 'No se pudo verificar.'));
+      throw err;
+    }
+  };
+
+  const handleSetStatus = async (
+    companyId: number,
+    declarationId: number | undefined,
+    status: 'sin_clave' | 'no_corresponde',
+  ) => {
+    setActionError('');
+    try {
+      let id = declarationId;
+      if (!id) {
+        const detail = await detraccionesService.getDetail(companyId, periodYm);
+        id = detail.declaration.id;
+      }
+      await detraccionesService.setSupervisorStatus(id, status);
+    } catch (err) {
+      setActionError(extractApiErrorMessage(err, 'No se pudo cambiar el estado.'));
+      throw err;
+    }
+  };
+
   return (
     <div className={PAGE_WORKSPACE_CLASS}>
       <div>
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Control de Detracciones SUNAT</h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Seguimiento manual del régimen de detracciones por empresa y período.
+          Carga de comprobante PDF por el asistente y verificación por el supervisor.
         </p>
       </div>
 
@@ -141,6 +197,9 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
       {error ? (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
       ) : null}
+      {actionError ? (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-sm">{actionError}</div>
+      ) : null}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -153,7 +212,7 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
                 <th className={TH}>RUC</th>
                 <th className={TH}>Asistente</th>
                 <th className={TH}>Estado</th>
-                <th className={TH}>Cantidad archivos</th>
+                <th className={TH}>Cumplimiento</th>
                 <th className={TH}>Fecha almacenamiento</th>
                 <th className={TH} />
               </tr>
@@ -174,7 +233,10 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
                 </tr>
               ) : (
                 rows.map((row) => (
-                  <tr key={row.company_id} className="hover:bg-slate-50/80">
+                  <tr
+                    key={row.company_id}
+                    className={`hover:bg-slate-50/80 border-l-4 ${timelinessRowBorderClass(row.timeliness?.timeliness)}`}
+                  >
                     <td className={`${TD} font-mono`}>{row.code || '—'}</td>
                     <td className={TD}>{row.dig || '—'}</td>
                     <td className={`${TD} max-w-[14rem] font-medium`} title={row.business_name}>
@@ -183,13 +245,31 @@ const DetraccionesListPage = ({ workspace }: DetraccionesListPageProps) => {
                     <td className={`${TD} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
                     <td className={TD}>{row.assistant_username || '—'}</td>
                     <td className={TD}>
+                      <DetraccionesRowActions
+                        row={row}
+                        periodYm={periodYm}
+                        workspace={workspace}
+                        canUpload={canUpload}
+                        canVerify={canVerify}
+                        canSetStatus={canSetStatus}
+                        onUpdated={() => void load()}
+                        onUpload={handleUpload}
+                        onVerify={handleVerify}
+                        onSetStatus={handleSetStatus}
+                      />
+                    </td>
+                    <td className={TD}>
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${detraccionesStatusBadgeClass(row.status)}`}
+                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${timelinessBadgeClass(row.timeliness?.timeliness)}`}
+                        title={
+                          row.timeliness?.due_at
+                            ? `Plazo: ${new Date(row.timeliness.due_at).toLocaleString('es-PE')}`
+                            : undefined
+                        }
                       >
-                        {detraccionesStatusLabel(row.status)}
+                        {timelinessLabel(row.timeliness?.timeliness)}
                       </span>
                     </td>
-                    <td className={`${TD} tabular-nums text-center`}>{row.attachment_count}</td>
                     <td className={`${TD} whitespace-nowrap text-slate-600`}>{formatStoredAt(row.last_stored_at)}</td>
                     <td className={TD}>
                       <Link

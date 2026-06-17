@@ -26,6 +26,7 @@ import Payments from './pages/Payments';
 import PaymentForm from './pages/PaymentForm';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import ActivityConfigurationSettings from './pages/settings/ActivityConfigurationSettings';
 import Users from './pages/Users';
 import UserForm from './pages/UserForm';
 import RolePermissions from './pages/RolePermissions';
@@ -47,6 +48,8 @@ import SupervisorControlDetail from './pages/supervisors/SupervisorControlDetail
 import SupervisorReports from './pages/supervisors/SupervisorReports';
 import SupervisorNotifications from './pages/supervisors/SupervisorNotifications';
 import FinanceCalendar from './pages/finance/FinanceCalendar';
+import ActivityTemplates from './pages/finance/ActivityTemplates';
+import ActivityTemplateForm from './pages/finance/ActivityTemplateForm';
 import CompanyAccessCredentials from './pages/finance/CompanyAccessCredentials';
 import AssistantWorkspace from './pages/assistant/AssistantWorkspace';
 import AssistantCompaniesPage from './pages/assistant/AssistantCompaniesPage';
@@ -141,6 +144,11 @@ function App() {
             <Route path="supervisors/reports" element={<SupervisorReports />} />
             <Route path="supervisors/notifications" element={<SupervisorNotifications />} />
             <Route path="finance/calendar" element={<FinanceCalendar />} />
+            <Route path="finance/activity-templates">
+              <Route index element={<ActivityTemplates />} />
+              <Route path="new" element={<ActivityTemplateForm />} />
+              <Route path=":id/edit" element={<ActivityTemplateForm />} />
+            </Route>
             <Route path="finance/claves-sol" element={<CompanyAccessCredentials />} />
             <Route path="assistant" element={<AssistantWorkspace />} />
             <Route path="assistant/companies" element={<AssistantCompaniesPage />} />
@@ -161,6 +169,7 @@ function App() {
             <Route path="pos" element={<PosSale />} />
             <Route path="pos/history" element={<PosHistory />} />
             <Route path="settings/firm" element={<Settings />} />
+            <Route path="settings/activity-configuration" element={<ActivityConfigurationSettings />} />
             <Route path="settings/fiscal-series" element={<FiscalDocumentSeries />} />
             <Route path="users" element={<Users />} />
             <Route path="users/roles" element={<RolePermissions />} />

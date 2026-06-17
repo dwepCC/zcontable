@@ -48,8 +48,14 @@ const TD = 'px-3 py-3 text-sm text-slate-700 border-t border-slate-100 align-top
 
 const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
   const homePath = workspaceHomePath(workspace);
-  const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
-  const canVerify = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
+  const canUpload = useMemo(
+    () => workspace === 'assistant' && auth.hasPermission(P.supervisorsAttachmentsUpload),
+    [workspace],
+  );
+  const canVerify = useMemo(
+    () => workspace === 'supervisor' && auth.hasPermission(P.supervisorsDeclarationsApprove),
+    [workspace],
+  );
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPeriod = searchParams.get('period_ym') || currentPeriodYM();
@@ -69,6 +75,7 @@ const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const [verifyError, setVerifyError] = useState('');
 
   const capturesPerWeek = meta?.captures_per_week ?? 2;
   const weekOptions = meta?.weeks?.length ? meta.weeks : weeksInPeriodYM(periodYm);
@@ -165,13 +172,20 @@ const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
   };
 
   const handleVerify = async (companyId: number, slotId: number, mailboxType: MailboxType) => {
+    if (!slotId) {
+      setVerifyError('No hay slot de captura registrado. Abra el detalle de la empresa primero.');
+      return;
+    }
     try {
       setMsg('');
+      setVerifyError('');
       const slot = await sunatInboxService.verifyCapture(slotId, mailboxType);
       patchRowSlot(companyId, slot.slot_index, slot);
       setMsg('Buzón verificado.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo verificar.'));
+      const text = extractApiErrorMessage(err, 'No se pudo verificar.');
+      setVerifyError(text);
+      setMsg('');
     }
   };
 
@@ -251,6 +265,10 @@ const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
         </div>
       </div>
 
+      {verifyError ? (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{verifyError}</div>
+      ) : null}
+
       {msg ? (
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">{msg}</div>
       ) : null}
@@ -259,9 +277,9 @@ const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
       ) : null}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full w-full text-left">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm max-w-full">
+        <div className="overflow-x-auto max-w-full custom-scrollbar">
+          <table className="w-max min-w-full text-left table-auto">
             <thead className="bg-slate-50">
               <tr>
                 <th className={`${TH} sticky left-0 z-10 bg-slate-50`}>Código</th>
@@ -322,7 +340,7 @@ const SunatInboxListPage = ({ workspace }: SunatInboxListPageProps) => {
                         sunafil: { status: 'pendiente' },
                       };
                       return (
-                        <td key={idx} className={`${TD} px-2`}>
+                        <td key={idx} className="px-2 py-2 text-sm text-slate-700 border-t border-slate-100 align-top min-w-[36.5rem] w-[36.5rem]">
                           <MailboxCaptureSlotCell
                             slot={slot}
                             canUpload={canUpload}

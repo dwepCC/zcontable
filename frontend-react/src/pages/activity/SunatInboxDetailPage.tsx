@@ -34,8 +34,14 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
 
   const listPath = `${activityModulePath(workspace, 'sunat-inbox')}?period_ym=${encodeURIComponent(periodYm)}&week_start=${encodeURIComponent(weekStart)}`;
 
-  const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
-  const canVerify = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
+  const canUpload = useMemo(
+    () => workspace === 'assistant' && auth.hasPermission(P.supervisorsAttachmentsUpload),
+    [workspace],
+  );
+  const canVerify = useMemo(
+    () => workspace === 'supervisor' && auth.hasPermission(P.supervisorsDeclarationsApprove),
+    [workspace],
+  );
 
   const [detail, setDetail] = useState<SunatInboxDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,13 +114,18 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
   };
 
   const handleVerify = async (slotId: number, mailboxType: MailboxType) => {
+    if (!slotId) {
+      setError('No hay slot de captura registrado.');
+      return;
+    }
     try {
       setMsg('');
+      setError('');
       const slot = await sunatInboxService.verifyCapture(slotId, mailboxType);
       patchSlot(slot);
       setMsg('Buzón verificado.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo verificar.'));
+      setError(extractApiErrorMessage(err, 'No se pudo verificar.'));
     }
   };
 
@@ -196,37 +207,29 @@ const SunatInboxDetailPage = ({ workspace }: SunatInboxDetailPageProps) => {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full w-full text-left">
-            <thead className="bg-slate-50">
-              <tr>
-                {detail.slots.map((slot) => (
-                  <th
-                    key={slot.slot_index}
-                    className="px-3 py-3 text-center text-xs font-semibold uppercase text-slate-500 min-w-[10rem]"
-                  >
-                    Carga {slot.slot_index}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {detail.slots.map((slot) => (
-                  <td key={slot.slot_index} className="px-3 py-3 border-t border-slate-100 align-top">
-                    <MailboxCaptureSlotCell
-                      slot={slot}
-                      canUpload={canUpload}
-                      canVerify={canVerify}
-                      uploadKey={`detail-${companyId}-${weekStart}`}
-                      onUpload={handleUpload}
-                      onVerify={handleVerify}
-                    />
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+          <h2 className="text-sm font-semibold text-slate-800">Capturas de la semana</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {canUpload
+              ? 'Suba PDF o imagen por buzón (SUNAT / SUNAFIL). Use Ver para previsualizar o Descargar para guardar el archivo.'
+              : 'Revise las capturas. Solo el asistente puede subir archivos; el supervisor puede verificar.'}
+          </p>
+        </div>
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {detail.slots.map((slot) => (
+            <div key={slot.slot_index} className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Carga {slot.slot_index}</h3>
+              <MailboxCaptureSlotCell
+                slot={slot}
+                canUpload={canUpload}
+                canVerify={canVerify}
+                layout="detail"
+                uploadKey={`detail-${companyId}-${weekStart}`}
+                onUpload={handleUpload}
+                onVerify={handleVerify}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </div>

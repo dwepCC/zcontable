@@ -1,28 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { resolveBackendUrl } from '../../api/client';
+import DetraccionesStatusModal from '../../components/activity/DetraccionesStatusModal';
 import {
   formatStoredAt,
+  detraccionesAllowsUpload,
   detraccionesStatusBadgeClass,
   detraccionesStatusLabel,
-  detraccionesSelectableStatuses,
+  detraccionesSupervisorCanSetManualStatus,
+  normalizeDetraccionesStatus,
 } from '../../components/activity/detraccionesConfig';
+import {
+  formatTimelinessDate,
+  timelinessBadgeClass,
+  timelinessLabel,
+} from '../../components/activity/timelinessConfig';
+import FilePreviewModal from '../../components/FilePreviewModal';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { activityModulePath, type ActivityWorkspace } from '../../navigation/activityRoutes';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
-import {
-  supervisorsService,
-  type SupervisorAttachment,
-  type SupervisorDeclaration,
-  type SupervisorObservation,
-} from '../../services/supervisors';
+import { supervisorsService, type SupervisorAttachment, type SupervisorDeclaration } from '../../services/supervisors';
 import { detraccionesService, type DetraccionesDetail } from '../../services/detracciones';
 import { currentPeriodYM } from '../../utils/supervisorLabels';
 import { extractApiErrorMessage } from '../../utils/apiError';
+import { downloadRemoteFile } from '../../utils/downloadFile';
 
 type DetraccionesDetailPageProps = {
   workspace: ActivityWorkspace;
 };
+
+function validatePdfClient(file: File): string | null {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.pdf')) return 'Solo se permiten archivos PDF.';
+  if (file.type && file.type !== 'application/pdf') return 'El archivo debe ser PDF.';
+  return null;
+}
 
 const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
   const { companyId: companyIdParam } = useParams();
@@ -31,37 +44,36 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
   const periodYm = searchParams.get('period_ym') || currentPeriodYM();
   const listPath = `${activityModulePath(workspace, 'detracciones')}?period_ym=${encodeURIComponent(periodYm)}`;
 
-  const canUpdate = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsUpdate), []);
-  const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
-  const canObserve = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsObserve), []);
-  const canApprove = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
-  const canCreateObservation = useMemo(() => auth.hasPermission(P.supervisorsObservationsCreate), []);
+  const canUpload = useMemo(
+    () => workspace === 'assistant' && auth.hasPermission(P.supervisorsAttachmentsUpload),
+    [workspace],
+  );
+  const canVerify = useMemo(
+    () => workspace === 'supervisor' && auth.hasPermission(P.supervisorsDeclarationsApprove),
+    [workspace],
+  );
 
   const [detail, setDetail] = useState<DetraccionesDetail | null>(null);
   const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
-  const [observations, setObservations] = useState<SupervisorObservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
-  const [statusSaving, setStatusSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [obsText, setObsText] = useState('');
-  const [obsSaving, setObsSaving] = useState(false);
-  const [supervisorNotes, setSupervisorNotes] = useState('');
-  const [declarationNotes, setDeclarationNotes] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; fileName: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const declaration = detail?.declaration;
+  const status = declaration ? normalizeDetraccionesStatus(declaration.status) : 'pendiente';
+  const latestAttachment = attachments[0];
+  const fileUrl = latestAttachment?.file_url ? resolveBackendUrl(latestAttachment.file_url) : '';
+  const fileName = latestAttachment?.file_name?.trim() || 'Comprobante.pdf';
 
   const loadAttachments = useCallback(async (declarationId: number) => {
     const rows = await supervisorsService.listAttachments(0, declarationId);
     setAttachments(rows);
-  }, []);
-
-  const loadObservations = useCallback(async (declarationId: number) => {
-    const rows = await supervisorsService.listObservations(0, declarationId);
-    setObservations(rows);
   }, []);
 
   const load = useCallback(async () => {
@@ -75,11 +87,7 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
       setError('');
       const data = await detraccionesService.getDetail(companyId, periodYm);
       setDetail(data);
-      setDeclarationNotes(data.declaration.notes ?? '');
-      await Promise.all([
-        loadAttachments(data.declaration.id),
-        loadObservations(data.declaration.id),
-      ]);
+      await loadAttachments(data.declaration.id);
     } catch (err) {
       console.error(err);
       setError(extractApiErrorMessage(err, 'No se pudo cargar el detalle.'));
@@ -87,7 +95,7 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
     } finally {
       setLoading(false);
     }
-  }, [companyId, periodYm, loadAttachments, loadObservations]);
+  }, [companyId, periodYm, loadAttachments]);
 
   useEffect(() => {
     void load();
@@ -95,112 +103,61 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
 
   const refreshDeclaration = (decl: SupervisorDeclaration) => {
     setDetail((d) => (d ? { ...d, declaration: decl } : d));
-    setDeclarationNotes(decl.notes ?? '');
-  };
-
-  const statusOptions = useMemo(
-    () => (declaration ? detraccionesSelectableStatuses(declaration.status) : []),
-    [declaration],
-  );
-
-  const canSubmitReview = declaration?.status === 'en_revision';
-  const canValidateNow =
-    declaration?.status === 'en_revision'
-      ? attachments.length > 0
-      : declaration?.status === 'sin_operaciones'
-        ? declarationNotes.trim().length > 0
-        : false;
-
-  const handleStatusChange = async (status: string) => {
-    if (!declaration || !canUpdate) return;
-    try {
-      setStatusSaving(true);
-      setMsg('');
-      const body: { status: string; notes?: string } = { status };
-      if (status === 'sin_operaciones' || status === 'en_revision') {
-        body.notes = declarationNotes.trim();
-      }
-      const updated = await supervisorsService.updateDeclaration(declaration.id, body);
-      refreshDeclaration(updated);
-      setMsg('Estado actualizado.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo actualizar el estado.'));
-    } finally {
-      setStatusSaving(false);
-    }
   };
 
   const handleUpload = async (files: FileList | null) => {
     if (!declaration || !canUpload || !files?.length) return;
+    const file = files[0];
+    const validationError = validatePdfClient(file);
+    if (validationError) {
+      setMsg(validationError);
+      return;
+    }
+    if (!detraccionesAllowsUpload(status)) {
+      setMsg('No se puede cargar PDF en el estado actual.');
+      return;
+    }
     try {
       setUploading(true);
       setMsg('');
-      for (const file of Array.from(files)) {
-        await supervisorsService.uploadAttachment(detail!.control_id, declaration.id, file);
-      }
-      await loadAttachments(declaration.id);
-      setMsg('Archivo(s) subido(s) correctamente.');
+      const updated = await detraccionesService.uploadPdf(companyId, periodYm, file);
+      setDetail(updated);
+      await loadAttachments(updated.declaration.id);
+      setMsg('PDF cargado correctamente.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'Error al subir archivo.'));
+      setMsg(extractApiErrorMessage(err, 'Error al subir el PDF.'));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
 
-  const handleAddObservation = async () => {
-    if (!declaration || !canCreateObservation) return;
-    const body = obsText.trim();
-    if (!body) return;
-    try {
-      setObsSaving(true);
-      setMsg('');
-      await supervisorsService.createObservation({ declaration_id: declaration.id, body });
-      setObsText('');
-      await loadObservations(declaration.id);
-      setMsg('Observación registrada.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo registrar la observación.'));
-    } finally {
-      setObsSaving(false);
-    }
-  };
-
-  const handleValidate = async () => {
-    if (!declaration || !canApprove) return;
+  const handleVerify = async () => {
+    if (!declaration || !canVerify || workspace !== 'supervisor') return;
     try {
       setActionLoading(true);
       setMsg('');
-      if (declaration.status === 'sin_operaciones' && declarationNotes.trim()) {
-        await supervisorsService.updateDeclaration(declaration.id, { notes: declarationNotes.trim() });
-      }
-      const updated = await detraccionesService.validate(declaration.id);
+      const updated = await detraccionesService.verify(declaration.id);
       refreshDeclaration(updated);
-      setMsg('Registro validado.');
+      setMsg('Registro verificado.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo validar.'));
+      setMsg(extractApiErrorMessage(err, 'No se pudo verificar.'));
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleObserve = async () => {
-    if (!declaration || !canObserve) return;
-    const notes = supervisorNotes.trim();
-    if (!notes) {
-      setMsg('Ingrese el texto de la observación.');
-      return;
-    }
+  const handleSetStatus = async (next: 'sin_clave' | 'no_corresponde') => {
+    if (!declaration || workspace !== 'supervisor' || !canVerify) return;
     try {
       setActionLoading(true);
       setMsg('');
-      const updated = await supervisorsService.observeDeclaration(declaration.id, notes);
+      const updated = await detraccionesService.setSupervisorStatus(declaration.id, next);
       refreshDeclaration(updated);
-      setSupervisorNotes('');
-      await loadObservations(declaration.id);
-      setMsg('Observación registrada.');
+      setStatusModalOpen(false);
+      setMsg('Estado actualizado.');
     } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo observar.'));
+      setMsg(extractApiErrorMessage(err, 'No se pudo cambiar el estado.'));
     } finally {
       setActionLoading(false);
     }
@@ -227,6 +184,10 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
       </div>
     );
   }
+
+  const showUpload = canUpload && detraccionesAllowsUpload(status);
+  const showVerify = canVerify && workspace === 'supervisor' && status === 'cargado';
+  const showStatusEdit = canVerify && workspace === 'supervisor' && detraccionesSupervisorCanSetManualStatus(status);
 
   return (
     <div className={PAGE_WORKSPACE_CLASS}>
@@ -256,97 +217,82 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
             <dd className="text-slate-800">{detail.assistant_username || '—'}</dd>
             <dt className="text-slate-500">Estado</dt>
             <dd>
-              <span
-                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${detraccionesStatusBadgeClass(declaration.status)}`}
-              >
-                {detraccionesStatusLabel(declaration.status)}
-              </span>
-            </dd>
-          </dl>
-          {canUpdate ? (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Notas del período</label>
-                <textarea
-                  value={declarationNotes}
-                  onChange={(e) => setDeclarationNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Ej. sin operaciones sujetas, referencia de depósito…"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Cambiar estado</label>
-                <select
-                  value={declaration.status}
-                  disabled={statusSaving || declaration.status === 'validado'}
-                  onChange={(e) => void handleStatusChange(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {statusOptions.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Para enviar a revisión desde depósito registrado se requiere al menos una evidencia cargada.
-                </p>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {(canApprove || canObserve) && (
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <h2 className="text-sm font-semibold text-slate-800">Revisión supervisor</h2>
-            {canObserve ? (
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Observar</label>
-                <textarea
-                  value={supervisorNotes}
-                  onChange={(e) => setSupervisorNotes(e.target.value)}
-                  rows={3}
-                  disabled={!canSubmitReview}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-50"
-                  placeholder={canSubmitReview ? 'Indique la observación…' : 'Disponible cuando el expediente esté en revisión.'}
-                />
+              {showStatusEdit ? (
                 <button
                   type="button"
-                  disabled={actionLoading || !canSubmitReview}
-                  onClick={() => void handleObserve()}
-                  className="mt-2 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm font-medium hover:bg-amber-100 disabled:opacity-50"
+                  onClick={() => setStatusModalOpen(true)}
+                  className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium hover:ring-2 hover:ring-primary-300 ${detraccionesStatusBadgeClass(status)}`}
                 >
-                  Observar
+                  {detraccionesStatusLabel(status)}
+                  <i className="fas fa-pen ml-1 text-[9px] opacity-70" aria-hidden />
                 </button>
-              </div>
+              ) : (
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${detraccionesStatusBadgeClass(status)}`}
+                >
+                  {detraccionesStatusLabel(status)}
+                </span>
+              )}
+            </dd>
+            <dt className="text-slate-500">Cumplimiento</dt>
+            <dd>
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${timelinessBadgeClass(detail.timeliness?.timeliness)}`}
+              >
+                {timelinessLabel(detail.timeliness?.timeliness)}
+              </span>
+            </dd>
+            {detail.timeliness?.due_at ? (
+              <>
+                <dt className="text-slate-500">Plazo calendario</dt>
+                <dd className="text-slate-800">{formatTimelinessDate(detail.timeliness.due_at)}</dd>
+              </>
             ) : null}
-            {canApprove ? (
+            {detail.timeliness?.uploaded_at || latestAttachment?.created_at ? (
+              <>
+                <dt className="text-slate-500">Fecha carga PDF</dt>
+                <dd className="text-slate-800">
+                  {formatTimelinessDate(detail.timeliness?.uploaded_at ?? latestAttachment?.created_at)}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+
+        {workspace === 'supervisor' && (showVerify || showStatusEdit) ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <h2 className="text-sm font-semibold text-slate-800">Revisión supervisor</h2>
+            {showVerify ? (
               <button
                 type="button"
-                disabled={actionLoading || declaration.status === 'validado' || !canValidateNow}
-                onClick={() => void handleValidate()}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                disabled={actionLoading || !fileUrl}
+                onClick={() => void handleVerify()}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
               >
-                Validar
+                <i className="fas fa-check" aria-hidden />
+                Marcar como verificado
               </button>
             ) : null}
+            {showStatusEdit ? (
+              <p className="text-xs text-slate-500">
+                Si la empresa no requiere comprobante PDF, use el estado en la tarjeta de empresa para marcar «Sin clave» o «No corresponde».
+              </p>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-800">Evidencias ({attachments.length})</h2>
-          {canUpload ? (
+          <h2 className="text-sm font-semibold text-slate-800">Comprobante PDF</h2>
+          {showUpload ? (
             <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium cursor-pointer hover:bg-primary-700">
               <i className="fas fa-upload" aria-hidden />
-              {uploading ? 'Subiendo…' : 'Subir archivos'}
+              {uploading ? 'Subiendo…' : fileUrl ? 'Reemplazar PDF' : 'Cargar PDF'}
               <input
                 ref={fileRef}
                 type="file"
-                multiple
-                accept=".pdf,image/*"
+                accept="application/pdf,.pdf"
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) => void handleUpload(e.target.files)}
@@ -354,65 +300,57 @@ const DetraccionesDetailPage = ({ workspace }: DetraccionesDetailPageProps) => {
             </label>
           ) : null}
         </div>
-        {attachments.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin archivos cargados.</p>
+        {!fileUrl ? (
+          <p className="text-sm text-slate-500">Sin PDF cargado.</p>
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {attachments.map((a) => (
-              <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">
-                  <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
-                  {a.file_name}
-                </span>
-                <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
-                <a
-                  href={a.file_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary-700 text-xs font-medium shrink-0 hover:underline"
-                >
-                  Abrir
-                </a>
-              </li>
-            ))}
-          </ul>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="truncate">
+              <i className="fas fa-file-pdf text-red-500 mr-2" aria-hidden />
+              {fileName}
+            </span>
+            <span className="text-xs text-slate-500">{formatStoredAt(latestAttachment?.created_at)}</span>
+            <button
+              type="button"
+              onClick={() => setPreview({ url: fileUrl, fileName })}
+              className="inline-flex items-center gap-1.5 text-primary-700 text-xs font-medium hover:underline"
+            >
+              <i className="fas fa-eye" aria-hidden />
+              Ver
+            </button>
+            <button
+              type="button"
+              disabled={downloading}
+              onClick={() => {
+                setDownloading(true);
+                void downloadRemoteFile(fileUrl, fileName).finally(() => setDownloading(false));
+              }}
+              className="inline-flex items-center gap-1.5 text-slate-600 text-xs font-medium hover:underline disabled:opacity-50"
+            >
+              <i className="fas fa-download" aria-hidden />
+              {downloading ? 'Descargando…' : 'Descargar'}
+            </button>
+          </div>
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <h2 className="text-sm font-semibold text-slate-800">Observaciones</h2>
-        {canCreateObservation ? (
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              value={obsText}
-              onChange={(e) => setObsText(e.target.value)}
-              placeholder="Nueva observación…"
-              className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-            />
-            <button
-              type="button"
-              disabled={obsSaving || !obsText.trim()}
-              onClick={() => void handleAddObservation()}
-              className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
-            >
-              Agregar
-            </button>
-          </div>
-        ) : null}
-        {observations.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin observaciones.</p>
-        ) : (
-          <ul className="space-y-2">
-            {observations.map((o) => (
-              <li key={o.id} className="text-sm border border-slate-100 rounded-lg px-3 py-2 bg-slate-50/50">
-                <p className="text-slate-800">{o.body}</p>
-                <p className="text-xs text-slate-500 mt-1">{formatStoredAt(o.created_at)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {preview ? (
+        <FilePreviewModal
+          open
+          url={preview.url}
+          title={preview.fileName}
+          onClose={() => setPreview(null)}
+          onDownload={() => void downloadRemoteFile(fileUrl, fileName)}
+        />
+      ) : null}
+
+      <DetraccionesStatusModal
+        open={statusModalOpen}
+        companyName={detail.business_name}
+        currentStatus={status}
+        saving={actionLoading}
+        onClose={() => setStatusModalOpen(false)}
+        onConfirm={(s) => void handleSetStatus(s)}
+      />
     </div>
   );
 };

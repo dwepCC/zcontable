@@ -1,77 +1,87 @@
 import {
-  activityStatusBadgeClass,
   activityStatusLabel,
   buildStatusFilter,
   formatStoredAt,
 } from './activityModuleShared';
 
-/** Estados operativos F4.1a (sin sin_registro: solo listado). */
+/** Flujo operativo simplificado de Detracciones. */
 export const DETRACCIONES_STATUSES = [
   { value: 'pendiente', label: 'Pendiente' },
-  { value: 'en_elaboracion', label: 'En elaboración' },
-  { value: 'deposito_pendiente', label: 'Depósito pendiente' },
-  { value: 'deposito_registrado', label: 'Depósito registrado' },
-  { value: 'sin_operaciones', label: 'Sin operaciones sujetas' },
-  { value: 'en_revision', label: 'En revisión' },
-  { value: 'observado', label: 'Observado' },
-  { value: 'validado', label: 'Validado' },
+  { value: 'cargado', label: 'Cargado' },
+  { value: 'verificado', label: 'Verificado' },
+  { value: 'sin_clave', label: 'Sin clave' },
+  { value: 'no_corresponde', label: 'No corresponde' },
 ] as const;
 
-/** Whitelist de transiciones (alineada a backend F4.1a). */
-export const DETRACCIONES_TRANSITIONS: Record<string, string[]> = {
-  pendiente: ['en_elaboracion', 'sin_operaciones'],
-  en_elaboracion: ['deposito_pendiente', 'sin_operaciones', 'en_revision'],
-  deposito_pendiente: ['deposito_registrado', 'en_elaboracion'],
-  deposito_registrado: ['en_revision', 'en_elaboracion'],
-  sin_operaciones: ['en_revision'],
-  observado: ['en_elaboracion'],
-  // Legacy display-only hasta migración completa en BD
-  abierto: ['en_elaboracion', 'sin_operaciones'],
-  en_proceso: ['deposito_pendiente', 'sin_operaciones', 'en_revision'],
-  resuelto: ['en_revision', 'en_elaboracion'],
-  escalado: ['en_elaboracion'],
-};
+/** Estados que el supervisor puede fijar manualmente (sin PDF). */
+export const DETRACCIONES_SUPERVISOR_MANUAL_STATUSES = [
+  { value: 'sin_clave', label: 'Sin clave' },
+  { value: 'no_corresponde', label: 'No corresponde' },
+] as const;
 
 export const DETRACCIONES_STATUS_FILTER = buildStatusFilter(DETRACCIONES_STATUSES);
 
+/**
+ * Colores semáforo por estado (Detracciones).
+ * 🟡 pendiente · 🔵 cargado · 🟢 verificado · 🔴 sin_clave / no_corresponde
+ */
 const DETRACCIONES_BADGE: Record<string, string> = {
+  pendiente: 'bg-amber-100 text-amber-900',
+  sin_registro: 'bg-amber-100 text-amber-900',
+  cargado: 'bg-blue-100 text-blue-800',
+  verificado: 'bg-emerald-100 text-emerald-800',
   validado: 'bg-emerald-100 text-emerald-800',
+  sin_clave: 'bg-red-100 text-red-800',
+  no_corresponde: 'bg-red-100 text-red-800',
+  // Legacy (hasta migración completa en BD)
+  en_elaboracion: 'bg-amber-100 text-amber-900',
+  deposito_pendiente: 'bg-amber-100 text-amber-900',
+  deposito_registrado: 'bg-blue-100 text-blue-800',
+  sin_operaciones: 'bg-red-100 text-red-800',
+  en_revision: 'bg-blue-100 text-blue-800',
   observado: 'bg-amber-100 text-amber-900',
-  pendiente: 'bg-slate-100 text-slate-700',
-  en_elaboracion: 'bg-blue-100 text-blue-800',
-  deposito_pendiente: 'bg-indigo-100 text-indigo-800',
-  deposito_registrado: 'bg-violet-100 text-violet-800',
-  sin_operaciones: 'bg-cyan-100 text-cyan-900',
-  en_revision: 'bg-purple-100 text-purple-800',
-  sin_registro: 'bg-slate-100 text-slate-500',
-  abierto: 'bg-blue-100 text-blue-800',
-  en_proceso: 'bg-indigo-100 text-indigo-800',
-  resuelto: 'bg-teal-100 text-teal-800',
-  escalado: 'bg-orange-100 text-orange-900',
+};
+
+const LEGACY_LABELS: Record<string, string> = {
+  validado: 'Verificado',
+  en_elaboracion: 'En elaboración',
+  deposito_pendiente: 'Depósito pendiente',
+  deposito_registrado: 'Depósito registrado',
+  sin_operaciones: 'Sin operaciones sujetas',
+  en_revision: 'En revisión',
+  observado: 'Observado',
 };
 
 export function detraccionesStatusLabel(status: string): string {
-  return activityStatusLabel(status, DETRACCIONES_STATUSES);
+  const normalized = normalizeDetraccionesStatus(status);
+  return activityStatusLabel(normalized, DETRACCIONES_STATUSES) || LEGACY_LABELS[status] || status;
 }
 
 export function detraccionesStatusBadgeClass(status: string): string {
-  return activityStatusBadgeClass(status, DETRACCIONES_BADGE);
+  const normalized = normalizeDetraccionesStatus(status);
+  return (
+    DETRACCIONES_BADGE[normalized] ??
+    DETRACCIONES_BADGE[status] ??
+    'bg-amber-100 text-amber-900'
+  );
 }
 
-/** Estados seleccionables en detalle: actual + transiciones permitidas. */
-export function detraccionesSelectableStatuses(current: string): { value: string; label: string }[] {
-  const seen = new Set<string>();
-  const out: { value: string; label: string }[] = [];
-  const add = (value: string) => {
-    if (seen.has(value) || value === 'validado' || value === 'observado') return;
-    seen.add(value);
-    out.push({ value, label: detraccionesStatusLabel(value) });
-  };
-  add(current);
-  for (const next of DETRACCIONES_TRANSITIONS[current] ?? []) {
-    add(next);
-  }
-  return out;
+export function normalizeDetraccionesStatus(status: string): string {
+  const s = (status || '').trim();
+  if (!s || s === 'sin_registro') return 'pendiente';
+  if (s === 'validado') return 'verificado';
+  if (s === 'sin_operaciones') return 'no_corresponde';
+  return s;
+}
+
+export function detraccionesAllowsUpload(status: string): boolean {
+  const s = normalizeDetraccionesStatus(status);
+  return s === 'pendiente' || s === 'cargado';
+}
+
+export function detraccionesSupervisorCanSetManualStatus(status: string): boolean {
+  const s = normalizeDetraccionesStatus(status);
+  return s === 'pendiente' || s === 'cargado';
 }
 
 export { formatStoredAt };

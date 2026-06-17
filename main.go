@@ -33,6 +33,14 @@ func main() {
 		log.Printf("supervisor migrations: %v", err)
 	}
 
+	if err := database.RunActivityTemplateMigrations(database.DB); err != nil {
+		log.Printf("activity template migrations: %v", err)
+	}
+
+	if err := database.RunActivityRuleMigrations(database.DB); err != nil {
+		log.Printf("activity rule migrations: %v", err)
+	}
+
 	if err := services.EnsureDocumentMigrationsOnStartup(); err != nil {
 		log.Printf("document migrations: %v", err)
 	}
