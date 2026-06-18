@@ -21,6 +21,10 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 
+	if err := database.PrepareActivityTemplateSchema(database.DB); err != nil {
+		log.Fatalf("prepare activity templates: %v", err)
+	}
+
 	if err := database.AutoMigrate(); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}

@@ -676,7 +676,7 @@ export async function buildFiscalReceiptA4Pdf(
   }
 
   const tableHeadH = 14;
-  const totalsSectionH = 30;
+  const totalsSectionH = 17;
   const totalsGap = 8;
   const sellerH = 14;
   const footerBlockH = 18;
@@ -771,15 +771,9 @@ export async function buildFiscalReceiptA4Pdf(
   }
 
   // —— Totales (debajo de la tabla, alineados a la derecha) ——
-  const gravadas =
-    receipt.subtotal ??
-    lines.reduce((sum, ln) => sum + Number(ln.line_subtotal ?? ln.line_total ?? 0), 0);
   const total = receipt.total ?? 0;
   const totalsRight = PAGE_W - M;
-  let totalsY = totalsStartY;
-  drawRightText(page, `OP. GRAVADAS: ${moneyPen(gravadas)}`, totalsRight, totalsY, 8, font, C.black);
-  totalsY += 13;
-  drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, totalsY, 9, fontB, C.black);
+  drawRightText(page, `TOTAL A PAGAR: ${moneyPen(total)}`, totalsRight, totalsStartY, 9, fontB, C.black);
 
   // —— Bloque inferior anclado al pie de página ——
   let bottomY = PAGE_H - M - footerBlockH;
