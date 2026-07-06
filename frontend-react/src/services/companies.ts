@@ -48,6 +48,7 @@ export interface CompanyUpsertInput {
   code: string;
   status: string;
   trade_name?: string;
+  igv_rate?: string;
   address?: string;
   phone?: string;
   email?: string;

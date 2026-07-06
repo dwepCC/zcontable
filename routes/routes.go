@@ -251,6 +251,10 @@ func Setup(app *fiber.App) {
 	sup.Get("/activity-modules/pdt-601/companies/:companyId", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt601DetailAPI)
 	sup.Get("/activity-modules/pdt-621", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621ListAPI)
 	sup.Get("/activity-modules/pdt-621/companies/:companyId", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621DetailAPI)
+	sup.Get("/tax-settlements/drafts-by-companies", middleware.RequirePermission(rbac.SupervisorsLiquidationsView), supervisorCtrl.TaxSettlementDraftsByCompaniesAPI)
+	sup.Get("/tax-settlements/:id", middleware.RequirePermission(rbac.SupervisorsLiquidationsView), supervisorCtrl.GetTaxSettlementAPI)
+	sup.Post("/tax-settlements", middleware.RequirePermission(rbac.SupervisorsLiquidationsCreate), supervisorCtrl.CreateTaxSettlementAPI)
+	sup.Put("/tax-settlements/:id", middleware.RequirePermission(rbac.SupervisorsLiquidationsUpdate), supervisorCtrl.UpdateTaxSettlementAPI)
 
 	// Catálogo de actividades (Finanzas / Calendario)
 	tpl := api.Group("/finance/activity-templates")

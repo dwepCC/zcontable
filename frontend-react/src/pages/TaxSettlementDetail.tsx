@@ -18,6 +18,7 @@ import {
 } from '../utils/documentDebtUi';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OperationsKeyDialog from '../components/OperationsKeyDialog';
+import TaxSettlementSectionsSummary, { hasTaxSectionsData } from '../components/taxSettlements/TaxSettlementSectionsSummary';
 
 const TaxSettlementDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -510,6 +511,9 @@ const TaxSettlementDetail = () => {
             <p className="text-slate-700 whitespace-pre-wrap">{row.notes}</p>
           </div>
         ) : null}
+        {hasTaxSectionsData(row.pdt621_json) ? (
+          <TaxSettlementSectionsSummary pdt621Json={row.pdt621_json} className="pt-2 border-t border-slate-100" />
+        ) : null}
         {row.status === 'cerrada' ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <i className="fas fa-lock text-slate-500 mr-2" aria-hidden />
@@ -517,7 +521,11 @@ const TaxSettlementDetail = () => {
             {row.closed_at ? ` el ${row.closed_at.slice(0, 10)}` : ''}. Registro histórico: no se puede editar ni eliminar. Las deudas muestran el estado al momento del cierre.
           </div>
         ) : null}
-        {settlementTotals && ((row.lines?.length ?? 0) > 0 || row.status === 'emitida' || row.status === 'cerrada') ? (
+        {settlementTotals &&
+        ((row.lines?.length ?? 0) > 0 ||
+          hasTaxSectionsData(row.pdt621_json) ||
+          row.status === 'emitida' ||
+          row.status === 'cerrada') ? (
           <div className="flex flex-wrap gap-4 pt-2 border-t border-slate-100">
             <div>
               <span className="text-xs font-medium text-slate-500">Honorarios / cargos</span>

@@ -27,6 +27,18 @@ function rucDigits(raw: string): string {
   return raw.replace(/\D/g, '').slice(0, 11);
 }
 
+const IGV_RATE_OPTIONS = [
+  { value: '18', label: '18 %' },
+  { value: '10.5', label: '10.5 %' },
+] as const;
+
+function normalizeIgvRateInput(value?: string | null): string {
+  const s = (value ?? '').trim().replace('%', '').replace(',', '.');
+  if (s === '10.5' || s === '10.50') return '10.5';
+  if (s === '18' || s === '18.0' || s === '18.00') return '18';
+  return '';
+}
+
 const CompanyForm = () => {
   const navigate = useNavigate();
   const params = useParams();
@@ -53,6 +65,7 @@ const CompanyForm = () => {
   const [status, setStatus] = useState('activo');
   const [businessName, setBusinessName] = useState('');
   const [tradeName, setTradeName] = useState('');
+  const [igvRate, setIgvRate] = useState<string>('18');
   const [serviceStartAt, setServiceStartAt] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
@@ -111,6 +124,7 @@ const CompanyForm = () => {
           setStatus(c.status ?? 'activo');
           setBusinessName(c.business_name ?? '');
           setTradeName(c.trade_name ?? '');
+          setIgvRate(normalizeIgvRateInput(c.igv_rate));
           setServiceStartAt(toDateInput(c.service_start_at));
           setAddress(c.address ?? '');
           setPhone(c.phone ?? '');
@@ -313,6 +327,10 @@ const CompanyForm = () => {
       setError('No tienes permisos para esta acción');
       return;
     }
+    if (!igvRate) {
+      setError('Seleccione el IGV aplicable de la empresa');
+      return;
+    }
 
     let declaredBillingAmount: number | null = null;
     if (declaredBilling.trim() !== '') {
@@ -332,6 +350,7 @@ const CompanyForm = () => {
         status: isEdit ? status : 'activo',
         business_name: businessName.trim(),
         trade_name: tradeName.trim() || undefined,
+        igv_rate: igvRate,
         service_start_at: dateInputToRFC3339MidnightPeru(serviceStartAt),
         address: address.trim() || undefined,
         phone: phone.trim() || undefined,
@@ -586,6 +605,20 @@ const CompanyForm = () => {
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
                 />
               </div>
+            </div>
+
+            <div className="max-w-xs">
+              <label htmlFor="igv_rate" className="block text-sm font-medium text-slate-700 mb-1">
+                IGV aplicable
+              </label>
+              <SearchableSelect
+                id="igv_rate"
+                name="igv_rate"
+                value={igvRate}
+                onChange={setIgvRate}
+                placeholder="Seleccione IGV"
+                options={[...IGV_RATE_OPTIONS]}
+              />
             </div>
 
                 <div className="space-y-4 pt-2 border-t border-slate-100">

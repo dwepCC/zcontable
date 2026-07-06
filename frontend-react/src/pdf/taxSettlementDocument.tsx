@@ -1,6 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer';
 import type { FirmConfig, TaxSettlement, TaxSettlementLine } from '../types/dashboard';
 import { loadLogoPngBlobForPdf } from '../utils/pdfLogo';
+import { formatTaxMoney, parseTaxSectionsJson, type TaxSettlementSectionsPayload, formatImpuestoPeriodo } from '../utils/taxSettlementSections';
 
 export function lineTypeLabelForPdf(t: string): string {
   if (t === 'document_ref') return 'Deuda';
@@ -29,7 +30,11 @@ export function settlementTotalsForPdf(row: TaxSettlement) {
     };
   }
   const s = sumLines(row.lines);
-  return { ...s, emitted: false };
+  const sections = parseTaxSectionsJson(row.pdt621_json);
+  const sectionTax = sections?.grand_total_impuesto_a_pagar ?? 0;
+  const impuestos = s.impuestos > 0 ? s.impuestos : sectionTax > 0 ? sectionTax : Number(row.total_impuestos) || 0;
+  const total = s.honorarios + impuestos;
+  return { honorarios: s.honorarios, impuestos, total, emitted: false };
 }
 
 export async function getLogoPngBlobForPdf(logoUrl: string): Promise<Blob | null> {
@@ -98,7 +103,58 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng }: TaxSettl
   });
 
   const pdtSnippet = (settlement.pdt621_json ?? '').trim();
-  const pdtShort = pdtSnippet.length > 1200 ? `${pdtSnippet.slice(0, 1200)}…` : pdtSnippet;
+  const taxSections = parseTaxSectionsJson(settlement.pdt621_json);
+
+  const renderTaxSections = (sections: TaxSettlementSectionsPayload) => (
+    <View style={styles.pdtBlock}>
+      <Text style={styles.blockTitle}>Detalle fiscal</Text>
+      {sections.pdt621?.enabled ? (
+        <View style={{ marginBottom: 8 }}>
+          <Text style={{ fontSize: 8, fontWeight: 700, marginBottom: 4 }}>PDT 621 — IGV y Renta</Text>
+          {(
+            [
+              ['Ventas netas', sections.pdt621.ventas_netas],
+              ['Notas de crédito', sections.pdt621.notas_credito],
+              ['Compras 10.5 %', sections.pdt621.compras_105],
+              ['Compras 18 %', sections.pdt621.compras_18],
+            ] as const
+          ).map(([label, r]) => (
+            <Text key={label} style={styles.pdtText}>
+              {label}: base {formatTaxMoney(r.base)} · imp. {formatTaxMoney(r.impuesto)} · total {formatTaxMoney(r.total)}
+            </Text>
+          ))}
+          <Text style={styles.pdtText}>Impuesto del periodo: {formatImpuestoPeriodo(sections.pdt621.impuesto_periodo)}</Text>
+          <Text style={styles.pdtText}>Saldo a favor (final): {formatTaxMoney(sections.pdt621.saldo_favor_final)}</Text>
+          <Text style={styles.pdtText}>Renta — impuesto a pagar: {formatTaxMoney(sections.pdt621.renta_impuesto_a_pagar)}</Text>
+          <Text style={styles.pdtText}>Subtotal PDT 621: {formatTaxMoney(sections.pdt621.impuesto_a_pagar)}</Text>
+        </View>
+      ) : null}
+      {sections.pdt601?.enabled ? (
+        <View style={{ marginBottom: 8 }}>
+          <Text style={{ fontSize: 8, fontWeight: 700, marginBottom: 4 }}>PDT 601 — Planilla electrónica</Text>
+          <Text style={styles.pdtText}>
+            ESSALUD {formatTaxMoney(sections.pdt601.essalud)} · ONP {formatTaxMoney(sections.pdt601.onp)} · AFP{' '}
+            {formatTaxMoney(sections.pdt601.afp)}
+          </Text>
+          <Text style={styles.pdtText}>
+            Rta 4ta {formatTaxMoney(sections.pdt601.rta_4ta)} · Rta 5ta {formatTaxMoney(sections.pdt601.rta_5ta)}
+          </Text>
+          <Text style={styles.pdtText}>Subtotal PDT 601: {formatTaxMoney(sections.pdt601.impuesto_a_pagar)}</Text>
+        </View>
+      ) : null}
+      {sections.itan?.enabled ? (
+        <View style={{ marginBottom: 8 }}>
+          <Text style={{ fontSize: 8, fontWeight: 700, marginBottom: 4 }}>
+            ITAN {sections.itan.year} — Cuota {sections.itan.cuota_nro}
+          </Text>
+          <Text style={styles.pdtText}>Impuesto a pagar: {formatTaxMoney(sections.itan.impuesto_a_pagar)}</Text>
+        </View>
+      ) : null}
+      <Text style={{ fontSize: 9, fontWeight: 700, marginTop: 4 }}>
+        Total impuestos a pagar: {formatTaxMoney(sections.grand_total_impuesto_a_pagar)}
+      </Text>
+    </View>
+  );
 
   return (
     <Document title={docTitle}>
@@ -203,10 +259,10 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng }: TaxSettl
           </View>
         ) : null}
 
-        {pdtShort ? (
+        {taxSections ? renderTaxSections(taxSections) : pdtSnippet ? (
           <View style={styles.pdtBlock}>
             <Text style={styles.blockTitle}>Referencia fiscal (JSON)</Text>
-            <Text style={styles.pdtText}>{pdtShort}</Text>
+            <Text style={styles.pdtText}>{pdtSnippet.length > 1200 ? `${pdtSnippet.slice(0, 1200)}…` : pdtSnippet}</Text>
           </View>
         ) : null}
 

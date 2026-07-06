@@ -153,6 +153,12 @@ export const OPERATIONAL_MODULES: OperationalModuleConfig[] = [
             label: 'Empresas',
             permission: P.companyCredentialsView,
           },
+          {
+            to: '/supervisors/liquidaciones',
+            icon: 'fas fa-file-invoice-dollar',
+            label: 'Liquidaciones',
+            permission: P.supervisorsLiquidationsView,
+          },
         ],
       },
       {
