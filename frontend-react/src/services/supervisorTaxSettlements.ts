@@ -40,11 +40,14 @@ export const supervisorTaxSettlementsService = {
     return res.data.data;
   },
 
-  async draftsByCompanies(companyIds: number[]): Promise<Record<number, SupervisorCompanyLiquidationDraft>> {
-    if (companyIds.length === 0) return {};
+  async draftsByCompanies(
+    companyIds: number[],
+    liquidationPeriod: string,
+  ): Promise<Record<number, SupervisorCompanyLiquidationDraft>> {
+    if (companyIds.length === 0 || !liquidationPeriod.trim()) return {};
     const res = await client.get<{ data: Record<string, SupervisorCompanyLiquidationDraft> }>(
       '/supervisors/tax-settlements/drafts-by-companies',
-      { params: { company_ids: companyIds.join(',') } },
+      { params: { company_ids: companyIds.join(','), liquidation_period: liquidationPeriod.trim() } },
     );
     const raw = res.data.data ?? {};
     const out: Record<number, SupervisorCompanyLiquidationDraft> = {};

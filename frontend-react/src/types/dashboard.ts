@@ -15,6 +15,7 @@ export interface Company {
   code: string; // Mapeado desde InternalCode con json:"code"
   trade_name: string;
   igv_rate?: string;
+  tax_regime?: string;
   status: string;
   balance?: number;
   address?: string;

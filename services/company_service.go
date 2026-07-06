@@ -114,6 +114,28 @@ func validateCompanyIgvRate(raw string) (string, error) {
 	return rate, nil
 }
 
+func normalizeCompanyTaxRegime(raw string) string {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	switch s {
+	case models.CompanyTaxRegimeMype, "rmt":
+		return models.CompanyTaxRegimeMype
+	case models.CompanyTaxRegimeRER:
+		return models.CompanyTaxRegimeRER
+	case models.CompanyTaxRegimeGeneral, "rg":
+		return models.CompanyTaxRegimeGeneral
+	default:
+		return ""
+	}
+}
+
+func validateCompanyTaxRegime(raw string) (string, error) {
+	regime := normalizeCompanyTaxRegime(raw)
+	if regime == "" {
+		return "", errors.New("régimen tributario inválido (use mype, rer o general)")
+	}
+	return regime, nil
+}
+
 // NextInternalCode sugiere un código interno numérico de 4 dígitos (0001–9999) sin repetir
 // códigos ya usados. Parte de (cantidad de empresas + 1) y avanza hasta encontrar hueco.
 func (s *CompanyService) NextInternalCode() (string, error) {
@@ -278,6 +300,12 @@ func (s *CompanyService) ValidateNewCompanyForCreate(db *gorm.DB, input *models.
 	}
 	input.IgvRate = rate
 
+	regime, err := validateCompanyTaxRegime(input.TaxRegime)
+	if err != nil {
+		return err
+	}
+	input.TaxRegime = regime
+
 	return nil
 }
 
@@ -418,6 +446,7 @@ func (s *CompanyService) ConvertToStudio(id uint, input *models.Company) (*model
 		"status":                  strings.TrimSpace(input.Status),
 		"trade_name":              strings.TrimSpace(input.TradeName),
 		"igv_rate":                input.IgvRate,
+		"tax_regime":              input.TaxRegime,
 		"address":                 strings.TrimSpace(input.Address),
 		"phone":                   strings.TrimSpace(input.Phone),
 		"email":                   strings.TrimSpace(input.Email),
@@ -498,6 +527,13 @@ func (s *CompanyService) Update(id uint, input *models.Company) error {
 			return err
 		}
 		c.IgvRate = rate
+	}
+	if trimmed := strings.TrimSpace(input.TaxRegime); trimmed != "" {
+		regime, err := validateCompanyTaxRegime(trimmed)
+		if err != nil {
+			return err
+		}
+		c.TaxRegime = regime
 	}
 	if input.Address != "" {
 		c.Address = strings.TrimSpace(input.Address)

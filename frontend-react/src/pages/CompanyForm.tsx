@@ -32,6 +32,20 @@ const IGV_RATE_OPTIONS = [
   { value: '10.5', label: '10.5 %' },
 ] as const;
 
+const TAX_REGIME_OPTIONS = [
+  { value: 'mype', label: 'MYPE Tributario (RMT) — 1 %' },
+  { value: 'rer', label: 'RER — 1.5 %' },
+  { value: 'general', label: 'Régimen General — 1.5 % mínimo' },
+] as const;
+
+function normalizeTaxRegimeInput(value?: string | null): string {
+  const s = (value ?? '').trim().toLowerCase();
+  if (s === 'mype' || s === 'rmt') return 'mype';
+  if (s === 'rer') return 'rer';
+  if (s === 'general' || s === 'rg') return 'general';
+  return '';
+}
+
 function normalizeIgvRateInput(value?: string | null): string {
   const s = (value ?? '').trim().replace('%', '').replace(',', '.');
   if (s === '10.5' || s === '10.50') return '10.5';
@@ -66,6 +80,7 @@ const CompanyForm = () => {
   const [businessName, setBusinessName] = useState('');
   const [tradeName, setTradeName] = useState('');
   const [igvRate, setIgvRate] = useState<string>('18');
+  const [taxRegime, setTaxRegime] = useState<string>('mype');
   const [serviceStartAt, setServiceStartAt] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
@@ -125,6 +140,7 @@ const CompanyForm = () => {
           setBusinessName(c.business_name ?? '');
           setTradeName(c.trade_name ?? '');
           setIgvRate(normalizeIgvRateInput(c.igv_rate));
+          setTaxRegime(normalizeTaxRegimeInput(c.tax_regime) || 'mype');
           setServiceStartAt(toDateInput(c.service_start_at));
           setAddress(c.address ?? '');
           setPhone(c.phone ?? '');
@@ -331,6 +347,10 @@ const CompanyForm = () => {
       setError('Seleccione el IGV aplicable de la empresa');
       return;
     }
+    if (!taxRegime) {
+      setError('Seleccione el régimen tributario de la empresa');
+      return;
+    }
 
     let declaredBillingAmount: number | null = null;
     if (declaredBilling.trim() !== '') {
@@ -351,6 +371,7 @@ const CompanyForm = () => {
         business_name: businessName.trim(),
         trade_name: tradeName.trim() || undefined,
         igv_rate: igvRate,
+        tax_regime: taxRegime,
         service_start_at: dateInputToRFC3339MidnightPeru(serviceStartAt),
         address: address.trim() || undefined,
         phone: phone.trim() || undefined,
@@ -607,18 +628,36 @@ const CompanyForm = () => {
               </div>
             </div>
 
-            <div className="max-w-xs">
-              <label htmlFor="igv_rate" className="block text-sm font-medium text-slate-700 mb-1">
-                IGV aplicable
-              </label>
-              <SearchableSelect
-                id="igv_rate"
-                name="igv_rate"
-                value={igvRate}
-                onChange={setIgvRate}
-                placeholder="Seleccione IGV"
-                options={[...IGV_RATE_OPTIONS]}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              <div>
+                <label htmlFor="igv_rate" className="block text-sm font-medium text-slate-700 mb-1">
+                  IGV aplicable
+                </label>
+                <SearchableSelect
+                  id="igv_rate"
+                  name="igv_rate"
+                  value={igvRate}
+                  onChange={setIgvRate}
+                  placeholder="Seleccione IGV"
+                  options={[...IGV_RATE_OPTIONS]}
+                />
+              </div>
+              <div>
+                <label htmlFor="tax_regime" className="block text-sm font-medium text-slate-700 mb-1">
+                  Régimen tributario
+                </label>
+                <SearchableSelect
+                  id="tax_regime"
+                  name="tax_regime"
+                  value={taxRegime}
+                  onChange={setTaxRegime}
+                  placeholder="Seleccione régimen"
+                  options={[...TAX_REGIME_OPTIONS]}
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500 leading-snug">
+                  MYPE 1 %, RER 1.5 %, General 1.5 % mínimo (SUNAT). Se usa por defecto al crear liquidaciones.
+                </p>
+              </div>
             </div>
 
                 <div className="space-y-4 pt-2 border-t border-slate-100">

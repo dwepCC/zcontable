@@ -133,6 +133,7 @@ function App() {
             <Route path="supervisors/liquidaciones" element={<SupervisorLiquidacionesListPage />} />
             <Route path="supervisors/liquidaciones/crear/:companyId" element={<SupervisorLiquidacionCreatePage />} />
             <Route path="supervisors/liquidaciones/editar/:settlementId" element={<SupervisorLiquidacionCreatePage />} />
+            <Route path="supervisors/liquidaciones/ver/:settlementId" element={<SupervisorLiquidacionCreatePage />} />
             <Route path="supervisors/activities" element={<Navigate to="/supervisors/dashboard" replace />} />
             <Route path="supervisors/activities/pdt-601" element={<SupervisorPdt601ListPage />} />
             <Route path="supervisors/activities/pdt-601/:companyId" element={<SupervisorPdt601DetailPage />} />

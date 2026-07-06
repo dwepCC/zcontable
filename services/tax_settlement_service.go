@@ -416,15 +416,27 @@ type SupervisorCompanyLiquidationDraft struct {
 	Status            string `json:"status"`
 }
 
-// SupervisorDraftByCompanies devuelve el borrador más reciente por empresa (solo status borrador).
-func (s *TaxSettlementService) SupervisorDraftByCompanies(companyIDs []uint) (map[uint]SupervisorCompanyLiquidationDraft, error) {
+// SupervisorDraftByCompanies devuelve la liquidación (borrador o emitida) por empresa para el periodo indicado.
+func (s *TaxSettlementService) SupervisorDraftByCompanies(companyIDs []uint, periodYM string) (map[uint]SupervisorCompanyLiquidationDraft, error) {
 	out := make(map[uint]SupervisorCompanyLiquidationDraft)
 	if len(companyIDs) == 0 {
 		return out, nil
 	}
+	periodYM = strings.TrimSpace(periodYM)
+	if periodYM == "" {
+		return out, nil
+	}
+	if err := validatePeriodYM(periodYM); err != nil {
+		return nil, err
+	}
 	var rows []models.TaxSettlement
 	if err := database.DB.
-		Where("company_id IN ? AND status = ?", companyIDs, models.TaxSettlementStatusDraft).
+		Where(
+			"company_id IN ? AND liquidation_period = ? AND status IN ?",
+			companyIDs,
+			periodYM,
+			[]string{models.TaxSettlementStatusDraft, models.TaxSettlementStatusIssued},
+		).
 		Order("updated_at DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -524,7 +536,9 @@ func (s *TaxSettlementService) UpdateDraft(id uint, in TaxSettlementUpdateInput)
 	ts.PeriodFrom = in.PeriodFrom
 	ts.PeriodTo = in.PeriodTo
 	ts.Notes = in.Notes
-	ts.Pdt621JSON = in.Pdt621JSON
+	if strings.TrimSpace(in.Pdt621JSON) != "" {
+		ts.Pdt621JSON = in.Pdt621JSON
+	}
 
 	explicitLP := strings.TrimSpace(in.LiquidationPeriod)
 	if explicitLP == "" {

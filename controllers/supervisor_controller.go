@@ -1571,8 +1571,12 @@ func (ctrl *SupervisorController) TaxSettlementDraftsByCompaniesAPI(c fiber.Ctx)
 		companyIDs = filtered
 	}
 	taxSvc := services.NewTaxSettlementService()
-	m, err := taxSvc.SupervisorDraftByCompanies(companyIDs)
+	periodYM := strings.TrimSpace(c.Query("liquidation_period"))
+	m, err := taxSvc.SupervisorDraftByCompanies(companyIDs, periodYM)
 	if err != nil {
+		if strings.Contains(err.Error(), "periodo") {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"data": m})

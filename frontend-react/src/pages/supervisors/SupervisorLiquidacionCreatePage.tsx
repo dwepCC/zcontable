@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
@@ -9,44 +9,45 @@ import { supervisorTaxSettlementsService } from '../../services/supervisorTaxSet
 import type { Company } from '../../types/dashboard';
 import { extractApiErrorMessage } from '../../utils/apiError';
 import SupervisorTaxSectionsForm from '../../components/supervisors/SupervisorTaxSectionsForm';
+import LiquidacionIgvAplicableToggle from '../../components/supervisors/LiquidacionIgvAplicableToggle';
+import LiquidacionRentaRegimenSelect from '../../components/supervisors/LiquidacionRentaRegimenSelect';
+import SupervisorLiquidacionPreviewModal from '../../components/supervisors/SupervisorLiquidacionPreviewModal';
+import { TaxSettlementSectionsSummary } from '../../components/taxSettlements/TaxSettlementSectionsSummary';
 import {
+  defaultLiquidationPeriodYM,
+  isValidLiquidationPeriodYM,
+  periodLabelFromYM,
+  previousMonthYMFromDate,
+  settlementStatusBadgeClass,
+  settlementStatusLabel,
+} from '../../utils/liquidationPeriod';
+import {
+  clearPdt621IgvRateRows,
   computeTaxSettlementSections,
   defaultTaxSections,
+  normalizePdt621IgvVentas,
   parseTaxSectionsJson,
   type TaxSettlementSectionsPayload,
 } from '../../utils/taxSettlementSections';
-import { formatCompanyIgvRateLabel, parseCompanyIgvRate } from '../../utils/companyIgv';
+import {
+  defaultLiquidationIgvRates,
+  formatCompanyIgvRateLabel,
+  LIQUIDATION_IGV_RATES,
+  parseCompanyIgvRate,
+  type CompanyIgvRate,
+} from '../../utils/companyIgv';
+import {
+  defaultLiquidationRentaRegime,
+  formatLiquidationRentaRegimeLabel,
+  formatRentaRateLabel,
+  getRentaMensualRatePct,
+  parseCompanyTaxRegime,
+  type CompanyTaxRegime,
+  type LiquidationRentaRegime,
+} from '../../utils/companyTaxRegime';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const formatDateInput = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
-function previousMonthYMFromDate(d: Date): string {
-  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-  return `${prev.getFullYear()}-${pad2(prev.getMonth() + 1)}`;
-}
-
-const MONTH_NAMES_ES = [
-  'enero',
-  'febrero',
-  'marzo',
-  'abril',
-  'mayo',
-  'junio',
-  'julio',
-  'agosto',
-  'septiembre',
-  'octubre',
-  'noviembre',
-  'diciembre',
-] as const;
-
-function periodLabelFromYM(ym: string): string {
-  if (!/^\d{4}-\d{2}$/.test(ym)) return '';
-  const y = Number(ym.slice(0, 4));
-  const m = Number(ym.slice(5, 7));
-  if (!Number.isFinite(y) || m < 1 || m > 12) return '';
-  return `${MONTH_NAMES_ES[m - 1]} ${y}`;
-}
 
 function issueDateFromSettlement(raw?: string): string {
   if (!raw) return formatDateInput(new Date());
@@ -56,30 +57,116 @@ function issueDateFromSettlement(raw?: string): string {
 
 const SupervisorLiquidacionCreatePage = () => {
   const { companyId: companyIdParam, settlementId: settlementIdParam } = useParams();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const settlementId = settlementIdParam ? Number(settlementIdParam) : null;
-  const isEdit = Boolean(settlementId && Number.isFinite(settlementId) && settlementId > 0);
+  const isView = location.pathname.includes('/liquidaciones/ver/');
+  const isEdit = location.pathname.includes('/liquidaciones/editar/');
   const companyIdFromRoute = companyIdParam ? Number(companyIdParam) : null;
   const navigate = useNavigate();
+  const canView = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsView), []);
   const canCreate = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsCreate), []);
   const canUpdate = useMemo(() => auth.hasPermission(P.supervisorsLiquidationsUpdate), []);
-  const canSubmit = isEdit ? canUpdate : canCreate;
+  const canSubmit = !isView && (isEdit ? canUpdate : canCreate);
+  const periodFromList = useMemo(() => {
+    const raw = (searchParams.get('period') ?? '').trim();
+    return isValidLiquidationPeriodYM(raw) ? raw : '';
+  }, [searchParams]);
+  const listBackTo = `/supervisors/liquidaciones${periodFromList ? `?period=${encodeURIComponent(periodFromList)}` : ''}`;
 
   const [companyId, setCompanyId] = useState<number | null>(companyIdFromRoute);
   const [company, setCompany] = useState<Company | null>(null);
   const [assistantName, setAssistantName] = useState('—');
   const [loadingCompany, setLoadingCompany] = useState(true);
   const [issueDate, setIssueDate] = useState(() => formatDateInput(new Date()));
-  const [liquidationPeriod, setLiquidationPeriod] = useState(() => previousMonthYMFromDate(new Date()));
-  const liquidationPeriodManualRef = useRef(false);
+  const [liquidationPeriod, setLiquidationPeriod] = useState(() => periodFromList || defaultLiquidationPeriodYM());
+  const liquidationPeriodManualRef = useRef(Boolean(periodFromList));
+  const [settlementStatus, setSettlementStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState('');
   const [taxSections, setTaxSections] = useState<TaxSettlementSectionsPayload>(() => defaultTaxSections(new Date().getFullYear()));
   const [settlementNumber, setSettlementNumber] = useState('');
-
-  const taxSectionsComputed = useMemo(() => computeTaxSettlementSections(taxSections), [taxSections]);
   const currentYear = new Date().getFullYear();
   const companyIgvRate = useMemo(() => parseCompanyIgvRate(company?.igv_rate), [company?.igv_rate]);
+  const companyTaxRegime = useMemo((): CompanyTaxRegime => parseCompanyTaxRegime(company?.tax_regime) ?? 'mype', [company?.tax_regime]);
   const igvConfigured = companyIgvRate != null;
+  const companyFiscalInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!companyIgvRate || companyFiscalInitializedRef.current) return;
+    companyFiscalInitializedRef.current = true;
+    setTaxSections((prev) => {
+      const base621 = prev.pdt621 ?? defaultTaxSections(currentYear).pdt621!;
+      const normalized = normalizePdt621IgvVentas(
+        {
+          ...base621,
+          igv_aplicable_ventas: base621.igv_aplicable_ventas?.length
+            ? base621.igv_aplicable_ventas
+            : defaultLiquidationIgvRates(companyIgvRate),
+          renta_regimen: base621.renta_regimen ?? defaultLiquidationRentaRegime(companyTaxRegime),
+          renta_coeficiente_pct: base621.renta_coeficiente_pct ?? 0,
+        },
+        companyIgvRate,
+      );
+      return computeTaxSettlementSections({ ...prev, pdt621: normalized });
+    });
+  }, [companyIgvRate, companyTaxRegime, currentYear]);
+
+  const taxSectionsComputed = useMemo(() => computeTaxSettlementSections(taxSections), [taxSections]);
+  const igvAplicableVentas = useMemo((): CompanyIgvRate[] => {
+    const rates = taxSectionsComputed.pdt621?.igv_aplicable_ventas;
+    if (rates?.length) return rates;
+    return companyIgvRate ? defaultLiquidationIgvRates(companyIgvRate) : [18];
+  }, [taxSectionsComputed.pdt621?.igv_aplicable_ventas, companyIgvRate]);
+
+  const patchIgvAplicableVentas = (nextRates: CompanyIgvRate[]) => {
+    if (!companyIgvRate) return;
+    setTaxSections((prev) => {
+      const base621 = prev.pdt621 ?? defaultTaxSections(currentYear).pdt621!;
+      let next621: TaxSettlementSectionsPayload['pdt621'] = {
+        ...normalizePdt621IgvVentas(base621, companyIgvRate),
+        igv_aplicable_ventas: nextRates,
+      };
+      for (const rate of LIQUIDATION_IGV_RATES) {
+        if (!nextRates.includes(rate)) {
+          next621 = clearPdt621IgvRateRows(next621, rate);
+        }
+      }
+      return computeTaxSettlementSections({ ...prev, pdt621: next621 });
+    });
+  };
+
+  const rentaRegimen = useMemo((): LiquidationRentaRegime => {
+    const r = taxSectionsComputed.pdt621?.renta_regimen;
+    return r ?? defaultLiquidationRentaRegime(companyTaxRegime);
+  }, [taxSectionsComputed.pdt621?.renta_regimen, companyTaxRegime]);
+
+  const rentaCoeficientePct = taxSectionsComputed.pdt621?.renta_coeficiente_pct ?? 0;
+
+  const patchRentaRegimen = (regimen: LiquidationRentaRegime) => {
+    setTaxSections((prev) => {
+      const base621 = prev.pdt621 ?? defaultTaxSections(currentYear).pdt621!;
+      return computeTaxSettlementSections({
+        ...prev,
+        pdt621: {
+          ...base621,
+          renta_regimen: regimen,
+          renta_coeficiente_pct: regimen === 'coeficiente' ? base621.renta_coeficiente_pct ?? 0 : 0,
+        },
+      });
+    });
+  };
+
+  const patchRentaCoeficiente = (pct: number) => {
+    setTaxSections((prev) => {
+      const base621 = prev.pdt621 ?? defaultTaxSections(currentYear).pdt621!;
+      return computeTaxSettlementSections({
+        ...prev,
+        pdt621: { ...base621, renta_coeficiente_pct: pct },
+      });
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -89,10 +176,10 @@ const SupervisorLiquidacionCreatePage = () => {
         setError('');
 
         let coId: number;
-        if (isEdit && settlementId) {
+        if ((isEdit || isView) && settlementId) {
           const settlement = await supervisorTaxSettlementsService.get(settlementId);
           if (cancelled) return;
-          if (settlement.status !== 'borrador') {
+          if (!isView && settlement.status !== 'borrador') {
             setError('Esta liquidación ya no está en borrador y no puede editarse desde Supervisores.');
             setCompany(null);
             return;
@@ -100,8 +187,9 @@ const SupervisorLiquidacionCreatePage = () => {
           coId = settlement.company_id;
           setCompanyId(coId);
           setSettlementNumber(settlement.number || `#${settlement.id}`);
+          setSettlementStatus(settlement.status || '');
           setIssueDate(issueDateFromSettlement(settlement.issue_date));
-          setLiquidationPeriod(settlement.liquidation_period || previousMonthYMFromDate(new Date()));
+          setLiquidationPeriod(settlement.liquidation_period || defaultLiquidationPeriodYM());
           liquidationPeriodManualRef.current = true;
           const parsed = parseTaxSectionsJson(settlement.pdt621_json);
           if (parsed) {
@@ -146,7 +234,16 @@ const SupervisorLiquidacionCreatePage = () => {
     return () => {
       cancelled = true;
     };
-  }, [companyIdFromRoute, isEdit, settlementId]);
+  }, [companyIdFromRoute, isEdit, isView, settlementId]);
+
+  useEffect(() => {
+    if (isEdit || isView || liquidationPeriodManualRef.current) return;
+    const raw = (searchParams.get('period') ?? '').trim();
+    if (isValidLiquidationPeriodYM(raw)) {
+      setLiquidationPeriod(raw);
+      liquidationPeriodManualRef.current = true;
+    }
+  }, [isEdit, isView, searchParams]);
 
   useEffect(() => {
     if (isEdit) return;
@@ -158,17 +255,20 @@ const SupervisorLiquidacionCreatePage = () => {
     setLiquidationPeriod(previousMonthYMFromDate(d));
   }, [issueDate, isEdit]);
 
-  const submit = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (!company || !companyId || companyId <= 0) return;
+  const saveLiquidacion = async () => {
+    if (!company || !companyId || companyId <= 0) return false;
     if (!companyIgvRate) {
       setError('Configure el IGV de la empresa antes de guardar la liquidación.');
-      return;
+      return false;
+    }
+    if (rentaRegimen === 'coeficiente' && rentaCoeficientePct <= 0) {
+      setError('Indique el porcentaje de coeficiente para calcular la renta mensual.');
+      return false;
     }
     const lp = liquidationPeriod.trim();
     if (!/^\d{4}-\d{2}$/.test(lp)) {
       setError('Indique un periodo válido (AAAA-MM)');
-      return;
+      return false;
     }
     setError('');
     setSaving(true);
@@ -203,15 +303,38 @@ const SupervisorLiquidacionCreatePage = () => {
           }),
         );
       }
-      navigate('/supervisors/liquidaciones');
+      setPreviewOpen(false);
+      navigate(listBackTo);
+      return true;
     } catch (err) {
       setError(extractApiErrorMessage(err, isEdit ? 'No se pudo actualizar la liquidación.' : 'No se pudo crear la liquidación.'));
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  if (!canSubmit) {
+  const submit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    await saveLiquidacion();
+  };
+
+  const periodLabelPreview = useMemo(
+    () => periodLabelFromYM(liquidationPeriod.trim()) || liquidationPeriod,
+    [liquidationPeriod],
+  );
+
+  if (isView && !canView) {
+    return (
+      <div className={PAGE_WORKSPACE_CLASS}>
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-sm">
+          No tiene permiso para visualizar liquidaciones.
+        </div>
+      </div>
+    );
+  }
+
+  if (!isView && !canSubmit) {
     return (
       <div className={PAGE_WORKSPACE_CLASS}>
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-sm">
@@ -233,7 +356,7 @@ const SupervisorLiquidacionCreatePage = () => {
   if (!company) {
     return (
       <div className={PAGE_WORKSPACE_CLASS}>
-        <Link to="/supervisors/liquidaciones" className="text-sm text-primary-700 hover:text-primary-800 font-medium">
+        <Link to={listBackTo} className="text-sm text-primary-700 hover:text-primary-800 font-medium">
           ← Volver al listado
         </Link>
         <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
@@ -246,14 +369,31 @@ const SupervisorLiquidacionCreatePage = () => {
   return (
     <div className={`${PAGE_WORKSPACE_CLASS} w-full min-w-0 max-w-full`}>
       <div>
-        <Link to="/supervisors/liquidaciones" className="text-sm text-primary-700 hover:text-primary-800 font-medium">
+        <Link to={listBackTo} className="text-sm text-primary-700 hover:text-primary-800 font-medium">
           ← Volver al listado
         </Link>
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight mt-2">
-          {isEdit ? 'Editar liquidación' : 'Crear liquidación'}
+          {isView ? 'Ver liquidación' : isEdit ? 'Editar liquidación' : 'Crear liquidación'}
         </h1>
         <p className="text-slate-500 mt-1 text-sm max-w-3xl">
-          {isEdit ? (
+          {isView ? (
+            <>
+              Liquidación{' '}
+              <span className="font-medium text-slate-700">{settlementNumber}</span> de{' '}
+              <span className="font-medium text-slate-700">{company.business_name}</span> en modo solo lectura.
+              {settlementStatus ? (
+                <>
+                  {' '}
+                  Estado:{' '}
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[11px] font-medium align-middle ${settlementStatusBadgeClass(settlementStatus)}`}
+                  >
+                    {settlementStatusLabel(settlementStatus)}
+                  </span>
+                </>
+              ) : null}
+            </>
+          ) : isEdit ? (
             <>
               Actualice la información fiscal de la liquidación{' '}
               <span className="font-medium text-slate-700">{settlementNumber}</span> para{' '}
@@ -290,13 +430,52 @@ const SupervisorLiquidacionCreatePage = () => {
             <dt className="text-xs font-medium text-slate-500 uppercase tracking-wide">Asistente asignado</dt>
             <dd className="mt-1 text-slate-800">{assistantName}</dd>
           </div>
-          <div className="min-w-0 lg:col-span-2">
-            <dt className="text-xs font-medium text-slate-500 uppercase tracking-wide">IGV aplicable</dt>
-            <dd className="mt-1 text-slate-800">
-              {companyIgvRate ? formatCompanyIgvRateLabel(companyIgvRate) : 'Sin configurar'}
-            </dd>
-          </div>
         </dl>
+
+        {igvConfigured && companyIgvRate ? (
+          <div className="mt-5 pt-5 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-5 lg:gap-8">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">IGV aplicable</p>
+              <div className="mt-2">
+                {isView ? (
+                  <p className="text-sm text-slate-800">
+                    {igvAplicableVentas.map((r) => formatCompanyIgvRateLabel(r)).join(' · ') || '—'}
+                  </p>
+                ) : (
+                  <LiquidacionIgvAplicableToggle
+                    rates={igvAplicableVentas}
+                    companyIgvRate={companyIgvRate}
+                    onChange={patchIgvAplicableVentas}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Régimen renta</p>
+              <div className="mt-2">
+                {isView ? (
+                  <p className="text-sm text-slate-800">
+                    {formatLiquidationRentaRegimeLabel(rentaRegimen)}
+                    {' · '}
+                    {formatRentaRateLabel(getRentaMensualRatePct(rentaRegimen, rentaCoeficientePct, companyTaxRegime))}
+                  </p>
+                ) : (
+                  <LiquidacionRentaRegimenSelect
+                    regimen={rentaRegimen}
+                    companyTaxRegime={companyTaxRegime}
+                    coeficientePct={rentaCoeficientePct}
+                    onRegimenChange={patchRentaRegimen}
+                    onCoeficienteChange={patchRentaCoeficiente}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 pt-5 border-t border-slate-100">
+            <p className="text-sm text-slate-600">IGV aplicable: <span className="text-slate-800">Sin configurar</span></p>
+          </div>
+        )}
       </section>
 
       {!igvConfigured ? (
@@ -315,6 +494,36 @@ const SupervisorLiquidacionCreatePage = () => {
         </div>
       ) : null}
 
+      {isView ? (
+        <section className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 md:p-6 space-y-5">
+          <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Datos de la liquidación</h2>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:max-w-2xl text-sm">
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Fecha de emisión</dt>
+              <dd className="mt-1 text-slate-800">{issueDate}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-slate-500">Periodo liquidado</dt>
+              <dd className="mt-1 text-slate-800">
+                {periodLabelPreview} <span className="font-mono text-slate-500">({liquidationPeriod})</span>
+              </dd>
+            </div>
+          </dl>
+          {igvConfigured ? (
+            <div className="pt-4 border-t border-slate-100">
+              <TaxSettlementSectionsSummary sections={taxSectionsComputed} />
+            </div>
+          ) : null}
+          <div className="pt-2 border-t border-slate-100">
+            <Link
+              to={listBackTo}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Volver al listado
+            </Link>
+          </div>
+        </section>
+      ) : (
       <form
         onSubmit={(e) => void submit(e)}
         className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 md:p-6 space-y-5"
@@ -363,8 +572,8 @@ const SupervisorLiquidacionCreatePage = () => {
             <div>
               <h3 className="text-sm font-semibold text-slate-800">Secciones fiscales</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Active solo las secciones que va a registrar. Ventas y notas de crédito usan el IGV de la empresa (
-                {formatCompanyIgvRateLabel(companyIgvRate)}); las compras se calculan al 10.5 % o 18 % según corresponda.
+                Active solo las secciones que va a registrar. En ventas y notas de crédito puede elegir IGV al 18 % y/o
+                10.5 % (por defecto el de la empresa); las compras se calculan al 10.5 % o 18 % según corresponda.
               </p>
             </div>
             <SupervisorTaxSectionsForm
@@ -372,6 +581,9 @@ const SupervisorLiquidacionCreatePage = () => {
               onChange={setTaxSections}
               currentYear={currentYear}
               companyIgvRate={companyIgvRate}
+              companyTaxRegime={companyTaxRegime}
+              igvAplicableVentas={igvAplicableVentas}
+              rentaRegimen={rentaRegimen}
             />
           </div>
         ) : null}
@@ -385,14 +597,43 @@ const SupervisorLiquidacionCreatePage = () => {
             {saving ? <i className="fas fa-spinner fa-spin text-xs" aria-hidden /> : null}
             {isEdit ? 'Guardar cambios' : 'Crear liquidación'}
           </button>
+          <button
+            type="button"
+            disabled={saving || !igvConfigured}
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-primary-200 bg-primary-50 text-primary-800 text-sm font-medium hover:bg-primary-100 disabled:opacity-50"
+          >
+            <i className="fas fa-eye text-xs" aria-hidden />
+            Vista previa
+          </button>
           <Link
-            to="/supervisors/liquidaciones"
+            to={listBackTo}
             className="px-4 py-2.5 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancelar
           </Link>
         </div>
       </form>
+      )}
+
+      {!isView && company && igvConfigured && companyIgvRate ? (
+        <SupervisorLiquidacionPreviewModal
+          open={previewOpen}
+          saving={saving}
+          isEdit={isEdit}
+          company={company}
+          issueDate={issueDate}
+          liquidationPeriod={liquidationPeriod}
+          periodLabel={periodLabelPreview}
+          igvAplicableVentas={igvAplicableVentas}
+          rentaRegimen={rentaRegimen}
+          rentaCoeficientePct={rentaCoeficientePct}
+          companyTaxRegime={companyTaxRegime}
+          taxSections={taxSectionsComputed}
+          onClose={() => setPreviewOpen(false)}
+          onSave={() => void saveLiquidacion()}
+        />
+      ) : null}
     </div>
   );
 };

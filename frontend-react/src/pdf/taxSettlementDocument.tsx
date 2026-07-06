@@ -1,7 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer';
 import type { FirmConfig, TaxSettlement, TaxSettlementLine } from '../types/dashboard';
 import { loadLogoPngBlobForPdf } from '../utils/pdfLogo';
-import { formatTaxMoney, parseTaxSectionsJson, type TaxSettlementSectionsPayload, formatImpuestoPeriodo } from '../utils/taxSettlementSections';
+import { formatTaxMoney, listPdt621IgvDisplayRows, parseTaxSectionsJson, type TaxSettlementSectionsPayload, formatImpuestoPeriodo } from '../utils/taxSettlementSections';
 
 export function lineTypeLabelForPdf(t: string): string {
   if (t === 'document_ref') return 'Deuda';
@@ -111,16 +111,9 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng }: TaxSettl
       {sections.pdt621?.enabled ? (
         <View style={{ marginBottom: 8 }}>
           <Text style={{ fontSize: 8, fontWeight: 700, marginBottom: 4 }}>PDT 621 — IGV y Renta</Text>
-          {(
-            [
-              ['Ventas netas', sections.pdt621.ventas_netas],
-              ['Notas de crédito', sections.pdt621.notas_credito],
-              ['Compras 10.5 %', sections.pdt621.compras_105],
-              ['Compras 18 %', sections.pdt621.compras_18],
-            ] as const
-          ).map(([label, r]) => (
+          {listPdt621IgvDisplayRows(sections.pdt621).map(({ label, row }) => (
             <Text key={label} style={styles.pdtText}>
-              {label}: base {formatTaxMoney(r.base)} · imp. {formatTaxMoney(r.impuesto)} · total {formatTaxMoney(r.total)}
+              {label}: base {formatTaxMoney(row.base)} · imp. {formatTaxMoney(row.impuesto)} · total {formatTaxMoney(row.total)}
             </Text>
           ))}
           <Text style={styles.pdtText}>Impuesto del periodo: {formatImpuestoPeriodo(sections.pdt621.impuesto_periodo)}</Text>

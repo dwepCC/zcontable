@@ -18,6 +18,13 @@ const (
 	CompanyIGVRate105 = "10.5"
 )
 
+// Régimen tributario SUNAT (valor en tax_regime).
+const (
+	CompanyTaxRegimeMype    = "mype"
+	CompanyTaxRegimeRER     = "rer"
+	CompanyTaxRegimeGeneral = "general"
+)
+
 // Company representa una empresa cliente del estudio
 type Company struct {
 	ID             uint           `gorm:"primaryKey" json:"id"`
@@ -28,6 +35,7 @@ type Company struct {
 	Status         string         `gorm:"size:50;not null;default:'activo'" json:"status"` // Estado del cliente
 	TradeName      string         `gorm:"size:255" json:"trade_name"`                      // Nombre comercial (opcional)
 	IgvRate        string         `gorm:"size:10" json:"igv_rate"`                         // 18 | 10.5 (% IGV aplicable); vacío = sin configurar
+	TaxRegime      string         `gorm:"size:20" json:"tax_regime"`                       // mype | rer | general
 	Address        string         `gorm:"size:255" json:"address"`
 	Phone          string         `gorm:"size:50" json:"phone"`
 	Email          string         `gorm:"size:255" json:"email"`
