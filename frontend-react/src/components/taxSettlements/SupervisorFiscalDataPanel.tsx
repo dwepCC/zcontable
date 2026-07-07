@@ -30,7 +30,7 @@ export function SupervisorFiscalDataPanel({ pdt621Json, className = '' }: Props)
         </span>
       </div>
       <div className="p-4 sm:p-5 bg-white">
-        <TaxSettlementSectionsSummary pdt621Json={pdt621Json} variant="embedded" />
+        <TaxSettlementSectionsSummary pdt621Json={pdt621Json} variant="embedded" collapsible />
       </div>
     </section>
   );

@@ -55,6 +55,31 @@ function issueDateFromSettlement(raw?: string): string {
   return raw;
 }
 
+function focusNextEditableFormInput(form: HTMLFormElement, current: HTMLInputElement) {
+  const focusables = Array.from(
+    form.querySelectorAll<HTMLInputElement>(
+      'input:not([disabled]):not([type="hidden"]):not([type="checkbox"]):not([type="submit"]):not([type="button"]):not([readonly])'
+    )
+  ).filter((el) => el.getClientRects().length > 0);
+
+  const idx = focusables.indexOf(current);
+  if (idx < 0 || idx >= focusables.length - 1) return;
+  const next = focusables[idx + 1];
+  next.focus();
+  if (next.type === 'text' || next.type === 'number') {
+    next.select();
+  }
+}
+
+function handleLiquidacionFormEnterKey(e: React.KeyboardEvent<HTMLFormElement>) {
+  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (['submit', 'button', 'checkbox', 'hidden', 'file'].includes(target.type)) return;
+  e.preventDefault();
+  focusNextEditableFormInput(e.currentTarget, target);
+}
+
 const SupervisorLiquidacionCreatePage = () => {
   const { companyId: companyIdParam, settlementId: settlementIdParam } = useParams();
   const location = useLocation();
@@ -526,6 +551,7 @@ const SupervisorLiquidacionCreatePage = () => {
       ) : (
       <form
         onSubmit={(e) => void submit(e)}
+        onKeyDown={handleLiquidacionFormEnterKey}
         className="w-full min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 md:p-6 space-y-5"
       >
         <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Datos de la liquidación</h2>

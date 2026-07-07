@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { formatCompanyIgvRateLabel } from '../../utils/companyIgv';
 import {
   formatLiquidationRentaRegimeLabel,
@@ -8,13 +8,11 @@ import {
 } from '../../utils/companyTaxRegime';
 import {
   computeTaxSettlementSections,
-  formatImpuestoPeriodo,
   formatTaxMoney,
-  formatTaxRowMoney,
-  listPdt621IgvDisplayRows,
   parseTaxSectionsJson,
   type TaxSettlementSectionsPayload,
 } from '../../utils/taxSettlementSections';
+import Pdt621ReadOnlySection from './Pdt621ReadOnlySection';
 
 type Props = {
   pdt621Json?: string | null;
@@ -22,31 +20,56 @@ type Props = {
   className?: string;
   /** embedded = dentro del panel Finanzas; sin título duplicado */
   variant?: 'default' | 'embedded';
+  /** Secciones PDT/ITAN desplegables (Finanzas). */
+  collapsible?: boolean;
 };
 
 function SectionBlock({
   title,
   subtitle,
   children,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (!collapsible) {
+    return (
+      <div className="rounded-lg border border-slate-200 overflow-hidden">
+        <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+          <h4 className="text-xs font-semibold text-slate-800">{title}</h4>
+          {subtitle ? <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p> : null}
+        </div>
+        <div className="p-3 space-y-3 text-sm">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-slate-200 overflow-hidden">
-      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-        <h4 className="text-xs font-semibold text-slate-800">{title}</h4>
-        {subtitle ? <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p> : null}
-      </div>
-      <div className="p-3 space-y-3 text-sm">{children}</div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full px-3 py-2.5 bg-slate-50 border-b border-slate-200 flex items-start justify-between gap-3 text-left hover:bg-slate-100/80 transition-colors"
+      >
+        <span className="min-w-0">
+          <span className="block text-xs font-semibold text-slate-800">{title}</span>
+          {subtitle ? <span className="block text-[11px] text-slate-500 mt-0.5">{subtitle}</span> : null}
+        </span>
+        <i
+          className={`fas fa-chevron-down text-[10px] text-slate-400 mt-1 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+      {open ? <div className="p-3 space-y-3 text-sm">{children}</div> : null}
     </div>
-  );
-}
-
-function SubHeading({ children }: { children: ReactNode }) {
-  return (
-    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 pt-1">{children}</p>
   );
 }
 
@@ -75,6 +98,7 @@ export function TaxSettlementSectionsSummary({
   sections: sectionsProp,
   className = '',
   variant = 'default',
+  collapsible = false,
 }: Props) {
   const sections = useMemo(() => {
     if (sectionsProp) return computeTaxSettlementSections(sectionsProp);
@@ -105,7 +129,12 @@ export function TaxSettlementSectionsSummary({
       ) : null}
 
       {sections.pdt621?.enabled ? (
-        <SectionBlock title="PDT 621 — IGV y Renta" subtitle="Impuesto mensual, créditos, percepciones, retenciones y renta.">
+        <SectionBlock
+          title="PDT 621 — IGV y Renta"
+          subtitle="Impuesto mensual, créditos, percepciones, retenciones y renta."
+          collapsible={collapsible}
+          defaultOpen={false}
+        >
           {igvRatesLabel || rentaRegimen ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {igvRatesLabel ? (
@@ -120,71 +149,12 @@ export function TaxSettlementSectionsSummary({
             </div>
           ) : null}
 
-          <SubHeading>1. IGV mensual</SubHeading>
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full min-w-[520px] text-xs">
-              <thead>
-                <tr className="text-left text-slate-500 border-b border-slate-100">
-                  <th className="py-1.5 pr-2 font-medium">Concepto</th>
-                  <th className="py-1.5 px-2 font-medium text-right">Base</th>
-                  <th className="py-1.5 px-2 font-medium text-right">No grav.</th>
-                  <th className="py-1.5 px-2 font-medium text-right">Impuesto</th>
-                  <th className="py-1.5 pl-2 font-medium text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-800">
-                {listPdt621IgvDisplayRows(sections.pdt621!).map(({ label, row, withNoGravadas }) => (
-                  <tr key={label} className="border-b border-slate-50">
-                    <td className="py-1.5 pr-2">{label}</td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">{formatTaxMoney(row.base)}</td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">
-                      {withNoGravadas ? formatTaxMoney(row.no_gravadas ?? 0) : '—'}
-                    </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">{formatTaxMoney(row.impuesto)}</td>
-                    <td className="py-1.5 pl-2 text-right tabular-nums">{formatTaxMoney(row.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-            <Row label="Impuesto del periodo" value={formatImpuestoPeriodo(sections.pdt621!.impuesto_periodo)} />
-            <Row label="Crédito periodo anterior" value={formatTaxMoney(sections.pdt621!.credito_periodo_anterior)} />
-            <Row label="Saldo a favor" value={formatTaxMoney(sections.pdt621!.saldo_favor)} />
-          </div>
-
-          <SubHeading>Percepciones</SubHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-            <Row label="Del periodo" value={formatTaxMoney(sections.pdt621!.percepciones_periodo)} />
-            <Row label="Periodos anteriores" value={formatTaxMoney(sections.pdt621!.percepciones_anteriores)} />
-          </div>
-
-          <SubHeading>Retenciones</SubHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-            <Row label="Del periodo" value={formatTaxMoney(sections.pdt621!.retenciones_periodo)} />
-            <Row label="Periodos anteriores" value={formatTaxMoney(sections.pdt621!.retenciones_anteriores)} />
-          </div>
-
-          <Row label="Saldo a favor (final)" value={formatTaxMoney(sections.pdt621!.saldo_favor_final)} bold />
-
-          <SubHeading>2. Renta mensual</SubHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1">
-            <Row label="Ingresos netos (base)" value={formatTaxRowMoney(sections.pdt621!.renta_ventas_base)} />
-            <Row
-              label={`Impuesto renta${rentaRatePct != null ? ` (${formatRentaRateLabel(rentaRatePct)})` : ''}`}
-              value={formatTaxRowMoney(sections.pdt621!.renta_ventas_impuesto)}
-            />
-            <Row label="Saldo a favor ITAN" value={formatTaxMoney(sections.pdt621!.renta_saldo_favor_itan)} />
-            <Row label="Impuesto a pagar (renta)" value={formatTaxMoney(sections.pdt621!.renta_impuesto_a_pagar)} />
-          </div>
-
-          <Row label="Subtotal PDT 621" value={formatTaxMoney(sections.pdt621!.impuesto_a_pagar)} bold />
+          <Pdt621ReadOnlySection p621={sections.pdt621!} rentaRatePct={rentaRatePct} />
         </SectionBlock>
       ) : null}
 
       {sections.pdt601?.enabled ? (
-        <SectionBlock title="PDT 601 — Planilla electrónica">
+        <SectionBlock title="PDT 601 — Planilla electrónica" collapsible={collapsible} defaultOpen={false}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1">
             <Row label="ESSALUD" value={formatTaxMoney(sections.pdt601.essalud)} />
             <Row label="ONP" value={formatTaxMoney(sections.pdt601.onp)} />
@@ -197,7 +167,11 @@ export function TaxSettlementSectionsSummary({
       ) : null}
 
       {sections.itan?.enabled ? (
-        <SectionBlock title={`ITAN ${sections.itan.year} — Cuota ${sections.itan.cuota_nro}`}>
+        <SectionBlock
+          title={`ITAN ${sections.itan.year} — Cuota ${sections.itan.cuota_nro}`}
+          collapsible={collapsible}
+          defaultOpen={false}
+        >
           <Row label="Impuesto a pagar" value={formatTaxMoney(sections.itan.impuesto_a_pagar)} bold />
         </SectionBlock>
       ) : null}

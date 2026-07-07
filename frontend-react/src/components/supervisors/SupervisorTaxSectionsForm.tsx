@@ -31,6 +31,17 @@ import {
   type CompanyIgvRate,
 } from '../../utils/companyIgv';
 
+import {
+  PDT621_IGV_HEADER_CELL,
+  PDT621_IGV_TABLE_GAP,
+  PDT621_IGV_TABLE_GRID,
+  PDT621_IGV_TABLE_ROW,
+  PDT621_ROW_GRID,
+  PDT621_SECTION_TITLE,
+  PDT621_SUMMARY_LABEL,
+  PDT621_SUMMARY_LABEL_EMPHASIS,
+} from '../taxSettlements/pdt621Layout';
+
 type Props = {
   value: TaxSettlementSectionsPayload;
   onChange: (next: TaxSettlementSectionsPayload) => void;
@@ -49,6 +60,8 @@ function AmountField({
   className = '',
   formatValue,
   useRowMoneyFormat = false,
+  hideLabel = false,
+  compact = false,
 }: {
   label: string;
   value: number;
@@ -57,6 +70,8 @@ function AmountField({
   className?: string;
   formatValue?: (n: number) => string;
   useRowMoneyFormat?: boolean;
+  hideLabel?: boolean;
+  compact?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
@@ -68,12 +83,21 @@ function AmountField({
       : formatTaxMoney(value);
 
   const inputValue = focused ? (draft ?? formatTaxAmountInput(value)) : formatTaxAmountInput(value);
+  const fieldPadding = compact ? 'px-2 py-1' : 'px-2.5 py-2';
 
   return (
     <div className={className}>
-      <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
+      <label
+        className={
+          hideLabel
+            ? 'sr-only'
+            : `block ${compact ? 'text-xs' : 'text-[11px]'} font-medium text-slate-500 mb-1`
+        }
+      >
+        {label}
+      </label>
       {readOnly ? (
-        <div className="px-2.5 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm tabular-nums text-slate-800">
+        <div className={`${fieldPadding} rounded-lg border border-slate-200 bg-slate-50 text-sm tabular-nums text-slate-800`}>
           {readDisplay}
         </div>
       ) : (
@@ -102,7 +126,7 @@ function AmountField({
             }
             setDraft(null);
           }}
-          className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm tabular-nums focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+          className={`w-full ${fieldPadding} rounded-lg border border-slate-300 text-sm tabular-nums focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none`}
           placeholder="0.00"
         />
       )}
@@ -110,7 +134,68 @@ function AmountField({
   );
 }
 
-function IGVRowFields({
+/** Fila compacta estilo PDT: etiqueta a la izquierda, control a la derecha. Solo layout. */
+function PdtFormRow({
+  label,
+  children,
+  emphasized = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  emphasized?: boolean;
+}) {
+  return (
+    <div className={`grid grid-cols-1 ${PDT621_ROW_GRID} gap-y-0.5`}>
+      <span className={`${emphasized ? PDT621_SUMMARY_LABEL_EMPHASIS : PDT621_SUMMARY_LABEL} leading-snug`}>
+        {label}
+      </span>
+      <div className="min-w-0 w-full">{children}</div>
+    </div>
+  );
+}
+
+/** Fila resumen IGV alineada bajo la columna Impuesto (solo escritorio). */
+function IGVImpuestoSummaryRow({
+  label,
+  value,
+  onChange,
+  readOnly,
+  formatValue,
+  useRowMoneyFormat,
+  emphasized = false,
+}: {
+  label: string;
+  value: number;
+  onChange?: (n: number) => void;
+  readOnly?: boolean;
+  formatValue?: (n: number) => string;
+  useRowMoneyFormat?: boolean;
+  emphasized?: boolean;
+}) {
+  return (
+    <div className={`${PDT621_IGV_TABLE_ROW} min-h-0 py-0.5`}>
+      <span
+        className={`col-span-3 ${emphasized ? PDT621_SUMMARY_LABEL_EMPHASIS : PDT621_SUMMARY_LABEL} text-right self-center pr-1`}
+      >
+        {label}
+      </span>
+      <AmountField
+        label={label}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+        formatValue={formatValue}
+        useRowMoneyFormat={useRowMoneyFormat}
+        hideLabel
+        compact
+        className="min-w-0 self-center"
+      />
+      <span aria-hidden className="hidden sm:block" />
+    </div>
+  );
+}
+
+function IGVTableRow({
   title,
   row,
   onChange,
@@ -132,18 +217,62 @@ function IGVRowFields({
     onChange(next);
   };
 
+  const impuestoLabel = `Impuesto (${formatCompanyIgvRateLabel(igvRate)})`;
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-      <p className="text-xs font-semibold text-slate-700">{title}</p>
-      <div className={`grid grid-cols-2 ${withNoGravadas ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-2`}>
-        <AmountField label="Base imponible" value={row.base} onChange={(n) => applyPatch({ base: n })} />
-        {withNoGravadas ? (
-          <AmountField label="No gravadas" value={row.no_gravadas ?? 0} onChange={(n) => applyPatch({ no_gravadas: n })} />
-        ) : null}
-        <AmountField label={`Impuesto (${formatCompanyIgvRateLabel(igvRate)})`} value={row.impuesto} readOnly useRowMoneyFormat />
-        <AmountField label="Total" value={row.total} readOnly useRowMoneyFormat />
+    <>
+      <div className="sm:hidden space-y-2 pb-2 last:pb-0">
+        <p className="text-xs font-semibold text-slate-700">{title}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <AmountField label="Base imponible" value={row.base} onChange={(n) => applyPatch({ base: n })} />
+          {withNoGravadas ? (
+            <AmountField
+              label="No gravadas"
+              value={row.no_gravadas ?? 0}
+              onChange={(n) => applyPatch({ no_gravadas: n })}
+            />
+          ) : null}
+          <AmountField
+            label={impuestoLabel}
+            value={row.impuesto}
+            readOnly
+            useRowMoneyFormat
+          />
+          <AmountField label="Total" value={row.total} readOnly useRowMoneyFormat />
+        </div>
       </div>
-    </div>
+      <div className={`hidden sm:grid ${PDT621_IGV_TABLE_ROW}`}>
+        <p className="text-xs font-medium text-slate-700 leading-snug pr-1 self-center">{title}</p>
+        <AmountField
+          label="Base imponible"
+          value={row.base}
+          onChange={(n) => applyPatch({ base: n })}
+          hideLabel
+          compact
+          className="min-w-0 self-center"
+        />
+        {withNoGravadas ? (
+          <AmountField
+            label="No gravadas"
+            value={row.no_gravadas ?? 0}
+            onChange={(n) => applyPatch({ no_gravadas: n })}
+            hideLabel
+            compact
+            className="min-w-0 self-center"
+          />
+        ) : null}
+        <AmountField
+          label={impuestoLabel}
+          value={row.impuesto}
+          readOnly
+          useRowMoneyFormat
+          hideLabel
+          compact
+          className="min-w-0 self-center"
+        />
+        <AmountField label="Total" value={row.total} readOnly useRowMoneyFormat hideLabel compact className="min-w-0 self-center" />
+      </div>
+    </>
   );
 }
 
@@ -258,116 +387,263 @@ const SupervisorTaxSectionsForm = ({
         onToggle={(enabled) => patch621({ enabled })}
       >
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">1. IGV mensual</h4>
-          <div className="space-y-3">
-            {igvAplicableVentas.map((rate) => (
-              <div key={`ventas-nc-${rate}`} className="space-y-3">
-                <IGVRowFields
-                  title={`Ventas netas (${formatCompanyIgvRateLabel(rate)})`}
-                  row={getPdt621VentasRow(p621, rate)}
-                  onChange={(p) => patchVentasByRate(rate, p)}
-                  withNoGravadas
-                  igvRate={rate}
-                />
-                <IGVRowFields
-                  title={`(−) Notas de crédito (${formatCompanyIgvRateLabel(rate)})`}
-                  row={getPdt621NotasCreditoRow(p621, rate)}
-                  onChange={(p) => patchNotasByRate(rate, p)}
-                  withNoGravadas
-                  igvRate={rate}
-                />
+          <h4 className={PDT621_SECTION_TITLE}>1. IGV mensual</h4>
+          <div className="overflow-x-auto -mx-1 px-1">
+            <div className={`hidden sm:grid ${PDT621_IGV_TABLE_GRID} ${PDT621_IGV_TABLE_GAP} min-w-[38rem]`}>
+              <div className={`${PDT621_IGV_TABLE_ROW} border-b border-slate-200 pb-1 mb-0.5 min-h-0 py-0`}>
+                <span className={`${PDT621_IGV_HEADER_CELL} text-left self-end pb-1`}>Concepto</span>
+                <span className={`${PDT621_IGV_HEADER_CELL} text-center self-end pb-1`}>Base imponible</span>
+                <span className={`${PDT621_IGV_HEADER_CELL} text-center self-end pb-1`}>No gravadas</span>
+                <span className={`${PDT621_IGV_HEADER_CELL} text-center self-end pb-1`}>Impuesto</span>
+                <span className={`${PDT621_IGV_HEADER_CELL} text-center self-end pb-1`}>Total</span>
               </div>
-            ))}
-            <IGVRowFields
-              title="(−) Compras 10.5 %"
-              row={p621.compras_105}
-              onChange={(p) => patchIGV('compras_105', p, 10.5)}
-              withNoGravadas
-              igvRate={10.5}
-            />
-            <IGVRowFields
-              title="(−) Compras 18 %"
-              row={p621.compras_18}
-              onChange={(p) => patchIGV('compras_18', p, 18)}
-              withNoGravadas
-              igvRate={18}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-4 pt-2 border-t border-slate-100">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <AmountField
-              label="Impuesto del periodo"
-              value={p621.impuesto_periodo}
-              readOnly
-              formatValue={formatImpuestoPeriodo}
-            />
-            <AmountField
-              label="Crédito periodo anterior"
-              value={p621.credito_periodo_anterior}
-              onChange={(n) => patch621({ credito_periodo_anterior: n })}
-            />
-            <AmountField label="Saldo a favor" value={p621.saldo_favor} readOnly />
-          </div>
-
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Percepciones</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <AmountField
+              {igvAplicableVentas.map((rate) => (
+                <div key={`ventas-nc-${rate}`} className="contents">
+                  <IGVTableRow
+                    title={`Ventas netas (${formatCompanyIgvRateLabel(rate)})`}
+                    row={getPdt621VentasRow(p621, rate)}
+                    onChange={(p) => patchVentasByRate(rate, p)}
+                    withNoGravadas
+                    igvRate={rate}
+                  />
+                  <IGVTableRow
+                    title={`(−) Notas de crédito (${formatCompanyIgvRateLabel(rate)})`}
+                    row={getPdt621NotasCreditoRow(p621, rate)}
+                    onChange={(p) => patchNotasByRate(rate, p)}
+                    withNoGravadas
+                    igvRate={rate}
+                  />
+                </div>
+              ))}
+              <IGVTableRow
+                title="(−) Compras 10.5 %"
+                row={p621.compras_105}
+                onChange={(p) => patchIGV('compras_105', p, 10.5)}
+                withNoGravadas
+                igvRate={10.5}
+              />
+              <IGVTableRow
+                title="(−) Compras 18 %"
+                row={p621.compras_18}
+                onChange={(p) => patchIGV('compras_18', p, 18)}
+                withNoGravadas
+                igvRate={18}
+              />
+              <IGVImpuestoSummaryRow
+                label="Impuesto del periodo"
+                value={p621.impuesto_periodo}
+                readOnly
+                formatValue={formatImpuestoPeriodo}
+              />
+              <IGVImpuestoSummaryRow
+                label="Crédito periodo anterior"
+                value={p621.credito_periodo_anterior}
+                onChange={(n) => patch621({ credito_periodo_anterior: n })}
+              />
+              <IGVImpuestoSummaryRow label="Saldo a favor" value={p621.saldo_favor} readOnly emphasized />
+              <IGVImpuestoSummaryRow
                 label="Percepciones del periodo"
                 value={p621.percepciones_periodo}
                 onChange={(n) => patch621({ percepciones_periodo: n })}
               />
-              <AmountField
+              <IGVImpuestoSummaryRow
                 label="Percepciones periodos anteriores"
                 value={p621.percepciones_anteriores}
                 onChange={(n) => patch621({ percepciones_anteriores: n })}
               />
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Retenciones</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <AmountField
+              <IGVImpuestoSummaryRow
                 label="Retenciones del periodo"
                 value={p621.retenciones_periodo}
                 onChange={(n) => patch621({ retenciones_periodo: n })}
               />
-              <AmountField
+              <IGVImpuestoSummaryRow
                 label="Retenciones periodos anteriores"
                 value={p621.retenciones_anteriores}
                 onChange={(n) => patch621({ retenciones_anteriores: n })}
               />
+              <IGVImpuestoSummaryRow
+                label="Saldo a favor (final)"
+                value={p621.saldo_favor_final}
+                readOnly
+                emphasized
+              />
+            </div>
+            <div className="sm:hidden space-y-2">
+              {igvAplicableVentas.map((rate) => (
+                <div key={`ventas-nc-m-${rate}`} className="space-y-2">
+                  <IGVTableRow
+                    title={`Ventas netas (${formatCompanyIgvRateLabel(rate)})`}
+                    row={getPdt621VentasRow(p621, rate)}
+                    onChange={(p) => patchVentasByRate(rate, p)}
+                    withNoGravadas
+                    igvRate={rate}
+                  />
+                  <IGVTableRow
+                    title={`(−) Notas de crédito (${formatCompanyIgvRateLabel(rate)})`}
+                    row={getPdt621NotasCreditoRow(p621, rate)}
+                    onChange={(p) => patchNotasByRate(rate, p)}
+                    withNoGravadas
+                    igvRate={rate}
+                  />
+                </div>
+              ))}
+              <IGVTableRow
+                title="(−) Compras 10.5 %"
+                row={p621.compras_105}
+                onChange={(p) => patchIGV('compras_105', p, 10.5)}
+                withNoGravadas
+                igvRate={10.5}
+              />
+              <IGVTableRow
+                title="(−) Compras 18 %"
+                row={p621.compras_18}
+                onChange={(p) => patchIGV('compras_18', p, 18)}
+                withNoGravadas
+                igvRate={18}
+              />
+            </div>
+          </div>
+          <div className="pt-3 space-y-1.5 sm:hidden">
+            <div className="space-y-1">
+              <PdtFormRow label="Impuesto del periodo">
+                <AmountField
+                  label="Impuesto del periodo"
+                  value={p621.impuesto_periodo}
+                  readOnly
+                  formatValue={formatImpuestoPeriodo}
+                  hideLabel
+                />
+              </PdtFormRow>
+              <PdtFormRow label="Crédito periodo anterior">
+                <AmountField
+                  label="Crédito periodo anterior"
+                  value={p621.credito_periodo_anterior}
+                  onChange={(n) => patch621({ credito_periodo_anterior: n })}
+                  hideLabel
+                />
+              </PdtFormRow>
+              <PdtFormRow label="Saldo a favor" emphasized>
+                <AmountField label="Saldo a favor" value={p621.saldo_favor} readOnly hideLabel />
+              </PdtFormRow>
+            </div>
+
+            <div className="space-y-1 pt-1">
+              <PdtFormRow label="Percepciones del periodo">
+                <AmountField
+                  label="Percepciones del periodo"
+                  value={p621.percepciones_periodo}
+                  onChange={(n) => patch621({ percepciones_periodo: n })}
+                  hideLabel
+                />
+              </PdtFormRow>
+              <PdtFormRow label="Percepciones periodos anteriores">
+                <AmountField
+                  label="Percepciones periodos anteriores"
+                  value={p621.percepciones_anteriores}
+                  onChange={(n) => patch621({ percepciones_anteriores: n })}
+                  hideLabel
+                />
+              </PdtFormRow>
+              <PdtFormRow label="Retenciones del periodo">
+                <AmountField
+                  label="Retenciones del periodo"
+                  value={p621.retenciones_periodo}
+                  onChange={(n) => patch621({ retenciones_periodo: n })}
+                  hideLabel
+                />
+              </PdtFormRow>
+              <PdtFormRow label="Retenciones periodos anteriores">
+                <AmountField
+                  label="Retenciones periodos anteriores"
+                  value={p621.retenciones_anteriores}
+                  onChange={(n) => patch621({ retenciones_anteriores: n })}
+                  hideLabel
+                />
+              </PdtFormRow>
+            </div>
+
+            <div className="pt-1">
+              <PdtFormRow label="Saldo a favor (final)" emphasized>
+                <AmountField label="Saldo a favor (final)" value={p621.saldo_favor_final} readOnly hideLabel />
+              </PdtFormRow>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1 border-t border-slate-100">
-            <AmountField label="Saldo a favor (final)" value={p621.saldo_favor_final} readOnly />
+          <div className="mt-1.5 pt-1 border-t border-slate-200">
+            <h4 className={PDT621_SECTION_TITLE}>2. Renta mensual</h4>
+          <div className="hidden sm:block overflow-x-auto -mx-1 px-1">
+            <div className={`grid ${PDT621_IGV_TABLE_GRID} ${PDT621_IGV_TABLE_GAP} min-w-[38rem]`}>
+              <div className={`${PDT621_IGV_TABLE_ROW} min-h-0 py-0 mb-0.5`}>
+                <span className="col-span-3" aria-hidden />
+                <span className={`${PDT621_IGV_HEADER_CELL} text-center self-end pb-0.5`}>Impuesto</span>
+                <span aria-hidden />
+              </div>
+              <IGVImpuestoSummaryRow
+                label="Ingresos netos (base)"
+                value={p621.renta_ventas_base}
+                readOnly
+                useRowMoneyFormat
+              />
+              <IGVImpuestoSummaryRow
+                label={`Impuesto renta (${formatRentaRateLabel(rentaRatePct)})`}
+                value={p621.renta_ventas_impuesto}
+                readOnly
+                useRowMoneyFormat
+              />
+              <IGVImpuestoSummaryRow
+                label="Saldo a favor ITAN"
+                value={p621.renta_saldo_favor_itan}
+                onChange={(n) => patch621({ renta_saldo_favor_itan: n })}
+              />
+              <IGVImpuestoSummaryRow
+                label="Impuesto a pagar (renta)"
+                value={p621.renta_impuesto_a_pagar}
+                readOnly
+                emphasized
+              />
+            </div>
+          </div>
+          <div className="sm:hidden space-y-1">
+            <p className={`${PDT621_IGV_HEADER_CELL} mb-1`}>Impuesto</p>
+            <PdtFormRow label="Ingresos netos (base)">
+              <AmountField
+                label="Ingresos netos (base)"
+                value={p621.renta_ventas_base}
+                readOnly
+                useRowMoneyFormat
+                hideLabel
+              />
+            </PdtFormRow>
+            <PdtFormRow label={`Impuesto renta (${formatRentaRateLabel(rentaRatePct)})`}>
+              <AmountField
+                label={`Impuesto renta (${formatRentaRateLabel(rentaRatePct)})`}
+                value={p621.renta_ventas_impuesto}
+                readOnly
+                useRowMoneyFormat
+                hideLabel
+              />
+            </PdtFormRow>
+            <PdtFormRow label="Saldo a favor ITAN">
+              <AmountField
+                label="Saldo a favor ITAN"
+                value={p621.renta_saldo_favor_itan}
+                onChange={(n) => patch621({ renta_saldo_favor_itan: n })}
+                hideLabel
+              />
+            </PdtFormRow>
+            <PdtFormRow label="Impuesto a pagar (renta)" emphasized>
+              <AmountField
+                label="Impuesto a pagar (renta)"
+                value={p621.renta_impuesto_a_pagar}
+                readOnly
+                hideLabel
+              />
+            </PdtFormRow>
+          </div>
           </div>
         </div>
 
-        <div className="pt-2 border-t border-slate-100">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">2. Renta mensual</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <AmountField label="Ingresos netos (base)" value={p621.renta_ventas_base} readOnly useRowMoneyFormat />
-            <AmountField
-              label={`Impuesto renta (${formatRentaRateLabel(rentaRatePct)})`}
-              value={p621.renta_ventas_impuesto}
-              readOnly
-              useRowMoneyFormat
-            />
-            <AmountField
-              label="Saldo a favor ITAN"
-              value={p621.renta_saldo_favor_itan}
-              onChange={(n) => patch621({ renta_saldo_favor_itan: n })}
-            />
-            <AmountField label="Impuesto a pagar (renta)" value={p621.renta_impuesto_a_pagar} readOnly />
-          </div>
-        </div>
-
-        <div className="flex justify-end pt-2 border-t border-slate-100">
+        <div className="flex justify-end pt-3 border-t border-slate-100">
           <div className="text-right">
             <p className="text-xs text-slate-500">Impuesto a pagar — PDT 621</p>
             <p className="text-lg font-bold text-slate-900 tabular-nums">{formatTaxMoney(p621.impuesto_a_pagar)}</p>

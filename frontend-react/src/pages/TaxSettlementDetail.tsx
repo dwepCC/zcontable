@@ -12,6 +12,7 @@ import {
   settlementTotalsForPdf,
   taxSettlementPdfFilename,
 } from '../pdf/taxSettlementDocument';
+import { getLogoPngBlobForAccountPdf } from '../pdf/companyAccountStatementPdf';
 import {
   formatMoneyPen,
   stripLegacyMigrationNotes,
@@ -226,8 +227,15 @@ const TaxSettlementDetail = () => {
         configService.getFirmBranding().catch(() => null),
         taxSettlementsService.get(settlementId),
       ]);
-      const logoPng = firm?.logo_url ? await getLogoPngBlobForPdf(firm.logo_url) : null;
-      const blob = await generateTaxSettlementPdfBlob(fresh, firm, logoPng);
+      const studioLogoUrl = (firm?.logo_url ?? '').trim();
+      const bankLogoUrl = (firm?.statement_bank_logo_url ?? '').trim();
+      const payQrUrl = (firm?.statement_payment_qr_url ?? '').trim();
+      const [logoPng, bankLogoPng, paymentQrPng] = await Promise.all([
+        studioLogoUrl ? getLogoPngBlobForPdf(studioLogoUrl) : Promise.resolve(null),
+        bankLogoUrl ? getLogoPngBlobForAccountPdf(bankLogoUrl) : Promise.resolve(null),
+        payQrUrl ? getLogoPngBlobForAccountPdf(payQrUrl) : Promise.resolve(null),
+      ]);
+      const blob = await generateTaxSettlementPdfBlob(fresh, firm, logoPng, { bankLogoPng, paymentQrPng });
       saveAs(blob, taxSettlementPdfFilename(fresh));
       window.dispatchEvent(
         new CustomEvent('miweb:toast', { detail: { type: 'success', message: 'PDF listo para entregar al cliente.' } }),

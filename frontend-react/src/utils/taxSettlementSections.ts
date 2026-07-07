@@ -405,13 +405,13 @@ export function listPdt621IgvDisplayRows(
       withNoGravadas: true,
     });
     rows.push({
-      label: `Notas de crédito (${formatCompanyIgvRateLabel(rate)})`,
+      label: `(−) Notas de crédito (${formatCompanyIgvRateLabel(rate)})`,
       row: getPdt621NotasCreditoRow(s, rate),
       withNoGravadas: true,
     });
   }
-  rows.push({ label: 'Compras 10.5 %', row: s.compras_105, withNoGravadas: true });
-  rows.push({ label: 'Compras 18 %', row: s.compras_18, withNoGravadas: true });
+  rows.push({ label: '(−) Compras 10.5 %', row: s.compras_105, withNoGravadas: true });
+  rows.push({ label: '(−) Compras 18 %', row: s.compras_18, withNoGravadas: true });
   return rows;
 }
 
