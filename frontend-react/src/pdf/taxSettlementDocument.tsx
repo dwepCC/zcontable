@@ -1,12 +1,19 @@
 import { Document, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer';
+import { Fragment } from 'react';
 import type { FirmConfig, TaxSettlement, TaxSettlementLine } from '../types/dashboard';
 import { periodLabelFromYM } from '../utils/liquidationPeriod';
 import { loadLogoPngBlobForPdf } from '../utils/pdfLogo';
-import { formatTaxMoney, parseTaxSectionsJson, type TaxSettlementSectionsPayload } from '../utils/taxSettlementSections';
+import {
+  formatTaxMoney,
+  isNonZeroTaxAmount,
+  parseTaxSectionsJson,
+  type TaxSettlementSectionsPayload,
+} from '../utils/taxSettlementSections';
 import { getRentaMensualRatePct } from '../utils/companyTaxRegime';
-import { PdfClientInfoRow, PdfLiquidationHeader, PdfSectionBar, pdfLiquidationStyles } from './pdfLiquidationComponents';
+import { PdfClientInfoRow, PdfHighlightedTotalRow, PdfLiquidationHeader, PdfSectionBar, pdfLiquidationStyles } from './pdfLiquidationComponents';
 import { formatIssueDateForPdf, PDF_LIQ } from './pdfLiquidationTheme';
 import { Pdt621PdfSection } from './pdt621PdfSection';
+import { Pdt601PdfSection } from './pdt601PdfSection';
 import {
   PdfLiquidationPaymentFooter,
   PdfTaxRecommendationsFooter,
@@ -52,6 +59,39 @@ export async function getLogoPngBlobForPdf(logoUrl: string): Promise<Blob | null
 }
 
 const formatMoney = (value: number) => `S/ ${Number(value ?? 0).toFixed(2)}`;
+const formatMoneyAmountOnly = (value: number) => Number(value ?? 0).toFixed(2);
+
+const docStyles = StyleSheet.create({
+  draftBanner: {
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+    borderRadius: 4,
+    padding: 8,
+    marginBottom: 10,
+  },
+  draftBannerText: { fontSize: 8, color: '#9a3412', fontWeight: 700 },
+  table: { borderWidth: 1, borderColor: PDF_LIQ.grayBorder },
+  honorariosTotal: { marginTop: 6 },
+  rowHead: { flexDirection: 'row', backgroundColor: PDF_LIQ.blue, borderBottomWidth: 1, borderBottomColor: PDF_LIQ.blueDark },
+  row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  rowAlt: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: PDF_LIQ.grayBg },
+  cell: { paddingVertical: 6, paddingHorizontal: 8 },
+  colTipo: { width: '14%' },
+  colPeriodo: { width: '14%' },
+  colConcepto: { width: '42%' },
+  colMonto: { width: '30%', textAlign: 'right' },
+  headText: { fontSize: 7.5, fontWeight: 700, color: PDF_LIQ.white, textTransform: 'uppercase' },
+  rowText: { fontSize: 8, color: PDF_LIQ.text },
+  notes: { marginTop: 10, padding: 8, backgroundColor: PDF_LIQ.grayBg, borderWidth: 1, borderColor: PDF_LIQ.grayBorder },
+  notesTitle: { fontSize: 8, fontWeight: 700, color: PDF_LIQ.blueDark, marginBottom: 4, textTransform: 'uppercase' },
+  notesText: { fontSize: 8, color: PDF_LIQ.text },
+  pdtBlock: { marginBottom: 10 },
+  pdtText: { fontSize: 7, color: PDF_LIQ.textMuted },
+  pdtSubBlock: { marginBottom: 8 },
+  taxSectionsTail: { marginBottom: 10 },
+  footer: { position: 'absolute', bottom: 14, left: 28, right: 28, fontSize: 8, color: '#94a3b8' },
+});
 
 type TaxSettlementPdfDocumentProps = {
   settlement: TaxSettlement;
@@ -72,75 +112,18 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
     periodLabelFromYM((settlement.liquidation_period ?? '').trim()) ||
     (settlement.liquidation_period ?? '').trim() ||
     '—';
-  const sortedLines = [...(settlement.lines ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.id ?? 0) - (b.id ?? 0));
-
-  const styles = StyleSheet.create({
-    draftBanner: {
-      backgroundColor: '#fff7ed',
-      borderWidth: 1,
-      borderColor: '#fed7aa',
-      borderRadius: 4,
-      padding: 8,
-      marginBottom: 10,
-    },
-    draftBannerText: { fontSize: 8, color: '#9a3412', fontWeight: 700 },
-    table: { borderWidth: 1, borderColor: PDF_LIQ.grayBorder, overflow: 'hidden' },
-    rowHead: { flexDirection: 'row', backgroundColor: PDF_LIQ.blue, borderBottomWidth: 1, borderBottomColor: PDF_LIQ.blueDark },
-    row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-    rowAlt: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: PDF_LIQ.grayBg },
-    cell: { paddingVertical: 6, paddingHorizontal: 8 },
-    colTipo: { width: '14%' },
-    colPeriodo: { width: '14%' },
-    colConcepto: { width: '42%' },
-    colMonto: { width: '30%', textAlign: 'right' },
-    headText: { fontSize: 7.5, fontWeight: 700, color: PDF_LIQ.white, textTransform: 'uppercase' },
-    rowText: { fontSize: 8, color: PDF_LIQ.text },
-    totalsBox: {
-      marginTop: 10,
-      alignSelf: 'flex-end',
-      width: '48%',
-      borderWidth: 1,
-      borderColor: PDF_LIQ.grayBorder,
-      padding: 10,
-      backgroundColor: PDF_LIQ.grayBg,
-    },
-    totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-    totalLabel: { fontSize: 8, color: PDF_LIQ.textMuted },
-    totalValue: { fontSize: 9, fontWeight: 700, color: PDF_LIQ.text },
-    totalGrand: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: 6,
-      paddingTop: 6,
-      borderTopWidth: 1,
-      borderTopColor: PDF_LIQ.grayBorder,
-    },
-    notes: { marginTop: 10, padding: 8, backgroundColor: PDF_LIQ.grayBg, borderWidth: 1, borderColor: PDF_LIQ.grayBorder },
-    notesTitle: { fontSize: 8, fontWeight: 700, color: PDF_LIQ.blueDark, marginBottom: 4, textTransform: 'uppercase' },
-    notesText: { fontSize: 8, color: PDF_LIQ.text },
-    pdtBlock: { marginBottom: 10 },
-    financeBlock: { marginTop: 4 },
-    pdtText: { fontSize: 7, color: PDF_LIQ.textMuted },
-    pdtSubBlock: { marginBottom: 8 },
-    pdtSubTitle: {
-      fontSize: 8,
-      fontWeight: 700,
-      color: PDF_LIQ.blueDark,
-      marginBottom: 4,
-      textTransform: 'uppercase',
-    },
-    pdtTotal: { fontSize: 9, fontWeight: 700, marginTop: 6, color: PDF_LIQ.blueDark, textAlign: 'right' },
-    footer: { position: 'absolute', bottom: 14, left: 28, right: 28, fontSize: 8, color: '#94a3b8' },
-  });
+  const sortedLines = [...(settlement.lines ?? [])]
+    .filter((ln) => isNonZeroTaxAmount(Number(ln.amount) || 0))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.id ?? 0) - (b.id ?? 0));
 
   const pdtSnippet = (settlement.pdt621_json ?? '').trim();
   const taxSections = parseTaxSectionsJson(settlement.pdt621_json);
 
   const renderTaxSections = (sections: TaxSettlementSectionsPayload) => (
-    <View style={styles.pdtBlock}>
+    <Fragment>
       <PdfSectionBar title="Detalle" />
       {sections.pdt621?.enabled ? (
-        <View style={styles.pdtSubBlock}>
+        <View style={docStyles.pdtSubBlock}>
           <PdfSectionBar title="PDT 621 — IGV y Renta" light />
           <Pdt621PdfSection
             p621={sections.pdt621}
@@ -153,26 +136,26 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
         </View>
       ) : null}
       {sections.pdt601?.enabled ? (
-        <View style={styles.pdtSubBlock}>
+        <View style={docStyles.pdtSubBlock}>
           <PdfSectionBar title="PDT 601 — Planilla electrónica" light />
-          <Text style={styles.pdtText}>
-            ESSALUD {formatTaxMoney(sections.pdt601.essalud)} · ONP {formatTaxMoney(sections.pdt601.onp)} · AFP{' '}
-            {formatTaxMoney(sections.pdt601.afp)}
-          </Text>
-          <Text style={styles.pdtText}>
-            Rta 4ta {formatTaxMoney(sections.pdt601.rta_4ta)} · Rta 5ta {formatTaxMoney(sections.pdt601.rta_5ta)}
-          </Text>
-          <Text style={styles.pdtTotal}>Subtotal PDT 601: {formatTaxMoney(sections.pdt601.impuesto_a_pagar)}</Text>
+          <Pdt601PdfSection p601={sections.pdt601} />
         </View>
       ) : null}
       {sections.itan?.enabled ? (
-        <View style={styles.pdtSubBlock}>
+        <View style={docStyles.pdtSubBlock}>
           <PdfSectionBar title={`ITAN ${sections.itan.year} — Cuota ${sections.itan.cuota_nro}`} light />
-          <Text style={styles.pdtText}>Impuesto a pagar: {formatTaxMoney(sections.itan.impuesto_a_pagar)}</Text>
+          <Text style={docStyles.pdtText}>
+            Impuesto a pagar: {formatTaxMoney(sections.itan.impuesto_a_pagar)}
+          </Text>
         </View>
       ) : null}
-      <Text style={styles.pdtTotal}>Total impuestos a pagar: {formatTaxMoney(sections.grand_total_impuesto_a_pagar)}</Text>
-    </View>
+      <View style={docStyles.taxSectionsTail}>
+        <PdfHighlightedTotalRow
+          label="Total impuestos a pagar"
+          amount={formatMoneyAmountOnly(sections.grand_total_impuesto_a_pagar)}
+        />
+      </View>
+    </Fragment>
   );
 
   return (
@@ -181,8 +164,8 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
         <PdfLiquidationHeader firm={firm} logoPng={logoPng} liqNumber={liqNumber} />
 
         {!totals.emitted ? (
-          <View style={styles.draftBanner}>
-            <Text style={styles.draftBannerText}>BORRADOR — Los totales se calculan desde las líneas; emita la liquidación para fijar el documento final.</Text>
+          <View style={docStyles.draftBanner}>
+            <Text style={docStyles.draftBannerText}>BORRADOR — Los totales se calculan desde las líneas; emita la liquidación para fijar el documento final.</Text>
           </View>
         ) : null}
 
@@ -193,9 +176,6 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
               { label: 'RUC', value: client?.ruc ?? '—' },
               { label: 'Periodo', value: periodDisplay },
               { label: 'Fecha de emisión', value: issueStr },
-              ...(client?.address?.trim()
-                ? [{ label: 'Dirección', value: client.address.trim() }]
-                : []),
             ] as const
           ).map((row, idx, arr) => (
             <PdfClientInfoRow
@@ -215,82 +195,72 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
         </View>
 
         {taxSections ? renderTaxSections(taxSections) : pdtSnippet ? (
-          <View style={styles.pdtBlock}>
+          <View style={docStyles.pdtBlock}>
             <PdfSectionBar title="Detalle" />
-            <Text style={styles.pdtText}>{pdtSnippet.length > 1200 ? `${pdtSnippet.slice(0, 1200)}…` : pdtSnippet}</Text>
+            <Text style={docStyles.pdtText}>{pdtSnippet.length > 1200 ? `${pdtSnippet.slice(0, 1200)}…` : pdtSnippet}</Text>
           </View>
         ) : null}
 
-        <View style={styles.financeBlock}>
-          <PdfSectionBar title="Honorarios y cargos del estudio" />
-          <View style={styles.table}>
-            <View style={styles.rowHead}>
-              <View style={[styles.cell, styles.colTipo]}>
-                <Text style={styles.headText}>Tipo</Text>
+        <PdfSectionBar title="Honorarios y cargos del estudio" breakBefore />
+        <View style={docStyles.table}>
+          <View style={docStyles.rowHead}>
+            <View style={[docStyles.cell, docStyles.colTipo]}>
+              <Text style={docStyles.headText}>Tipo</Text>
+            </View>
+            <View style={[docStyles.cell, docStyles.colPeriodo]}>
+              <Text style={docStyles.headText}>Periodo</Text>
+            </View>
+            <View style={[docStyles.cell, docStyles.colConcepto]}>
+              <Text style={docStyles.headText}>Concepto</Text>
+            </View>
+            <View style={[docStyles.cell, docStyles.colMonto]}>
+              <Text style={docStyles.headText}>Monto</Text>
+            </View>
+          </View>
+          {sortedLines.length > 0 ? (
+            sortedLines.map((ln, idx) => (
+              <View key={ln.id ?? idx} style={idx % 2 === 1 ? docStyles.rowAlt : docStyles.row}>
+                <View style={[docStyles.cell, docStyles.colTipo]}>
+                  <Text style={docStyles.rowText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
+                </View>
+                <View style={[docStyles.cell, docStyles.colPeriodo]}>
+                  <Text style={docStyles.rowText}>
+                    {(() => {
+                      const p = (ln.period_ym ?? '').trim();
+                      if (p) return p;
+                      if (ln.period_date && ln.period_date.length >= 10) return ln.period_date.slice(0, 10);
+                      return settlement.liquidation_period || '—';
+                    })()}
+                  </Text>
+                </View>
+                <View style={[docStyles.cell, docStyles.colConcepto]}>
+                  <Text style={docStyles.rowText}>{ln.concept}</Text>
+                </View>
+                <View style={[docStyles.cell, docStyles.colMonto]}>
+                  <Text style={docStyles.rowText}>{formatMoney(ln.amount)}</Text>
+                </View>
               </View>
-              <View style={[styles.cell, styles.colPeriodo]}>
-                <Text style={styles.headText}>Periodo</Text>
-              </View>
-              <View style={[styles.cell, styles.colConcepto]}>
-                <Text style={styles.headText}>Concepto</Text>
-              </View>
-              <View style={[styles.cell, styles.colMonto]}>
-                <Text style={styles.headText}>Monto</Text>
+            ))
+          ) : (
+            <View style={docStyles.row}>
+              <View style={[docStyles.cell, { width: '100%' }]}>
+                <Text style={docStyles.rowText}>Sin líneas.</Text>
               </View>
             </View>
-            {sortedLines.length > 0 ? (
-              sortedLines.map((ln, idx) => (
-                <View key={ln.id ?? idx} style={idx % 2 === 1 ? styles.rowAlt : styles.row} wrap={false}>
-                  <View style={[styles.cell, styles.colTipo]}>
-                    <Text style={styles.rowText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
-                  </View>
-                  <View style={[styles.cell, styles.colPeriodo]}>
-                    <Text style={styles.rowText}>
-                      {(() => {
-                        const p = (ln.period_ym ?? '').trim();
-                        if (p) return p;
-                        if (ln.period_date && ln.period_date.length >= 10) return ln.period_date.slice(0, 10);
-                        return settlement.liquidation_period || '—';
-                      })()}
-                    </Text>
-                  </View>
-                  <View style={[styles.cell, styles.colConcepto]}>
-                    <Text style={styles.rowText}>{ln.concept}</Text>
-                  </View>
-                  <View style={[styles.cell, styles.colMonto]}>
-                    <Text style={styles.rowText}>{formatMoney(ln.amount)}</Text>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <View style={styles.row}>
-                <View style={[styles.cell, { width: '100%' }]}>
-                  <Text style={styles.rowText}>Sin líneas.</Text>
-                </View>
-              </View>
-            )}
-          </View>
+          )}
+        </View>
 
-          <View style={styles.totalsBox}>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Honorarios y cargos</Text>
-              <Text style={styles.totalValue}>{formatMoney(totals.honorarios)}</Text>
-            </View>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Fiscal / PDT</Text>
-              <Text style={styles.totalValue}>{formatMoney(totals.impuestos)}</Text>
-            </View>
-            <View style={styles.totalGrand}>
-              <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>{formatMoney(totals.total)}</Text>
-            </View>
-          </View>
+        <View style={docStyles.honorariosTotal}>
+          <PdfHighlightedTotalRow
+            label="Total honorarios a pagar"
+            amount={formatMoneyAmountOnly(totals.honorarios)}
+          />
         </View>
 
         {settlement.notes?.trim() ? (
-          <View style={styles.notes}>
-            <Text style={styles.notesTitle}>Notas</Text>
-            <Text style={styles.notesText}>{settlement.notes.trim()}</Text>
+          <View style={docStyles.notes}>
+            <Text style={docStyles.notesTitle}>Notas</Text>
+            <Text style={docStyles.notesText}>{settlement.notes.trim()}</Text>
           </View>
         ) : null}
 
@@ -298,7 +268,7 @@ export function TaxSettlementPdfDocument({ settlement, firm, logoPng, footerAsse
         <PdfTaxRecommendationsFooter />
 
         <Text
-          style={styles.footer}
+          style={docStyles.footer}
           render={({ pageNumber, totalPages }) => `${firmName} · ${docTitle} · Página ${pageNumber} de ${totalPages}`}
           fixed
         />

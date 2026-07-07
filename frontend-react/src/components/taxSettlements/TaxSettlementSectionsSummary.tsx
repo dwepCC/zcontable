@@ -13,6 +13,7 @@ import {
   type TaxSettlementSectionsPayload,
 } from '../../utils/taxSettlementSections';
 import Pdt621ReadOnlySection from './Pdt621ReadOnlySection';
+import Pdt601ReadOnlySection from './Pdt601ReadOnlySection';
 
 type Props = {
   pdt621Json?: string | null;
@@ -155,14 +156,7 @@ export function TaxSettlementSectionsSummary({
 
       {sections.pdt601?.enabled ? (
         <SectionBlock title="PDT 601 — Planilla electrónica" collapsible={collapsible} defaultOpen={false}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1">
-            <Row label="ESSALUD" value={formatTaxMoney(sections.pdt601.essalud)} />
-            <Row label="ONP" value={formatTaxMoney(sections.pdt601.onp)} />
-            <Row label="AFP" value={formatTaxMoney(sections.pdt601.afp)} />
-            <Row label="Rta 4ta categoría" value={formatTaxMoney(sections.pdt601.rta_4ta)} />
-            <Row label="Rta 5ta categoría" value={formatTaxMoney(sections.pdt601.rta_5ta)} />
-          </div>
-          <Row label="Subtotal PDT 601" value={formatTaxMoney(sections.pdt601.impuesto_a_pagar)} bold />
+          <Pdt601ReadOnlySection p601={sections.pdt601} />
         </SectionBlock>
       ) : null}
 

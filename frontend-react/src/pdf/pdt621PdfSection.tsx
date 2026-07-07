@@ -4,10 +4,13 @@ import {
   formatImpuestoPeriodo,
   formatTaxMoney,
   formatTaxRowMoney,
+  isNonZeroTaxAmount,
+  isTaxIgvRowVisibleInPdf,
   listPdt621IgvDisplayRows,
   type TaxSectionPdt621,
 } from '../utils/taxSettlementSections';
 import { PDF_LIQ } from './pdfLiquidationTheme';
+import { PdfPdtSectionFooterRow } from './pdfPdtSectionFooter';
 
 const COL_CONCEPT = '32%';
 const COL_NUM = '17%';
@@ -40,9 +43,6 @@ const styles = StyleSheet.create({
   value: { fontSize: 7, color: PDF_LIQ.text, textAlign: 'right' },
   dataRow: { flexDirection: 'row', paddingVertical: 2, borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB' },
   sectionDivider: { borderTopWidth: 1, borderTopColor: PDF_LIQ.grayBorder, marginTop: 6, paddingTop: 4 },
-  footerBox: { marginTop: 6, alignSelf: 'flex-end', width: '42%' },
-  footerLabel: { fontSize: 7, color: PDF_LIQ.textMuted, textAlign: 'right' },
-  footerValue: { fontSize: 10, fontWeight: 700, color: PDF_LIQ.blueDark, textAlign: 'right', marginTop: 2 },
 });
 
 function PdfHeaderRow() {
@@ -96,7 +96,7 @@ function PdfSummaryRow({
         {label}
       </Text>
       <Text style={[styles.value, { width: COL_NUM }]}>{value}</Text>
-      <Text style={{ width: COL_NUM }} />
+      <View style={{ width: COL_NUM }} />
     </View>
   );
 }
@@ -108,7 +108,7 @@ type Props = {
 };
 
 export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Props) {
-  const igvRows = listPdt621IgvDisplayRows(p621);
+  const igvRows = listPdt621IgvDisplayRows(p621).filter(({ row }) => isTaxIgvRowVisibleInPdf(row));
   const rentaRateLabel = rentaRatePct != null ? formatRentaRateLabel(rentaRatePct) : null;
 
   const summaryRows = [
@@ -131,14 +131,16 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
   ] as const;
 
   const rentaRows = [
-    { label: 'Ingresos netos (base)', value: formatTaxRowMoney(p621.renta_ventas_base), emphasized: false },
+    ...(isNonZeroTaxAmount(p621.renta_ventas_base)
+      ? [{ label: 'Ingresos netos (base)', value: formatTaxRowMoney(p621.renta_ventas_base), emphasized: false as const }]
+      : []),
     {
       label: `Impuesto renta${rentaRateLabel ? ` (${rentaRateLabel})` : ''}`,
       value: formatTaxRowMoney(p621.renta_ventas_impuesto),
-      emphasized: false,
+      emphasized: false as const,
     },
-    { label: 'Saldo a favor ITAN', value: formatTaxMoney(p621.renta_saldo_favor_itan), emphasized: false },
-    { label: 'Impuesto a pagar (renta)', value: formatTaxMoney(p621.renta_impuesto_a_pagar), emphasized: true },
+    { label: 'Saldo a favor ITAN', value: formatTaxMoney(p621.renta_saldo_favor_itan), emphasized: false as const },
+    { label: 'Impuesto a pagar (renta)', value: formatTaxMoney(p621.renta_impuesto_a_pagar), emphasized: true as const },
   ] as const;
 
   return (
@@ -162,9 +164,9 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
       <View style={styles.sectionDivider}>
         <Text style={styles.sectionTitle}>2. Renta mensual</Text>
         <View style={styles.dataRow}>
-          <Text style={{ width: '66%' }} />
+          <View style={{ width: '66%' }} />
           <Text style={[styles.headerText, { width: COL_NUM, textAlign: 'right' }]}>Impuesto</Text>
-          <Text style={{ width: COL_NUM }} />
+          <View style={{ width: COL_NUM }} />
         </View>
         {rentaRows.map((item) => (
           <PdfSummaryRow key={item.label} label={item.label} value={item.value} emphasized={item.emphasized} />
@@ -172,10 +174,10 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
       </View>
 
       {showFooter ? (
-        <View style={styles.footerBox}>
-          <Text style={styles.footerLabel}>Impuesto a pagar — PDT 621</Text>
-          <Text style={styles.footerValue}>{formatTaxMoney(p621.impuesto_a_pagar)}</Text>
-        </View>
+        <PdfPdtSectionFooterRow
+          label="Impuesto a pagar — PDT 621"
+          value={formatTaxMoney(p621.impuesto_a_pagar)}
+        />
       ) : null}
     </View>
   );

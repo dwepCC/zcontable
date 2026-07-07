@@ -415,6 +415,35 @@ export function listPdt621IgvDisplayRows(
   return rows;
 }
 
+export type Pdt601DisplayRow = {
+  label: string;
+  value: number;
+};
+
+export function listPdt601DisplayRows(s: TaxSectionPdt601): Pdt601DisplayRow[] {
+  return [
+    { label: 'ESSALUD', value: s.essalud },
+    { label: 'ONP', value: s.onp },
+    { label: 'AFP', value: s.afp },
+    { label: 'Rta 4ta categoría', value: s.rta_4ta },
+    { label: 'Rta 5ta categoría', value: s.rta_5ta },
+  ];
+}
+
+/** Monto distinto de cero (2 decimales) para ocultar conceptos vacíos en PDF. */
+export function isNonZeroTaxAmount(v: number): boolean {
+  return Math.round(Number(v ?? 0) * 100) !== 0;
+}
+
+export function isTaxIgvRowVisibleInPdf(row: TaxIGVRow): boolean {
+  return (
+    isNonZeroTaxAmount(row.base) ||
+    isNonZeroTaxAmount(row.no_gravadas ?? 0) ||
+    isNonZeroTaxAmount(row.impuesto) ||
+    isNonZeroTaxAmount(row.total)
+  );
+}
+
 export function parseTaxSectionsJson(raw: string | undefined | null): TaxSettlementSectionsPayload | null {
   const t = (raw ?? '').trim();
   if (!t) return null;

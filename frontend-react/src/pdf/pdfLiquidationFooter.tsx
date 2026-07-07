@@ -17,9 +17,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingTop: 8,
   },
-  paymentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  bankCol: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 8, minWidth: 0 },
-  bankLogo: { width: 36, height: 36, objectFit: 'contain' },
+  paymentRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  bankCol: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', minWidth: 0, marginRight: 10 },
+  bankLogo: { width: 36, height: 36, objectFit: 'contain', marginRight: 8 },
   bankTextWrap: { flex: 1, minWidth: 0 },
   bankLine: { fontSize: 6.5, color: PDF_LIQ.blueDark, lineHeight: 1.35, marginBottom: 1.5 },
   bankLineFirst: { fontSize: 7, fontWeight: 700, color: PDF_LIQ.blueDark, marginBottom: 2 },
@@ -112,7 +112,7 @@ export function PdfLiquidationPaymentFooter({
   if (!showPayment) return null;
 
   return (
-    <View style={styles.divider} wrap={false}>
+    <View style={styles.divider}>
       <View style={styles.paymentRow}>
         <BankInfoBlock bankInfo={bankInfo} observations={observations} bankLogoPng={bankLogoPng} />
         {paymentQrPng ? <QrBlock qrPng={paymentQrPng} caption={qrCaption} /> : null}
@@ -123,7 +123,7 @@ export function PdfLiquidationPaymentFooter({
 
 export function PdfTaxRecommendationsFooter() {
   return (
-    <View style={styles.recoDivider} wrap={false}>
+    <View style={styles.recoDivider}>
       <Text style={styles.recoTitle}>{PDF_TAX_RECOMMENDATIONS_TITLE}</Text>
       {PDF_TAX_RECOMMENDATIONS.map((text, idx) => (
         <Text key={text.slice(0, 24)} style={styles.recoItem}>

@@ -1,10 +1,27 @@
 import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { ReactNode } from 'react';
 import type { FirmConfig } from '../types/dashboard';
 import { PDF_LIQ } from './pdfLiquidationTheme';
 
-export function PdfSectionBar({ title, light = false }: { title: string; light?: boolean }) {
+export function PdfSectionBar({
+  title,
+  light = false,
+  minPresenceAhead,
+  breakBefore = false,
+}: {
+  title: string;
+  light?: boolean;
+  minPresenceAhead?: number;
+  /** Fuerza salto de página antes de la barra (p. ej. honorarios en hoja 2). */
+  breakBefore?: boolean;
+}) {
+  const presenceProps = typeof minPresenceAhead === 'number' ? { minPresenceAhead } : {};
+  const breakProps = breakBefore ? { break: true as const } : {};
+
   return (
     <View
+      {...presenceProps}
+      {...breakProps}
       style={{
         backgroundColor: light ? PDF_LIQ.blueLight : PDF_LIQ.blue,
         paddingVertical: 5,
@@ -25,6 +42,89 @@ export function PdfSectionBar({ title, light = false }: { title: string; light?:
       >
         {title}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * Bloque de sección PDF (título + contenido).
+ * No usar minPresenceAhead aquí: react-pdf considera todos los hermanos siguientes
+ * y puede empujar bloques largos (PDT 621) a la página siguiente dejando huecos en blanco.
+ */
+export function PdfSectionBlock({
+  title,
+  light = false,
+  children,
+}: {
+  title: string;
+  light?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <PdfSectionBar title={title} light={light} />
+      {children}
+    </View>
+  );
+}
+
+/** Fila total resaltada: etiqueta | S/ | monto (fondo amarillo, como liquidación legacy). */
+export function PdfHighlightedTotalRow({ label, amount }: { label: string; amount: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: PDF_LIQ.highlightYellow,
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: PDF_LIQ.text,
+        marginTop: 6,
+      }}
+    >
+      <View
+        style={{
+          flex: 1,
+          paddingVertical: 6,
+          paddingHorizontal: 8,
+          borderRightWidth: 1,
+          borderRightColor: PDF_LIQ.text,
+          justifyContent: 'center',
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 8,
+            fontWeight: 700,
+            color: PDF_LIQ.text,
+            textTransform: 'uppercase',
+            textAlign: 'right',
+          }}
+        >
+          {label}
+        </Text>
+      </View>
+      <View
+        style={{
+          width: 26,
+          paddingVertical: 6,
+          borderRightWidth: 1,
+          borderRightColor: PDF_LIQ.text,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ fontSize: 8, fontWeight: 700, color: PDF_LIQ.text }}>S/</Text>
+      </View>
+      <View
+        style={{
+          width: 76,
+          paddingVertical: 6,
+          paddingHorizontal: 8,
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={{ fontSize: 9, fontWeight: 700, color: PDF_LIQ.text, textAlign: 'right' }}>{amount}</Text>
+      </View>
     </View>
   );
 }
@@ -100,9 +200,8 @@ export const pdfLiquidationStyles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 10,
-    gap: 14,
   },
-  headerFirmCol: { flex: 1, minWidth: 0, paddingRight: 4 },
+  headerFirmCol: { flex: 1, minWidth: 0, paddingRight: 14 },
   logo: { width: 118, height: 42, objectFit: 'contain', marginBottom: 4 },
   firmName: { fontSize: 12, fontWeight: 700, color: PDF_LIQ.blueDark, marginBottom: 4 },
   firmContact: { fontSize: 7.5, color: PDF_LIQ.textMuted, lineHeight: 1.35, marginTop: 2 },
@@ -167,7 +266,7 @@ export const pdfLiquidationStyles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: PDF_LIQ.text,
   },
-  clientValueText: { fontSize: 8, color: PDF_LIQ.text, lineHeight: 1.2 },
+  clientValueText: { fontSize: 8, color: PDF_LIQ.text, lineHeight: 1.2, textTransform: 'uppercase' },
   introBar: {
     backgroundColor: PDF_LIQ.grayBg,
     paddingVertical: 7,

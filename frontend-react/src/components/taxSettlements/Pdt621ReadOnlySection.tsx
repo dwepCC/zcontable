@@ -120,6 +120,25 @@ function MobileReadOnlyRow({
   );
 }
 
+function ReadOnlyFooterRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={`${PDT621_IGV_TABLE_ROW} min-h-0 py-1 mt-1 pt-2 border-t border-slate-100`}>
+      <span className={`col-span-3 ${PDT621_SUMMARY_LABEL} text-right self-center pr-1 leading-snug`}>{label}</span>
+      <div className={`${PDT621_READONLY_AMOUNT} font-bold text-sm min-w-0 self-center`}>{value}</div>
+      <span aria-hidden className="hidden sm:block" />
+    </div>
+  );
+}
+
+function MobileReadOnlyFooterRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={`grid grid-cols-1 ${PDT621_ROW_GRID} gap-y-0.5 pt-2 mt-1 border-t border-slate-100`}>
+      <span className={`${PDT621_SUMMARY_LABEL} leading-snug`}>{label}</span>
+      <div className={`${PDT621_READONLY_AMOUNT} font-bold text-sm`}>{value}</div>
+    </div>
+  );
+}
+
 export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }: Props) {
   const rentaRateLabel = rentaRatePct != null ? formatRentaRateLabel(rentaRatePct) : null;
   const igvRows = listPdt621IgvDisplayRows(p621);
@@ -262,6 +281,12 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
                 emphasized={item.emphasized}
               />
             ))}
+            {showFooter ? (
+              <ReadOnlyFooterRow
+                label="Impuesto a pagar — PDT 621"
+                value={formatTaxMoney(p621.impuesto_a_pagar)}
+              />
+            ) : null}
           </div>
         </div>
         <div className="sm:hidden space-y-1">
@@ -274,17 +299,14 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
               emphasized={item.emphasized}
             />
           ))}
+          {showFooter ? (
+            <MobileReadOnlyFooterRow
+              label="Impuesto a pagar — PDT 621"
+              value={formatTaxMoney(p621.impuesto_a_pagar)}
+            />
+          ) : null}
         </div>
       </div>
-
-      {showFooter ? (
-        <div className="flex justify-end pt-3 border-t border-slate-100 mt-2">
-          <div className="text-right">
-            <p className="text-xs text-slate-500">Impuesto a pagar — PDT 621</p>
-            <p className="text-lg font-bold text-slate-900 tabular-nums">{formatTaxMoney(p621.impuesto_a_pagar)}</p>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
