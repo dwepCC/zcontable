@@ -1,6 +1,11 @@
 import {
   formatImpuestoPeriodo,
+  getPdt621AppliedDetractionAmount,
+  getPdt621AppliedDetractionAmountRenta,
+  getPdt621IgvBalanceLabel,
+  getPdt621IgvSaldoFavorLabel,
   formatTaxMoney,
+  formatTaxTotalMoney,
   formatTaxRowMoney,
   listPdt621IgvDisplayRows,
   type TaxSectionPdt621,
@@ -142,6 +147,10 @@ function MobileReadOnlyFooterRow({ label, value }: { label: string; value: strin
 export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }: Props) {
   const rentaRateLabel = rentaRatePct != null ? formatRentaRateLabel(rentaRatePct) : null;
   const igvRows = listPdt621IgvDisplayRows(p621);
+  const igvBalance = getPdt621IgvBalanceLabel(p621);
+  const igvSaldoFavor = getPdt621IgvSaldoFavorLabel(p621);
+  const detractionAppliedIgv = getPdt621AppliedDetractionAmount(p621);
+  const detractionAppliedRenta = getPdt621AppliedDetractionAmountRenta(p621);
 
   const summaryRows = [
     {
@@ -154,7 +163,7 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
       value: formatTaxMoney(p621.credito_periodo_anterior),
       emphasized: false,
     },
-    { label: 'Saldo a favor', value: formatTaxMoney(p621.saldo_favor), emphasized: true },
+    { label: igvSaldoFavor.label, value: formatTaxMoney(igvSaldoFavor.amount), emphasized: true },
     {
       label: 'Percepciones del periodo',
       value: formatTaxMoney(p621.percepciones_periodo),
@@ -176,10 +185,19 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
       emphasized: false,
     },
     {
-      label: 'Saldo a favor (final)',
-      value: formatTaxMoney(p621.saldo_favor_final),
+      label: igvBalance.label,
+      value: formatTaxMoney(igvBalance.amount),
       emphasized: true,
     },
+    ...(detractionAppliedIgv > 0
+      ? [
+          {
+            label: 'Pago con detracción aplicado (IGV)',
+            value: formatTaxMoney(detractionAppliedIgv),
+            emphasized: false,
+          },
+        ]
+      : []),
   ] as const;
 
   const rentaRows = [
@@ -203,6 +221,15 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
       value: formatTaxMoney(p621.renta_impuesto_a_pagar),
       emphasized: true,
     },
+    ...(detractionAppliedRenta > 0
+      ? [
+          {
+            label: 'Pago con detracción aplicado (renta)',
+            value: formatTaxMoney(detractionAppliedRenta),
+            emphasized: false,
+          },
+        ]
+      : []),
   ] as const;
 
   return (
@@ -284,7 +311,7 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
             {showFooter ? (
               <ReadOnlyFooterRow
                 label="Impuesto a pagar — PDT 621"
-                value={formatTaxMoney(p621.impuesto_a_pagar)}
+                value={formatTaxTotalMoney(p621.impuesto_a_pagar)}
               />
             ) : null}
           </div>
@@ -302,7 +329,7 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
           {showFooter ? (
             <MobileReadOnlyFooterRow
               label="Impuesto a pagar — PDT 621"
-              value={formatTaxMoney(p621.impuesto_a_pagar)}
+              value={formatTaxTotalMoney(p621.impuesto_a_pagar)}
             />
           ) : null}
         </div>

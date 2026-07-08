@@ -1,5 +1,8 @@
 import {
+  formatPdt621DetractionPaymentNote,
   formatTaxMoney,
+  formatTaxTotalMoney,
+  getPdt601AppliedDetractionAmount,
   listPdt601DisplayRows,
   type TaxSectionPdt601,
 } from '../../utils/taxSettlementSections';
@@ -62,6 +65,8 @@ function MobileReadOnlyFooterRow({ label, value }: { label: string; value: strin
 
 export function Pdt601ReadOnlySection({ p601, showFooter = true }: Props) {
   const rows = listPdt601DisplayRows(p601);
+  const detractionApplied = getPdt601AppliedDetractionAmount(p601);
+  const detractionNote = formatPdt621DetractionPaymentNote(p601.detraction_payment);
 
   return (
     <div>
@@ -75,25 +80,37 @@ export function Pdt601ReadOnlySection({ p601, showFooter = true }: Props) {
           {rows.map((item) => (
             <ReadOnlyListRow key={item.label} label={item.label} value={formatTaxMoney(item.value)} />
           ))}
+          {detractionApplied > 0 ? (
+            <ReadOnlyListRow label="Pago con detracción aplicado" value={formatTaxMoney(detractionApplied)} />
+          ) : null}
           {showFooter ? (
             <ReadOnlyFooterRow
               label="Impuesto a pagar — PDT 601"
-              value={formatTaxMoney(p601.impuesto_a_pagar)}
+              value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
             />
           ) : null}
         </div>
       </div>
+      {detractionNote ? (
+        <p className="mt-2 text-[11px] text-slate-500 text-right">{detractionNote}. AFP no aplica detracción.</p>
+      ) : null}
 
       <div className="sm:hidden space-y-1.5">
         <p className={`${PDT621_IGV_HEADER_CELL} mb-0.5`}>Impuesto</p>
         {rows.map((item) => (
           <MobileReadOnlyRow key={`m-${item.label}`} label={item.label} value={formatTaxMoney(item.value)} />
         ))}
+        {detractionApplied > 0 ? (
+          <MobileReadOnlyRow label="Pago con detracción aplicado" value={formatTaxMoney(detractionApplied)} />
+        ) : null}
         {showFooter ? (
           <MobileReadOnlyFooterRow
             label="Impuesto a pagar — PDT 601"
-            value={formatTaxMoney(p601.impuesto_a_pagar)}
+            value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
           />
+        ) : null}
+        {detractionNote ? (
+          <p className="text-[11px] text-slate-500">{detractionNote}. AFP no aplica detracción.</p>
         ) : null}
       </div>
     </div>

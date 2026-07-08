@@ -2,7 +2,14 @@ import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatRentaRateLabel } from '../utils/companyTaxRegime';
 import {
   formatImpuestoPeriodo,
+  getPdt621AppliedDetractionAmount,
+  getPdt621AppliedDetractionAmountRenta,
+  getPdt621IgvBalanceLabel,
+  getPdt621IgvNetAfterDetraction,
+  getPdt621IgvSaldoFavorLabel,
+  getPdt621RentaNetAfterDetraction,
   formatTaxMoney,
+  formatTaxTotalMoney,
   formatTaxRowMoney,
   isNonZeroTaxAmount,
   isTaxIgvRowVisibleInPdf,
@@ -43,6 +50,14 @@ const styles = StyleSheet.create({
   value: { fontSize: 7, color: PDF_LIQ.text, textAlign: 'right' },
   dataRow: { flexDirection: 'row', paddingVertical: 2, borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB' },
   sectionDivider: { borderTopWidth: 1, borderTopColor: PDF_LIQ.grayBorder, marginTop: 6, paddingTop: 4 },
+  detractionNote: {
+    fontSize: 6.5,
+    color: PDF_LIQ.textMuted,
+    textAlign: 'right',
+    marginTop: 1,
+    marginBottom: 3,
+    paddingRight: 2,
+  },
 });
 
 function PdfHeaderRow() {
@@ -105,16 +120,34 @@ type Props = {
   p621: TaxSectionPdt621;
   rentaRatePct?: number | null;
   showFooter?: boolean;
+  detractionNoteIgv?: string | null;
+  detractionNoteRenta?: string | null;
 };
 
-export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Props) {
+export function Pdt621PdfSection({
+  p621,
+  rentaRatePct,
+  showFooter = true,
+  detractionNoteIgv,
+  detractionNoteRenta,
+}: Props) {
   const igvRows = listPdt621IgvDisplayRows(p621).filter(({ row }) => isTaxIgvRowVisibleInPdf(row));
   const rentaRateLabel = rentaRatePct != null ? formatRentaRateLabel(rentaRatePct) : null;
+  const igvBalance = getPdt621IgvBalanceLabel(p621);
+  const igvSaldoFavor = getPdt621IgvSaldoFavorLabel(p621);
+  const igvPayableAmount =
+    getPdt621AppliedDetractionAmount(p621) > 0
+      ? getPdt621IgvNetAfterDetraction(p621)
+      : igvBalance.amount;
+  const rentaPayableAmount =
+    getPdt621AppliedDetractionAmountRenta(p621) > 0
+      ? getPdt621RentaNetAfterDetraction(p621)
+      : p621.renta_impuesto_a_pagar;
 
   const summaryRows = [
     { label: 'Impuesto del periodo', value: formatImpuestoPeriodo(p621.impuesto_periodo), emphasized: false },
     { label: 'Crédito periodo anterior', value: formatTaxMoney(p621.credito_periodo_anterior), emphasized: false },
-    { label: 'Saldo a favor', value: formatTaxMoney(p621.saldo_favor), emphasized: true },
+    { label: igvSaldoFavor.label, value: formatTaxMoney(igvSaldoFavor.amount), emphasized: true },
     { label: 'Percepciones del periodo', value: formatTaxMoney(p621.percepciones_periodo), emphasized: false },
     {
       label: 'Percepciones periodos anteriores',
@@ -127,7 +160,7 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
       value: formatTaxMoney(p621.retenciones_anteriores),
       emphasized: false,
     },
-    { label: 'Saldo a favor (final)', value: formatTaxMoney(p621.saldo_favor_final), emphasized: true },
+    { label: igvBalance.label, value: formatTaxMoney(igvPayableAmount), emphasized: true },
   ] as const;
 
   const rentaRows = [
@@ -140,7 +173,7 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
       emphasized: false as const,
     },
     { label: 'Saldo a favor ITAN', value: formatTaxMoney(p621.renta_saldo_favor_itan), emphasized: false as const },
-    { label: 'Impuesto a pagar (renta)', value: formatTaxMoney(p621.renta_impuesto_a_pagar), emphasized: true as const },
+    { label: 'Impuesto a pagar (renta)', value: formatTaxMoney(rentaPayableAmount), emphasized: true as const },
   ] as const;
 
   return (
@@ -160,6 +193,7 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
       {summaryRows.map((item) => (
         <PdfSummaryRow key={item.label} label={item.label} value={item.value} emphasized={item.emphasized} />
       ))}
+      {detractionNoteIgv ? <Text style={styles.detractionNote}>{detractionNoteIgv}</Text> : null}
 
       <View style={styles.sectionDivider}>
         <Text style={styles.sectionTitle}>2. Renta mensual</Text>
@@ -171,12 +205,13 @@ export function Pdt621PdfSection({ p621, rentaRatePct, showFooter = true }: Prop
         {rentaRows.map((item) => (
           <PdfSummaryRow key={item.label} label={item.label} value={item.value} emphasized={item.emphasized} />
         ))}
+        {detractionNoteRenta ? <Text style={styles.detractionNote}>{detractionNoteRenta}</Text> : null}
       </View>
 
       {showFooter ? (
         <PdfPdtSectionFooterRow
           label="Impuesto a pagar — PDT 621"
-          value={formatTaxMoney(p621.impuesto_a_pagar)}
+          value={formatTaxTotalMoney(p621.impuesto_a_pagar)}
         />
       ) : null}
     </View>

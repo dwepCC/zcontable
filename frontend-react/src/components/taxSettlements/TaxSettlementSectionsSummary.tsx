@@ -9,6 +9,11 @@ import {
 import {
   computeTaxSettlementSections,
   formatTaxMoney,
+  formatTaxTotalMoney,
+  getPdt601AppliedDetractionAmount,
+  getPdt621AppliedDetractionAmount,
+  getPdt621AppliedDetractionAmountRenta,
+  getItanAppliedDetractionAmount,
   parseTaxSectionsJson,
   type TaxSettlementSectionsPayload,
 } from '../../utils/taxSettlementSections';
@@ -116,6 +121,10 @@ export function TaxSettlementSectionsSummary({
       ? p621.igv_aplicable_ventas.map((r) => formatCompanyIgvRateLabel(r)).join(' · ')
       : null;
   const rentaRegimen = p621?.renta_regimen;
+  const detraccionAplicadaIgv = p621 ? getPdt621AppliedDetractionAmount(p621) : 0;
+  const detraccionAplicadaRenta = p621 ? getPdt621AppliedDetractionAmountRenta(p621) : 0;
+  const detraccionAplicadaP601 = sections.pdt601 ? getPdt601AppliedDetractionAmount(sections.pdt601) : 0;
+  const detraccionAplicadaItan = sections.itan ? getItanAppliedDetractionAmount(sections.itan) : 0;
   const rentaRatePct =
     p621?.enabled && rentaRegimen
       ? getRentaMensualRatePct(rentaRegimen, p621.renta_coeficiente_pct ?? 0)
@@ -147,6 +156,12 @@ export function TaxSettlementSectionsSummary({
                   value={`${formatLiquidationRentaRegimeLabel(rentaRegimen)} · ${formatRentaRateLabel(rentaRatePct)}`}
                 />
               ) : null}
+              {detraccionAplicadaIgv > 0 ? (
+                <MetaChip label="Detracción aplicada (IGV)" value={formatTaxMoney(detraccionAplicadaIgv)} />
+              ) : null}
+              {detraccionAplicadaRenta > 0 ? (
+                <MetaChip label="Detracción aplicada (renta)" value={formatTaxMoney(detraccionAplicadaRenta)} />
+              ) : null}
             </div>
           ) : null}
 
@@ -156,6 +171,9 @@ export function TaxSettlementSectionsSummary({
 
       {sections.pdt601?.enabled ? (
         <SectionBlock title="PDT 601 — Planilla electrónica" collapsible={collapsible} defaultOpen={false}>
+          {detraccionAplicadaP601 > 0 ? (
+            <MetaChip label="Detracción aplicada (PDT 601)" value={formatTaxMoney(detraccionAplicadaP601)} />
+          ) : null}
           <Pdt601ReadOnlySection p601={sections.pdt601} />
         </SectionBlock>
       ) : null}
@@ -166,14 +184,17 @@ export function TaxSettlementSectionsSummary({
           collapsible={collapsible}
           defaultOpen={false}
         >
-          <Row label="Impuesto a pagar" value={formatTaxMoney(sections.itan.impuesto_a_pagar)} bold />
+          {detraccionAplicadaItan > 0 ? (
+            <MetaChip label="Detracción aplicada (ITAN)" value={formatTaxMoney(detraccionAplicadaItan)} />
+          ) : null}
+          <Row label="Impuesto a pagar" value={formatTaxTotalMoney(sections.itan.impuesto_a_pagar)} bold />
         </SectionBlock>
       ) : null}
 
       <div className="rounded-lg border-2 border-primary-200 bg-primary-50/70 px-4 py-3 flex flex-wrap justify-between items-center gap-3">
         <span className="text-sm font-semibold text-primary-900">Total impuestos a pagar</span>
         <span className="text-xl font-bold text-primary-900 tabular-nums">
-          {formatTaxMoney(sections.grand_total_impuesto_a_pagar)}
+          {formatTaxTotalMoney(sections.grand_total_impuesto_a_pagar)}
         </span>
       </div>
     </div>

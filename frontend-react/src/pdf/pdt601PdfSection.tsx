@@ -1,5 +1,12 @@
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { formatTaxMoney, isNonZeroTaxAmount, listPdt601DisplayRows, type TaxSectionPdt601 } from '../utils/taxSettlementSections';
+import {
+  formatPdt621DetractionPaymentNote,
+  formatTaxMoney,
+  formatTaxTotalMoney,
+  isNonZeroTaxAmount,
+  listPdt601DisplayRows,
+  type TaxSectionPdt601,
+} from '../utils/taxSettlementSections';
 import { PDF_LIQ } from './pdfLiquidationTheme';
 import { PdfPdtSectionFooterRow } from './pdfPdtSectionFooter';
 
@@ -15,6 +22,14 @@ const styles = StyleSheet.create({
   label: { fontSize: 7, color: PDF_LIQ.textMuted },
   value: { fontSize: 7, color: PDF_LIQ.text, textAlign: 'right' },
   dataRow: { flexDirection: 'row', paddingVertical: 2, borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB' },
+  detractionNote: {
+    fontSize: 6.5,
+    color: PDF_LIQ.textMuted,
+    textAlign: 'right',
+    marginTop: 1,
+    marginBottom: 3,
+    paddingRight: 2,
+  },
 });
 
 function PdfListRow({ label, value }: { label: string; value: string }) {
@@ -30,10 +45,12 @@ function PdfListRow({ label, value }: { label: string; value: string }) {
 type Props = {
   p601: TaxSectionPdt601;
   showFooter?: boolean;
+  detractionNote?: string | null;
 };
 
-export function Pdt601PdfSection({ p601, showFooter = true }: Props) {
+export function Pdt601PdfSection({ p601, showFooter = true, detractionNote }: Props) {
   const rows = listPdt601DisplayRows(p601).filter((item) => isNonZeroTaxAmount(item.value));
+  const note = detractionNote ?? formatPdt621DetractionPaymentNote(p601.detraction_payment);
 
   return (
     <View>
@@ -47,10 +64,11 @@ export function Pdt601PdfSection({ p601, showFooter = true }: Props) {
       {rows.map((item) => (
         <PdfListRow key={item.label} label={item.label} value={formatTaxMoney(item.value)} />
       ))}
+      {note ? <Text style={styles.detractionNote}>{note}. AFP no aplica detracción.</Text> : null}
       {showFooter ? (
         <PdfPdtSectionFooterRow
           label="Impuesto a pagar — PDT 601"
-          value={formatTaxMoney(p601.impuesto_a_pagar)}
+          value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
         />
       ) : null}
     </View>
