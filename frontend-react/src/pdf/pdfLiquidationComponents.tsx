@@ -48,20 +48,24 @@ export function PdfSectionBar({
 
 /**
  * Bloque de sección PDF (título + contenido).
- * No usar minPresenceAhead aquí: react-pdf considera todos los hermanos siguientes
- * y puede empujar bloques largos (PDT 621) a la página siguiente dejando huecos en blanco.
+ * keepTogether evita cortes feos entre páginas en bloques compactos (601, ITAN, totales).
  */
 export function PdfSectionBlock({
   title,
   light = false,
   children,
+  keepTogether = true,
+  minPresenceAhead,
 }: {
   title: string;
   light?: boolean;
   children: ReactNode;
+  keepTogether?: boolean;
+  minPresenceAhead?: number;
 }) {
+  const presenceProps = typeof minPresenceAhead === 'number' ? { minPresenceAhead } : {};
   return (
-    <View style={{ marginBottom: 8 }}>
+    <View wrap={keepTogether ? false : undefined} style={{ marginBottom: 8 }} {...presenceProps}>
       <PdfSectionBar title={title} light={light} />
       {children}
     </View>
@@ -79,7 +83,7 @@ export function PdfHighlightedTotalRow({
   note?: string | null;
 }) {
   return (
-    <View style={{ marginTop: 6 }}>
+    <View wrap={false} style={{ marginTop: 6 }}>
       <View
         style={{
           flexDirection: 'row',

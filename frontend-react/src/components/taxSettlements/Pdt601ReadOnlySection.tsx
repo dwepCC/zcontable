@@ -1,11 +1,12 @@
 import {
-  formatPdt621DetractionPaymentNote,
   formatTaxMoney,
   formatTaxTotalMoney,
   getPdt601AppliedDetractionAmount,
+  getPdt601DetractableBeforeDetraction,
   listPdt601DisplayRows,
   type TaxSectionPdt601,
 } from '../../utils/taxSettlementSections';
+import DetraccionReadOnlyBar from './DetraccionReadOnlyBar';
 import {
   PDT621_IGV_HEADER_CELL,
   PDT621_IGV_TABLE_GAP,
@@ -66,7 +67,9 @@ function MobileReadOnlyFooterRow({ label, value }: { label: string; value: strin
 export function Pdt601ReadOnlySection({ p601, showFooter = true }: Props) {
   const rows = listPdt601DisplayRows(p601);
   const detractionApplied = getPdt601AppliedDetractionAmount(p601);
-  const detractionNote = formatPdt621DetractionPaymentNote(p601.detraction_payment);
+  const detractableBefore = getPdt601DetractableBeforeDetraction(p601);
+  const showDetraction = detractableBefore > 0 || p601.afp > 0;
+  const netAfterDetraction = p601.impuesto_a_pagar;
 
   return (
     <div>
@@ -80,19 +83,30 @@ export function Pdt601ReadOnlySection({ p601, showFooter = true }: Props) {
           {rows.map((item) => (
             <ReadOnlyListRow key={item.label} label={item.label} value={formatTaxMoney(item.value)} />
           ))}
-          {detractionApplied > 0 ? (
-            <ReadOnlyListRow label="Pago con detracción aplicado" value={formatTaxMoney(detractionApplied)} />
-          ) : null}
-          {showFooter ? (
-            <ReadOnlyFooterRow
-              label="Impuesto a pagar — PDT 601"
-              value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
-            />
-          ) : null}
         </div>
       </div>
-      {detractionNote ? (
-        <p className="mt-2 text-[11px] text-slate-500 text-right">{detractionNote}. AFP no aplica detracción.</p>
+      {showDetraction ? (
+        <div className="hidden sm:block">
+          <DetraccionReadOnlyBar
+            payment={p601.detraction_payment}
+            appliedAmount={detractionApplied}
+            payableBefore={detractableBefore}
+            totalLabel="Planilla pendiente"
+            netAfterDetraction={netAfterDetraction}
+            extraNote="AFP no aplica detracción."
+            additionalPayableAmount={p601.afp}
+          />
+        </div>
+      ) : null}
+      {showFooter ? (
+        <div className="hidden sm:block overflow-x-auto -mx-1 px-1 mt-1">
+          <div className={`grid ${PDT621_IGV_TABLE_GRID} ${PDT621_IGV_TABLE_GAP} min-w-[38rem]`}>
+            <ReadOnlyFooterRow
+              label="Planilla pendiente"
+              value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
+            />
+          </div>
+        </div>
       ) : null}
 
       <div className="sm:hidden space-y-1.5">
@@ -100,17 +114,22 @@ export function Pdt601ReadOnlySection({ p601, showFooter = true }: Props) {
         {rows.map((item) => (
           <MobileReadOnlyRow key={`m-${item.label}`} label={item.label} value={formatTaxMoney(item.value)} />
         ))}
-        {detractionApplied > 0 ? (
-          <MobileReadOnlyRow label="Pago con detracción aplicado" value={formatTaxMoney(detractionApplied)} />
+        {showDetraction ? (
+          <DetraccionReadOnlyBar
+            payment={p601.detraction_payment}
+            appliedAmount={detractionApplied}
+            payableBefore={detractableBefore}
+            totalLabel="Planilla pendiente"
+            netAfterDetraction={netAfterDetraction}
+            extraNote="AFP no aplica detracción."
+            additionalPayableAmount={p601.afp}
+          />
         ) : null}
         {showFooter ? (
           <MobileReadOnlyFooterRow
-            label="Impuesto a pagar — PDT 601"
+            label="Planilla pendiente"
             value={formatTaxTotalMoney(p601.impuesto_a_pagar)}
           />
-        ) : null}
-        {detractionNote ? (
-          <p className="text-[11px] text-slate-500">{detractionNote}. AFP no aplica detracción.</p>
         ) : null}
       </div>
     </div>

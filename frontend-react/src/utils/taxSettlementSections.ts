@@ -59,6 +59,7 @@ export type Pdt621DetractionPayment = {
 export type TaxSectionPdt601 = {
   enabled: boolean;
   essalud: number;
+  sis: number;
   onp: number;
   afp: number;
   rta_4ta: number;
@@ -286,6 +287,7 @@ export function defaultPdt601Section(): TaxSectionPdt601 {
   return {
     enabled: false,
     essalud: 0,
+    sis: 0,
     onp: 0,
     afp: 0,
     rta_4ta: 0,
@@ -352,10 +354,15 @@ export function computePdt621RentaVentasBase(s: TaxSectionPdt621): number {
 function computePdt621RentaFields(s: TaxSectionPdt621): Pick<TaxSectionPdt621, 'renta_ventas_base' | 'renta_ventas_impuesto' | 'renta_impuesto_a_pagar'> {
   const renta_ventas_base = computePdt621RentaVentasBase(s);
   const ratePct = getRentaMensualRatePct(s.renta_regimen, s.renta_coeficiente_pct);
-  const renta_ventas_impuesto =
+  const renta_ventas_impuesto_raw =
     ratePct > 0 && renta_ventas_base > 0 ? roundTaxAmount((renta_ventas_base * ratePct) / 100) : 0;
+  const renta_ventas_impuesto = roundTaxTotalAmount(renta_ventas_impuesto_raw);
   let renta_impuesto_a_pagar = roundMoney(renta_ventas_impuesto - s.renta_saldo_favor_itan);
-  if (renta_impuesto_a_pagar < 0) renta_impuesto_a_pagar = 0;
+  if (renta_impuesto_a_pagar < 0) {
+    renta_impuesto_a_pagar = 0;
+  } else {
+    renta_impuesto_a_pagar = roundTaxTotalAmount(renta_impuesto_a_pagar);
+  }
   return { renta_ventas_base, renta_ventas_impuesto, renta_impuesto_a_pagar };
 }
 
@@ -368,12 +375,29 @@ function sumPdt621PercepcionesRetenciones(s: TaxSectionPdt621): number {
   );
 }
 
-/** Saldo a favor (negativo): suma percepciones/retenciones; impuesto a pagar (>=0): las resta. */
+/** Percepciones/retenciones siempre restan del saldo (a favor o impuesto a pagar). */
 function computePdt621SaldoFavorFinal(saldoFavor: number, percepRetTotal: number): number {
-  if (saldoFavor < 0) {
-    return roundMoney(saldoFavor + percepRetTotal);
-  }
   return roundMoney(saldoFavor - percepRetTotal);
+}
+
+function finalizePdt621SaldoFavorFinal(raw: number): number {
+  if (raw > 0) return roundTaxTotalAmount(raw);
+  return roundMoney(raw);
+}
+
+export function getPdt621PercepcionesRetencionesOpSign(_saldoFavor: number): '+' | '−' {
+  return '−';
+}
+
+export function getPdt621PercepcionesRetencionesFieldLabel(baseLabel: string, saldoFavor: number): string {
+  return `${baseLabel} (${getPdt621PercepcionesRetencionesOpSign(saldoFavor)})`;
+}
+
+export function formatPdt621IgvBalanceAmount(display: { label: string; amount: number }): string {
+  if (display.amount > 0 && display.label.toLowerCase().includes('impuesto a pagar')) {
+    return formatTaxTotalMoney(display.amount);
+  }
+  return formatTaxMoney(display.amount);
 }
 
 function computePdt621Section(s: TaxSectionPdt621): TaxSectionPdt621 {
@@ -403,7 +427,9 @@ function computePdt621Section(s: TaxSectionPdt621): TaxSectionPdt621 {
   );
   const saldo_favor = roundMoney(impuesto_periodo - s.credito_periodo_anterior);
   const percepRetTotal = sumPdt621PercepcionesRetenciones(s);
-  const saldo_favor_final = computePdt621SaldoFavorFinal(saldo_favor, percepRetTotal);
+  const saldo_favor_final = finalizePdt621SaldoFavorFinal(
+    computePdt621SaldoFavorFinal(saldo_favor, percepRetTotal),
+  );
 
   const rentaFields = computePdt621RentaFields({
     ...s,
@@ -466,28 +492,30 @@ function normalizePdt621DetractionPayment(
 }
 
 function computePdt601Section(s: TaxSectionPdt601, includeDetraction = true): TaxSectionPdt601 {
-  const afp = roundMoney(s.afp);
-  const detractable = getPdt601DetractableBeforeDetraction(s);
+  const section: TaxSectionPdt601 = { ...s, sis: roundMoney(s.sis ?? 0) };
+  const afp = roundMoney(section.afp);
+  const detractable = getPdt601DetractableBeforeDetraction(section);
   const gross = roundMoney(afp + detractable);
-  const detractionPayment = normalizePdt621DetractionPayment(s.detraction_payment, detractable, includeDetraction);
+  const detractionPayment = normalizePdt621DetractionPayment(section.detraction_payment, detractable, includeDetraction);
   const impuesto_a_pagar = includeDetraction
     ? roundTaxTotalAmount(afp + Math.max(detractable - detractionPayment.applied_amount, 0))
     : roundTaxTotalAmount(gross);
-  return { ...s, detraction_payment: detractionPayment, impuesto_a_pagar };
+  return { ...section, detraction_payment: detractionPayment, impuesto_a_pagar };
 }
 
 function computePdt601SectionWithDetractionOption(s: TaxSectionPdt601, includeDetraction: boolean): TaxSectionPdt601 {
-  if (includeDetraction) return computePdt601Section(s, true);
-  const gross = roundMoney(s.essalud + s.onp + s.afp + s.rta_4ta + s.rta_5ta);
+  const section: TaxSectionPdt601 = { ...s, sis: roundMoney(s.sis ?? 0) };
+  if (includeDetraction) return computePdt601Section(section, true);
+  const gross = roundMoney(section.essalud + section.sis + section.onp + section.afp + section.rta_4ta + section.rta_5ta);
   const noDetraction = computePdt601Section({
-    ...s,
-    detraction_payment: normalizePdt621DetractionPayment(s.detraction_payment, 0, false),
+    ...section,
+    detraction_payment: normalizePdt621DetractionPayment(section.detraction_payment, 0, false),
   }, false);
   return {
     ...noDetraction,
     detraction_payment: normalizePdt621DetractionPayment(
-      s.detraction_payment,
-      getPdt601DetractableBeforeDetraction(s),
+      section.detraction_payment,
+      getPdt601DetractableBeforeDetraction(section),
       false,
     ),
     impuesto_a_pagar: roundTaxTotalAmount(gross),
@@ -597,6 +625,7 @@ export type Pdt601DisplayRow = {
 export function listPdt601DisplayRows(s: TaxSectionPdt601): Pdt601DisplayRow[] {
   return [
     { label: 'ESSALUD', value: s.essalud },
+    { label: 'SIS', value: s.sis },
     { label: 'ONP', value: s.onp },
     { label: 'AFP', value: s.afp },
     { label: 'Rta 4ta categoría', value: s.rta_4ta },
@@ -634,7 +663,7 @@ export function parseTaxSectionsJson(
 }
 
 export function getPdt601DetractableBeforeDetraction(p601: TaxSectionPdt601): number {
-  return roundMoney(p601.essalud + p601.onp + p601.rta_4ta + p601.rta_5ta);
+  return roundMoney(p601.essalud + p601.sis + p601.onp + p601.rta_4ta + p601.rta_5ta);
 }
 
 export function getPdt601AppliedDetractionAmount(p601: TaxSectionPdt601): number {
@@ -809,4 +838,28 @@ export function formatTaxAmountInput(
 
 export function formatTaxRowMoney(n: number): string {
   return formatTaxMoney(n);
+}
+
+/** PDF: muestra guion cuando el monto es cero. */
+export function formatTaxPdfMoney(n: number): string {
+  if (!isNonZeroTaxAmount(n)) return '—';
+  return formatTaxMoney(n);
+}
+
+/** PDF: totales finales siempre muestran monto (incluido cero). */
+export function formatTaxPdfTotalMoney(n: number): string {
+  return formatTaxTotalMoney(n);
+}
+
+export function formatTaxPdfRowMoney(n: number): string {
+  return formatTaxPdfMoney(n);
+}
+
+export function formatImpuestoPeriodoPdf(n: number): string {
+  return formatTaxPdfMoney(n);
+}
+
+export function getPdt621DetractionPdfRowLabel(payment: Pdt621DetractionPayment | undefined): string | null {
+  if (!payment?.enabled || (payment.applied_amount ?? 0) <= 0) return null;
+  return payment.mode === 'total' ? 'Pago con detracción (total)' : 'Pago con detracción (parcial)';
 }

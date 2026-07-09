@@ -63,11 +63,11 @@ func TestComputePdt621FromExample(t *testing.T) {
 	if out.Pdt621.SaldoFavor != -179 {
 		t.Fatalf("saldo_favor=%v want -179", out.Pdt621.SaldoFavor)
 	}
-	if out.Pdt621.RentaImpuestoPagar != 4 {
-		t.Fatalf("renta_impuesto=%v want 4", out.Pdt621.RentaImpuestoPagar)
+	if out.Pdt621.RentaImpuestoPagar != 7 {
+		t.Fatalf("renta_impuesto=%v want 7", out.Pdt621.RentaImpuestoPagar)
 	}
-	if out.Pdt621.ImpuestoAPagar != 4 {
-		t.Fatalf("pdt621 impuesto_a_pagar=%v want 4", out.Pdt621.ImpuestoAPagar)
+	if out.Pdt621.ImpuestoAPagar != 7 {
+		t.Fatalf("pdt621 impuesto_a_pagar=%v want 7", out.Pdt621.ImpuestoAPagar)
 	}
 }
 
@@ -240,7 +240,7 @@ func TestComputePdt621PercepcionesRetencionesSign(t *testing.T) {
 		t.Fatalf("saldo_favor_final=%v want 150 (200-30-20)", outPay.Pdt621.SaldoFavorFinal)
 	}
 
-	// Saldo a favor (negativo): suma percepciones/retenciones.
+	// Saldo a favor (negativo): también resta percepciones/retenciones (-150 - 50 = -200).
 	pFavor := &TaxSettlementSectionsPayload{
 		Pdt621: &TaxSectionPdt621{
 			Enabled:             true,
@@ -254,9 +254,33 @@ func TestComputePdt621PercepcionesRetencionesSign(t *testing.T) {
 	if outFavor.Pdt621.SaldoFavor >= 0 {
 		t.Fatalf("saldo_favor=%v want negative", outFavor.Pdt621.SaldoFavor)
 	}
-	wantFinal := outFavor.Pdt621.SaldoFavor + 50
+	wantFinal := outFavor.Pdt621.SaldoFavor - 50
 	if outFavor.Pdt621.SaldoFavorFinal != wantFinal {
 		t.Fatalf("saldo_favor_final=%v want %v", outFavor.Pdt621.SaldoFavorFinal, wantFinal)
+	}
+}
+
+func TestComputePdt601DetractionIncludesSis(t *testing.T) {
+	p := &TaxSettlementSectionsPayload{
+		Pdt601: &TaxSectionPdt601{
+			Enabled: true,
+			Essalud: 100,
+			Sis:     50,
+			Onp:     0,
+			Afp:     80,
+			DetractionPayment: &TaxDetractionPayment{
+				Enabled: true,
+				Mode:    "total",
+				Amount:  150,
+			},
+		},
+	}
+	out := ComputeTaxSettlementSections(p)
+	if out.Pdt601.DetractionPayment == nil || out.Pdt601.DetractionPayment.AppliedAmount != 150 {
+		t.Fatalf("applied detraccion p601=%v want 150 (essalud+sis)", out.Pdt601.DetractionPayment)
+	}
+	if out.Pdt601.ImpuestoAPagar != 80 {
+		t.Fatalf("pdt601 impuesto_a_pagar=%v want 80 (solo AFP)", out.Pdt601.ImpuestoAPagar)
 	}
 }
 

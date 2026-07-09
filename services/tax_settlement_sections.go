@@ -66,6 +66,7 @@ type TaxDetractionPayment struct {
 type TaxSectionPdt601 struct {
 	Enabled            bool                  `json:"enabled"`
 	Essalud            float64               `json:"essalud"`
+	Sis                float64               `json:"sis"`
 	Onp                float64               `json:"onp"`
 	Afp                float64               `json:"afp"`
 	Rta4ta             float64               `json:"rta_4ta"`
@@ -274,12 +275,16 @@ func sumPdt621PercepcionesRetenciones(s *TaxSectionPdt621) float64 {
 	)
 }
 
-// computePdt621SaldoFavorFinal: saldo a favor (negativo) suma percepciones/retenciones; impuesto a pagar (>=0) las resta.
+// computePdt621SaldoFavorFinal: percepciones/retenciones siempre restan del saldo.
 func computePdt621SaldoFavorFinal(saldoFavor, percepRetTotal float64) float64 {
-	if saldoFavor < 0 {
-		return roundTaxMoney(saldoFavor + percepRetTotal)
-	}
 	return roundTaxMoney(saldoFavor - percepRetTotal)
+}
+
+func finalizePdt621SaldoFavorFinal(raw float64) float64 {
+	if raw > 0 {
+		return roundTaxTotalAmount(raw)
+	}
+	return roundTaxMoney(raw)
 }
 
 func computePdt621Section(s *TaxSectionPdt621, includeDetraction bool) {
@@ -310,12 +315,12 @@ func computePdt621Section(s *TaxSectionPdt621, includeDetraction bool) {
 	)
 	s.SaldoFavor = roundTaxMoney(s.ImpuestoPeriodo - s.CreditoPeriodoAnt)
 	percepRetTotal := sumPdt621PercepcionesRetenciones(s)
-	s.SaldoFavorFinal = computePdt621SaldoFavorFinal(s.SaldoFavor, percepRetTotal)
+	s.SaldoFavorFinal = finalizePdt621SaldoFavorFinal(computePdt621SaldoFavorFinal(s.SaldoFavor, percepRetTotal))
 
 	s.RentaVentasBase = computePdt621RentaVentasBase(s, rates)
 	ratePct := rentaMensualRatePct(s.RentaRegimen, s.RentaCoeficientePct)
 	if ratePct > 0 && s.RentaVentasBase > 0 {
-		s.RentaVentasImpuesto = roundTaxAmount(s.RentaVentasBase*ratePct/100, taxAmountMaxDecimals)
+		s.RentaVentasImpuesto = roundTaxTotalAmount(roundTaxAmount(s.RentaVentasBase*ratePct/100, taxAmountMaxDecimals))
 	} else {
 		s.RentaVentasImpuesto = 0
 	}
@@ -323,6 +328,8 @@ func computePdt621Section(s *TaxSectionPdt621, includeDetraction bool) {
 	renta := roundTaxMoney(s.RentaVentasImpuesto - s.RentaSaldoFavorItan)
 	if renta < 0 {
 		renta = 0
+	} else {
+		renta = roundTaxTotalAmount(renta)
 	}
 	s.RentaImpuestoPagar = renta
 
@@ -342,7 +349,7 @@ func pdt601DetractableBeforeDetraction(s *TaxSectionPdt601) float64 {
 	if s == nil {
 		return 0
 	}
-	return roundTaxMoney(s.Essalud + s.Onp + s.Rta4ta + s.Rta5ta)
+	return roundTaxMoney(s.Essalud + s.Sis + s.Onp + s.Rta4ta + s.Rta5ta)
 }
 
 func computePdt601Section(s *TaxSectionPdt601, includeDetraction bool) {

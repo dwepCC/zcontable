@@ -1,9 +1,15 @@
 import {
   formatImpuestoPeriodo,
+  formatPdt621IgvBalanceAmount,
+  getPdt621PercepcionesRetencionesFieldLabel,
   getPdt621AppliedDetractionAmount,
   getPdt621AppliedDetractionAmountRenta,
   getPdt621IgvBalanceLabel,
+  getPdt621IgvNetAfterDetraction,
+  getPdt621IgvPayableBeforeDetraction,
   getPdt621IgvSaldoFavorLabel,
+  getPdt621RentaNetAfterDetraction,
+  getPdt621RentaPayableBeforeDetraction,
   formatTaxMoney,
   formatTaxTotalMoney,
   formatTaxRowMoney,
@@ -11,6 +17,7 @@ import {
   type TaxSectionPdt621,
 } from '../../utils/taxSettlementSections';
 import { formatRentaRateLabel } from '../../utils/companyTaxRegime';
+import DetraccionReadOnlyBar from './DetraccionReadOnlyBar';
 import {
   PDT621_IGV_HEADER_CELL,
   PDT621_IGV_TABLE_GAP,
@@ -151,6 +158,13 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
   const igvSaldoFavor = getPdt621IgvSaldoFavorLabel(p621);
   const detractionAppliedIgv = getPdt621AppliedDetractionAmount(p621);
   const detractionAppliedRenta = getPdt621AppliedDetractionAmountRenta(p621);
+  const igvPayableBefore = getPdt621IgvPayableBeforeDetraction(p621);
+  const rentaPayableBefore = getPdt621RentaPayableBeforeDetraction(p621);
+  const igvNetAfterDetraction = getPdt621IgvNetAfterDetraction(p621);
+  const rentaNetAfterDetraction = getPdt621RentaNetAfterDetraction(p621);
+  const igvFinalAmount = detractionAppliedIgv > 0 ? igvNetAfterDetraction : igvBalance.amount;
+  const showIgvDetraction = igvPayableBefore > 0;
+  const showRentaDetraction = rentaPayableBefore > 0;
 
   const summaryRows = [
     {
@@ -163,41 +177,32 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
       value: formatTaxMoney(p621.credito_periodo_anterior),
       emphasized: false,
     },
-    { label: igvSaldoFavor.label, value: formatTaxMoney(igvSaldoFavor.amount), emphasized: true },
+    { label: igvSaldoFavor.label, value: formatPdt621IgvBalanceAmount(igvSaldoFavor), emphasized: true },
     {
-      label: 'Percepciones del periodo',
+      label: getPdt621PercepcionesRetencionesFieldLabel('Percepciones del periodo', p621.saldo_favor),
       value: formatTaxMoney(p621.percepciones_periodo),
       emphasized: false,
     },
     {
-      label: 'Percepciones periodos anteriores',
+      label: getPdt621PercepcionesRetencionesFieldLabel('Percepciones periodos anteriores', p621.saldo_favor),
       value: formatTaxMoney(p621.percepciones_anteriores),
       emphasized: false,
     },
     {
-      label: 'Retenciones del periodo',
+      label: getPdt621PercepcionesRetencionesFieldLabel('Retenciones del periodo', p621.saldo_favor),
       value: formatTaxMoney(p621.retenciones_periodo),
       emphasized: false,
     },
     {
-      label: 'Retenciones periodos anteriores',
+      label: getPdt621PercepcionesRetencionesFieldLabel('Retenciones periodos anteriores', p621.saldo_favor),
       value: formatTaxMoney(p621.retenciones_anteriores),
       emphasized: false,
     },
     {
       label: igvBalance.label,
-      value: formatTaxMoney(igvBalance.amount),
+      value: formatPdt621IgvBalanceAmount({ label: igvBalance.label, amount: igvFinalAmount }),
       emphasized: true,
     },
-    ...(detractionAppliedIgv > 0
-      ? [
-          {
-            label: 'Pago con detracción aplicado (IGV)',
-            value: formatTaxMoney(detractionAppliedIgv),
-            emphasized: false,
-          },
-        ]
-      : []),
   ] as const;
 
   const rentaRows = [
@@ -218,18 +223,9 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
     },
     {
       label: 'Impuesto a pagar (renta)',
-      value: formatTaxMoney(p621.renta_impuesto_a_pagar),
+      value: formatTaxTotalMoney(p621.renta_impuesto_a_pagar),
       emphasized: true,
     },
-    ...(detractionAppliedRenta > 0
-      ? [
-          {
-            label: 'Pago con detracción aplicado (renta)',
-            value: formatTaxMoney(detractionAppliedRenta),
-            emphasized: false,
-          },
-        ]
-      : []),
   ] as const;
 
   return (
@@ -291,6 +287,35 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
         ))}
       </div>
 
+      {showIgvDetraction ? (
+        <DetraccionReadOnlyBar
+          payment={p621.detraction_payment_igv}
+          appliedAmount={detractionAppliedIgv}
+          payableBefore={igvPayableBefore}
+          totalLabel={igvBalance.label}
+          netAfterDetraction={igvNetAfterDetraction}
+        />
+      ) : null}
+
+      {showFooter && igvPayableBefore > 0 ? (
+        <>
+          <div className="hidden sm:block overflow-x-auto -mx-1 px-1 mt-1">
+            <div className={`grid ${PDT621_IGV_TABLE_GRID} ${PDT621_IGV_TABLE_GAP} min-w-[38rem]`}>
+              <ReadOnlyFooterRow
+                label="IGV pendiente"
+                value={formatTaxTotalMoney(igvNetAfterDetraction)}
+              />
+            </div>
+          </div>
+          <div className="sm:hidden">
+            <MobileReadOnlyFooterRow
+              label="IGV pendiente"
+              value={formatTaxTotalMoney(igvNetAfterDetraction)}
+            />
+          </div>
+        </>
+      ) : null}
+
       <div className="mt-1.5 pt-1 border-t border-slate-200">
         <h4 className={PDT621_SECTION_TITLE}>2. Renta mensual</h4>
         <div className="hidden sm:block overflow-x-auto -mx-1 px-1">
@@ -308,14 +333,29 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
                 emphasized={item.emphasized}
               />
             ))}
-            {showFooter ? (
-              <ReadOnlyFooterRow
-                label="Impuesto a pagar — PDT 621"
-                value={formatTaxTotalMoney(p621.impuesto_a_pagar)}
-              />
-            ) : null}
           </div>
         </div>
+        {showRentaDetraction ? (
+          <div className="hidden sm:block">
+            <DetraccionReadOnlyBar
+              payment={p621.detraction_payment_renta}
+              appliedAmount={detractionAppliedRenta}
+              payableBefore={rentaPayableBefore}
+              totalLabel="Impuesto a pagar (renta)"
+              netAfterDetraction={rentaNetAfterDetraction}
+            />
+          </div>
+        ) : null}
+        {showFooter && rentaPayableBefore > 0 ? (
+          <div className="hidden sm:block overflow-x-auto -mx-1 px-1 mt-1">
+            <div className={`grid ${PDT621_IGV_TABLE_GRID} ${PDT621_IGV_TABLE_GAP} min-w-[38rem]`}>
+              <ReadOnlyFooterRow
+                label="Renta pendiente"
+                value={formatTaxTotalMoney(rentaNetAfterDetraction)}
+              />
+            </div>
+          </div>
+        ) : null}
         <div className="sm:hidden space-y-1">
           <p className={`${PDT621_IGV_HEADER_CELL} mb-1`}>Impuesto</p>
           {rentaRows.map((item) => (
@@ -326,10 +366,19 @@ export function Pdt621ReadOnlySection({ p621, rentaRatePct, showFooter = true }:
               emphasized={item.emphasized}
             />
           ))}
-          {showFooter ? (
+          {showRentaDetraction ? (
+            <DetraccionReadOnlyBar
+              payment={p621.detraction_payment_renta}
+              appliedAmount={detractionAppliedRenta}
+              payableBefore={rentaPayableBefore}
+              totalLabel="Impuesto a pagar (renta)"
+              netAfterDetraction={rentaNetAfterDetraction}
+            />
+          ) : null}
+          {showFooter && rentaPayableBefore > 0 ? (
             <MobileReadOnlyFooterRow
-              label="Impuesto a pagar — PDT 621"
-              value={formatTaxTotalMoney(p621.impuesto_a_pagar)}
+              label="Renta pendiente"
+              value={formatTaxTotalMoney(rentaNetAfterDetraction)}
             />
           ) : null}
         </div>
