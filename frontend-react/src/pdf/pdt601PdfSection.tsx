@@ -8,6 +8,8 @@ import {
 
   getPdt601AppliedDetractionAmount,
 
+  getPdt601DetractableBeforeDetraction,
+
   getPdt621DetractionPdfRowLabel,
 
   isNonZeroTaxAmount,
@@ -141,6 +143,13 @@ export function Pdt601PdfSection({ p601, showFooter = true }: Props) {
       ))}
 
       <View wrap={false}>
+        {detractionLabel ? (
+          <PdfListRow
+            label="Total planilla"
+            value={formatTaxPdfMoney(getPdt601DetractableBeforeDetraction(p601))}
+            emphasized
+          />
+        ) : null}
         {detractionLabel ? (
           <PdfListRow label={detractionLabel} value={formatTaxPdfMoney(detractionApplied)} />
         ) : null}
