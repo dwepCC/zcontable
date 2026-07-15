@@ -2,42 +2,48 @@ package services
 
 import "testing"
 
-func TestComputeImpuestoPeriodoNegativeCeil(t *testing.T) {
-	// 180 - 90 - 52.50 - 144 = -106.50 → -107
+func TestComputeImpuestoPeriodoRoundsNearestDown(t *testing.T) {
+	// 3784.11 → 3784 (mismo método que el resto de totales: al entero más cercano, no al techo).
 	p := &TaxSettlementSectionsPayload{
 		Pdt621: &TaxSectionPdt621{
-			Enabled:      true,
-			VentasNetas:  TaxIGVRow{Impuesto: 180},
-			NotasCredito: TaxIGVRow{Impuesto: 90},
-			Compras105:   TaxIGVRow{Impuesto: 52.50},
-			Compras18:    TaxIGVRow{Impuesto: 144},
+			Enabled:     true,
+			VentasNetas: TaxIGVRow{Impuesto: 3784.11},
 		},
 	}
 	out := ComputeTaxSettlementSections(p)
-	if out.Pdt621.ImpuestoPeriodo != -107 {
-		t.Fatalf("impuesto_periodo=%v want -107", out.Pdt621.ImpuestoPeriodo)
+	if out.Pdt621.ImpuestoPeriodo != 3784 {
+		t.Fatalf("impuesto_periodo=%v want 3784", out.Pdt621.ImpuestoPeriodo)
 	}
 }
 
-func TestComputeImpuestoPeriodoCeilFloat(t *testing.T) {
-	if got := roundImpuestoPeriodo(106.499999999999); got != 107 {
-		t.Fatalf("impuesto_periodo float=%v want 107", got)
-	}
-	if got := roundImpuestoPeriodo(-106.50); got != -107 {
-		t.Fatalf("impuesto_periodo negative=%v want -107", got)
-	}
-}
-
-func TestComputeImpuestoPeriodoCeil(t *testing.T) {
+func TestComputeImpuestoPeriodoRoundsHalfUp(t *testing.T) {
+	// 106.50 → 107 (half-up).
 	p := &TaxSettlementSectionsPayload{
 		Pdt621: &TaxSectionPdt621{
-			Enabled:    true,
+			Enabled:     true,
 			VentasNetas: TaxIGVRow{Impuesto: 106.50},
 		},
 	}
 	out := ComputeTaxSettlementSections(p)
 	if out.Pdt621.ImpuestoPeriodo != 107 {
-		t.Fatalf("impuesto_periodo=%v want 107 (ceil)", out.Pdt621.ImpuestoPeriodo)
+		t.Fatalf("impuesto_periodo=%v want 107", out.Pdt621.ImpuestoPeriodo)
+	}
+}
+
+func TestComputeImpuestoPeriodoNegative(t *testing.T) {
+	// 180 - 90 - 52.40 - 144 = -106.40 → -106 (al más cercano).
+	p := &TaxSettlementSectionsPayload{
+		Pdt621: &TaxSectionPdt621{
+			Enabled:      true,
+			VentasNetas:  TaxIGVRow{Impuesto: 180},
+			NotasCredito: TaxIGVRow{Impuesto: 90},
+			Compras105:   TaxIGVRow{Impuesto: 52.40},
+			Compras18:    TaxIGVRow{Impuesto: 144},
+		},
+	}
+	out := ComputeTaxSettlementSections(p)
+	if out.Pdt621.ImpuestoPeriodo != -106 {
+		t.Fatalf("impuesto_periodo=%v want -106", out.Pdt621.ImpuestoPeriodo)
 	}
 }
 
@@ -364,5 +370,60 @@ func TestComputeItanDetractionPartial(t *testing.T) {
 	}
 	if out.Itan.DetractionPayment == nil || out.Itan.DetractionPayment.AppliedAmount != 120 {
 		t.Fatalf("applied detraccion itan=%v want 120", out.Itan.DetractionPayment)
+	}
+}
+
+func TestMarshalKeepsNumeroTrabajadoresWithoutSections(t *testing.T) {
+	// El supervisor puede registrar el conteo antes de activar cualquier sección PDT.
+	p := &TaxSettlementSectionsPayload{NumeroTrabajadores: 7}
+	raw, err := MarshalTaxSettlementSectionsJSON(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if raw == "" {
+		t.Fatal("json vacío: se perdió numero_trabajadores")
+	}
+	out, err := ParseTaxSettlementSectionsJSON(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if out == nil {
+		t.Fatal("parse devolvió nil")
+	}
+	if out.NumeroTrabajadores != 7 {
+		t.Fatalf("numero_trabajadores=%d want 7", out.NumeroTrabajadores)
+	}
+}
+
+func TestMarshalEmptyPayloadStillReturnsBlank(t *testing.T) {
+	raw, err := MarshalTaxSettlementSectionsJSON(&TaxSettlementSectionsPayload{})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if raw != "" {
+		t.Fatalf("json=%q want vacío", raw)
+	}
+}
+
+func TestComputePreservesNumeroTrabajadoresAlongsideSections(t *testing.T) {
+	p := &TaxSettlementSectionsPayload{
+		NumeroTrabajadores: 12,
+		Pdt621: &TaxSectionPdt621{
+			Enabled:     true,
+			VentasNetas: TaxIGVRow{Impuesto: 100},
+		},
+	}
+	out := ComputeTaxSettlementSections(p)
+	if out.NumeroTrabajadores != 12 {
+		t.Fatalf("numero_trabajadores=%d want 12", out.NumeroTrabajadores)
+	}
+}
+
+func TestValidateRejectsNegativeNumeroTrabajadores(t *testing.T) {
+	if err := validateTaxSettlementSections(&TaxSettlementSectionsPayload{NumeroTrabajadores: -1}); err == nil {
+		t.Fatal("se esperaba error para conteo negativo")
+	}
+	if err := validateTaxSettlementSections(&TaxSettlementSectionsPayload{NumeroTrabajadores: 10}); err != nil {
+		t.Fatalf("conteo válido rechazado: %v", err)
 	}
 }
