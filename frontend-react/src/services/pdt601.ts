@@ -1,6 +1,48 @@
 import client from '../api/client';
 import type { SupervisorDeclaration } from './supervisors';
 
+/** Datos de planilla PDT 601 del período (salida del backend). */
+export interface Pdt601Planilla {
+  trabajadores_onp: number;
+  trabajadores_afp: number;
+  trabajadores_total: number;
+  essalud: number;
+  onp: number;
+  afp: number;
+  sis: number;
+  rta_4ta: number;
+  rta_5ta: number;
+  rh: number;
+  total_aportes: number;
+  fecha_entrega?: string | null;
+  observaciones: string;
+  fecha_declaracion_pdt?: string | null;
+  nps: string;
+  ticket_afp: string;
+  estado_envio_boletas: string;
+  fecha_envio_nps_tickets_boletas?: string | null;
+}
+
+/** Cuerpo que envía el supervisor al guardar la planilla (fechas como AAAA-MM-DD). */
+export interface Pdt601PlanillaInput {
+  trabajadores_onp: number;
+  trabajadores_afp: number;
+  essalud: number;
+  onp: number;
+  afp: number;
+  sis: number;
+  rta_4ta: number;
+  rta_5ta: number;
+  rh: number;
+  fecha_entrega: string;
+  observaciones: string;
+  fecha_declaracion_pdt: string;
+  nps: string;
+  ticket_afp: string;
+  estado_envio_boletas: string;
+  fecha_envio_nps_tickets_boletas: string;
+}
+
 export interface Pdt601ListRow {
   company_id: number;
   code: string;
@@ -16,6 +58,7 @@ export interface Pdt601ListRow {
   days_remaining?: number | null;
   attachment_count: number;
   last_stored_at?: string;
+  planilla?: Pdt601Planilla | null;
 }
 
 export interface Pdt601Detail {
@@ -29,6 +72,7 @@ export interface Pdt601Detail {
   control_id: number;
   control_due_date?: string;
   declaration: SupervisorDeclaration;
+  planilla?: Pdt601Planilla | null;
 }
 
 export interface Pdt601ListResponse {
@@ -56,6 +100,19 @@ export const pdt601Service = {
   async getDetail(companyId: number, periodYm: string): Promise<Pdt601Detail> {
     const res = await client.get<{ data: Pdt601Detail }>(
       `/supervisors/activity-modules/pdt-601/companies/${companyId}`,
+      { params: { period_ym: periodYm } },
+    );
+    return res.data.data;
+  },
+
+  async savePlanilla(
+    companyId: number,
+    periodYm: string,
+    body: Pdt601PlanillaInput,
+  ): Promise<Pdt601Detail> {
+    const res = await client.put<{ data: Pdt601Detail }>(
+      `/supervisors/activity-modules/pdt-601/companies/${companyId}/planilla`,
+      body,
       { params: { period_ym: periodYm } },
     );
     return res.data.data;

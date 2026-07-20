@@ -3,8 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import Pagination from '../../components/Pagination';
 import ActivityPeriodFilter from '../../components/activity/ActivityPeriodFilter';
 import {
-  formatStoredAt,
-  formatPdt601DueDateCell,
   pdt601StatusBadgeClass,
   pdt601StatusLabel,
   PDT601_STATUS_FILTER,
@@ -33,7 +31,18 @@ type Pdt601ListPageProps = {
 };
 
 const TH = 'px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500';
+const SUBTH = 'px-3 py-2 text-center text-[11px] font-semibold uppercase text-slate-500';
 const TD = 'px-4 py-3 text-sm text-slate-700 border-t border-slate-100';
+const TDN = `${TD} tabular-nums text-center whitespace-nowrap`;
+const TDM = `${TD} tabular-nums text-right whitespace-nowrap`;
+/** Separador vertical entre grupos de columnas (N° trabajadores / PDT 601). */
+const GROUP_BORDER = 'border-l border-slate-200';
+/** Total de columnas hoja (para el colSpan de filas vacías). */
+const COL_COUNT = 24;
+
+function formatMoney(n: number): string {
+  return n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
   const homePath = workspaceHomePath(workspace);
@@ -148,66 +157,103 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
           <table className="min-w-full w-full text-left">
             <thead className="bg-slate-50">
               <tr>
-                <th className={TH}>Código</th>
-                <th className={TH}>Dígito</th>
-                <th className={TH}>Razón social</th>
-                <th className={TH}>RUC</th>
-                <th className={TH}>Asistente</th>
-                <th className={TH}>Estado</th>
-                <th className={TH}>Fecha vencimiento</th>
-                <th className={TH}>Cantidad archivos</th>
-                <th className={TH}>Fecha almacenamiento</th>
-                <th className={TH} />
+                <th className={TH} rowSpan={2}>Código</th>
+                <th className={TH} rowSpan={2}>Dígito</th>
+                <th className={TH} rowSpan={2}>Razón social</th>
+                <th className={TH} rowSpan={2}>RUC</th>
+                <th className={TH} rowSpan={2}>Asistente</th>
+                <th className={TH} rowSpan={2}>Estado</th>
+                <th className={`${TH} text-center ${GROUP_BORDER}`} colSpan={3}>
+                  N° de trabajadores
+                </th>
+                <th className={`${TH} text-center ${GROUP_BORDER}`} colSpan={7}>
+                  PDT 601
+                </th>
+                <th className={`${TH} ${GROUP_BORDER}`} rowSpan={2}>Fecha de entrega</th>
+                <th className={TH} rowSpan={2}>Observaciones</th>
+                <th className={TH} rowSpan={2}>Fecha de declaración PDT</th>
+                <th className={TH} rowSpan={2}>NPS</th>
+                <th className={TH} rowSpan={2}>Ticket AFP</th>
+                <th className={TH} rowSpan={2}>Estado de envío boletas de trabajadores</th>
+                <th className={TH} rowSpan={2}>Fecha de envío de NPS, tickets y boletas</th>
+                <th className={TH} rowSpan={2} />
+              </tr>
+              <tr>
+                <th className={`${SUBTH} ${GROUP_BORDER}`}>ONP</th>
+                <th className={SUBTH}>AFP</th>
+                <th className={SUBTH}>Total</th>
+                <th className={`${SUBTH} ${GROUP_BORDER}`}>ESSALUD</th>
+                <th className={SUBTH}>ONP</th>
+                <th className={SUBTH}>AFP</th>
+                <th className={SUBTH}>SIS</th>
+                <th className={SUBTH}>4TA</th>
+                <th className={SUBTH}>5TA</th>
+                <th className={SUBTH}>RH</th>
               </tr>
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={COL_COUNT} className="px-4 py-8 text-center text-slate-500 text-sm">
                     <i className="fas fa-spinner fa-spin mr-2" aria-hidden />
                     Cargando…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={COL_COUNT} className="px-4 py-8 text-center text-slate-500 text-sm">
                     No hay empresas para mostrar.
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row.company_id} className="hover:bg-slate-50/80">
-                    <td className={`${TD} font-mono`}>{row.code || '—'}</td>
-                    <td className={TD}>{row.dig || '—'}</td>
-                    <td className={`${TD} max-w-[14rem] font-medium`} title={row.business_name}>
-                      <span className="block truncate">{row.business_name || '—'}</span>
-                    </td>
-                    <td className={`${TD} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
-                    <td className={TD}>{row.assistant_username || '—'}</td>
-                    <td className={TD}>
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt601StatusBadgeClass(row.status)}`}
-                      >
-                        {pdt601StatusLabel(row.status)}
-                      </span>
-                    </td>
-                    <td
-                      className={`${TD} whitespace-nowrap ${row.is_overdue ? 'text-red-700 font-medium' : 'text-slate-600'}`}
-                    >
-                      {formatPdt601DueDateCell(row.due_date, row.is_overdue, row.days_remaining)}
-                    </td>
-                    <td className={`${TD} tabular-nums text-center`}>{row.attachment_count}</td>
-                    <td className={`${TD} whitespace-nowrap text-slate-600`}>{formatStoredAt(row.last_stored_at)}</td>
-                    <td className={TD}>
-                      <Link
-                        to={detailLink(row.company_id)}
-                        className="text-primary-700 text-sm font-medium hover:underline"
-                      >
-                        Ver
-                      </Link>
-                    </td>
-                  </tr>
-                ))
+                rows.map((row) => {
+                  const pl = row.planilla;
+                  return (
+                    <tr key={row.company_id} className="hover:bg-slate-50/80">
+                      <td className={`${TD} font-mono`}>{row.code || '—'}</td>
+                      <td className={TD}>{row.dig || '—'}</td>
+                      <td className={`${TD} max-w-[14rem] font-medium`} title={row.business_name}>
+                        <span className="block truncate">{row.business_name || '—'}</span>
+                      </td>
+                      <td className={`${TD} font-mono whitespace-nowrap`}>{row.ruc || '—'}</td>
+                      <td className={TD}>{row.assistant_username || '—'}</td>
+                      <td className={TD}>
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt601StatusBadgeClass(row.status)}`}
+                        >
+                          {pdt601StatusLabel(row.status)}
+                        </span>
+                      </td>
+                      <td className={`${TDN} ${GROUP_BORDER}`}>{pl ? pl.trabajadores_onp : '—'}</td>
+                      <td className={TDN}>{pl ? pl.trabajadores_afp : '—'}</td>
+                      <td className={`${TDN} font-semibold`}>{pl ? pl.trabajadores_total : '—'}</td>
+                      <td className={`${TDM} ${GROUP_BORDER}`}>{pl ? formatMoney(pl.essalud) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.onp) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.afp) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.sis) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.rta_4ta) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.rta_5ta) : '—'}</td>
+                      <td className={TDM}>{pl ? formatMoney(pl.rh) : '—'}</td>
+                      <td className={`${TD} whitespace-nowrap ${GROUP_BORDER}`}>{pl?.fecha_entrega || '—'}</td>
+                      <td className={`${TD} max-w-[12rem]`} title={pl?.observaciones || ''}>
+                        <span className="block truncate">{pl?.observaciones || '—'}</span>
+                      </td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_declaracion_pdt || '—'}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.nps || '—'}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.ticket_afp || '—'}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.estado_envio_boletas || '—'}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_envio_nps_tickets_boletas || '—'}</td>
+                      <td className={TD}>
+                        <Link
+                          to={detailLink(row.company_id)}
+                          className="text-primary-700 text-sm font-medium hover:underline whitespace-nowrap"
+                        >
+                          Editar planilla
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -250,6 +250,7 @@ func Setup(app *fiber.App) {
 	sup.Post("/activity-modules/distractions/declarations/:declarationId/validate", middleware.RequirePermission(rbac.SupervisorsDeclarationsApprove), supervisorCtrl.DetraccionesValidateAPI)
 	sup.Get("/activity-modules/pdt-601", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt601ListAPI)
 	sup.Get("/activity-modules/pdt-601/companies/:companyId", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt601DetailAPI)
+	sup.Put("/activity-modules/pdt-601/companies/:companyId/planilla", middleware.RequirePermission(rbac.SupervisorsDeclarationsUpdate), supervisorCtrl.Pdt601SavePlanillaAPI)
 	sup.Get("/activity-modules/pdt-621", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621ListAPI)
 	sup.Get("/activity-modules/pdt-621/companies/:companyId", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621DetailAPI)
 	sup.Get("/tax-settlements/drafts-by-companies", middleware.RequirePermission(rbac.SupervisorsLiquidationsView), supervisorCtrl.TaxSettlementDraftsByCompaniesAPI)

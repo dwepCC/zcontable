@@ -64,6 +64,7 @@ func AutoMigrate() error {
 		&models.SupervisorMonthlyControl{},
 		&models.SupervisorDeclaration{},
 		&models.SupervisorTaxLiquidation{},
+		&models.SupervisorPdt601Planilla{},
 		&models.SupervisorNPS{},
 		&models.SupervisorChangeLog{},
 		&models.SupervisorObservation{},
