@@ -42,6 +42,8 @@ var registryDefs = []PermDef{
 	{CompanyCredentialsView, ModRecursos, "Claves de acceso", "Ver claves de acceso por empresa"},
 	{CompanyCredentialsManage, ModRecursos, "Claves de acceso", "Editar claves de acceso por empresa"},
 	{CompanyCredentialsImport, ModRecursos, "Claves de acceso", "Importar claves de acceso desde Excel"},
+	{FinanceSunatDueDatesView, ModRecursos, "Vencimientos SUNAT", "Ver cronograma de vencimientos SUNAT"},
+	{FinanceSunatDueDatesManage, ModRecursos, "Vencimientos SUNAT", "Editar cronograma de vencimientos SUNAT"},
 
 	// ───────────── Finanzas del estudio ─────────────
 	{DashboardView, ModFinanzas, "Dashboard", "Ver dashboard"},
@@ -212,6 +214,9 @@ func SystemRoleCodes() []string {
 const DefaultRoleCode = RoleAsistente
 
 // supervisorDeny lo que NO tienen Supervisor / Administrador / Gerencia (tienen el resto).
+// Nota: FinanceSunatDueDatesManage NO está aquí a propósito — Administrador lo tiene
+// (ver administradorCodes) pero Supervisor y Gerencia no (ver gerenciaSupervisorCodes):
+// es el primer permiso del sistema con separación real entre estos tres roles.
 var supervisorDeny = []string{
 	AccessStudio,
 	UsersView, UsersCreate, UsersUpdate, UsersDelete,
@@ -231,6 +236,7 @@ var contadorDeny = []string{
 	CompaniesCreate, CompaniesUpdate, CompaniesStatus, CompaniesDelete,
 	SubscriptionPlansCreate, SubscriptionPlansUpdate, SubscriptionPlansTiers, SubscriptionPlansDelete,
 	PlanCategoriesDelete, PaymentsDelete, ProductsDelete,
+	FinanceSunatDueDatesManage,
 }
 
 // asistenteCodes lista cerrada del rol Asistente.
@@ -244,7 +250,7 @@ var asistenteCodes = []string{
 	FiscalSeriesView, FiscalReceiptsList, FiscalReceiptsCreatePayment, FiscalReceiptsLinkPayment,
 	FiscalReceiptsPatchTax, FiscalReceiptsDiscard,
 	TaxSettlementsPreview, TaxSettlementsList, TaxSettlementsView, TaxSettlementsPaymentSuggestions,
-	FinanceCalendarView, CompanyCredentialsView,
+	FinanceCalendarView, CompanyCredentialsView, FinanceSunatDueDatesView,
 	SupervisorsDashboardView, SupervisorsPeriodsView,
 	SupervisorsControlsView, SupervisorsControlsUpdate,
 	SupervisorsDeclarationsView, SupervisorsDeclarationsUpdate,
@@ -264,7 +270,7 @@ var analistaCodes = []string{
 	SupervisorsReportsView,
 	SupervisorsObservationsView, SupervisorsObservationsCreate,
 	SupervisorsHistoryView, SupervisorsAttachmentsUpload, SupervisorsNotificationsView,
-	FinanceCalendarView, CompanyCredentialsView,
+	FinanceCalendarView, CompanyCredentialsView, FinanceSunatDueDatesView,
 	FiscalSeriesView, FiscalReceiptsList, FiscalReceiptsLinkPayment,
 	FiscalReceiptsPatchTax, FiscalReceiptsDiscard, PaymentsIssueComprobante,
 }
@@ -337,14 +343,32 @@ func contadorCodes() []string {
 	return codesExcept(deny)
 }
 
+// administradorCodes: todo lo del grupo "administración de área" (supervisorDeny) MÁS los
+// permisos exclusivos de Administrador (hoy: gestionar el cronograma de vencimientos SUNAT).
+func administradorCodes() []string {
+	return codesExcept(supervisorDeny)
+}
+
+// gerenciaSupervisorCodes: mismo alcance que Administrador, salvo los permisos que son
+// exclusivos de Administrador. Función compartida por Gerencia y Supervisor — hoy tienen
+// exactamente el mismo conjunto entre sí, pero cada uno se resuelve por su propia función
+// para poder diferenciarlos sin tocar Administrador si en el futuro hace falta.
+func gerenciaSupervisorCodes() []string {
+	deny := append([]string(nil), supervisorDeny...)
+	deny = append(deny, FinanceSunatDueDatesManage)
+	return codesExcept(deny)
+}
+
 // RolePermissionCodes conjunto canónico de permisos de un rol de sistema.
 // FUENTE ÚNICA: semilla, reconciliación y tests derivan de aquí.
 func RolePermissionCodes(roleCode string) []string {
 	switch roleCode {
 	case RoleSuperusuario:
 		return append([]string(nil), AllPermissionCodes...)
-	case RoleAdministrador, RoleGerencia, RoleSupervisor:
-		return codesExcept(supervisorDeny)
+	case RoleAdministrador:
+		return administradorCodes()
+	case RoleGerencia, RoleSupervisor:
+		return gerenciaSupervisorCodes()
 	case RoleContador:
 		return contadorCodes()
 	case RoleAsistente:

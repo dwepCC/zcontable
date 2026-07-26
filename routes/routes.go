@@ -34,6 +34,7 @@ func Setup(app *fiber.App) {
 	calendarCtrl := controllers.NewFinanceCalendarController()
 	activityTplCtrl := controllers.NewActivityTemplateController()
 	credCtrl := controllers.NewCompanyAccessCredentialController()
+	sunatDueDateCtrl := controllers.NewSunatDueDateController()
 
 	app.Post("/api/login", authCtrl.LoginAPI)
 
@@ -293,4 +294,8 @@ func Setup(app *fiber.App) {
 	creds.Get("/import/template", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportTemplateAPI)
 	creds.Post("/import", middleware.RequirePermission(rbac.CompanyCredentialsImport), credCtrl.ImportAPI)
 	creds.Put("/:companyId", middleware.RequirePermission(rbac.CompanyCredentialsManage), credCtrl.UpdateAPI)
+
+	// Cronograma de vencimientos SUNAT (referencia del estudio; solo se edita, nunca se crea)
+	api.Get("/finance/sunat-due-dates", middleware.RequirePermission(rbac.FinanceSunatDueDatesView), sunatDueDateCtrl.ListAPI)
+	api.Put("/finance/sunat-due-dates", middleware.RequirePermission(rbac.FinanceSunatDueDatesManage), sunatDueDateCtrl.UpdateAPI)
 }

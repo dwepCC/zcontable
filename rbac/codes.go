@@ -145,6 +145,9 @@ const (
 	CompanyCredentialsManage = "finance.company_credentials_manage"
 	CompanyCredentialsImport = "finance.company_credentials_import"
 
+	FinanceSunatDueDatesView   = "finance.sunat_due_dates_view"
+	FinanceSunatDueDatesManage = "finance.sunat_due_dates_manage"
+
 	SalesEmit           = "sales.emit"
 	SalesHistory        = "sales.history"
 	SalesCatalogPick    = "sales.catalog_pick"

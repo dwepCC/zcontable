@@ -53,6 +53,7 @@ import FinanceCalendar from './pages/finance/FinanceCalendar';
 import ActivityTemplates from './pages/finance/ActivityTemplates';
 import ActivityTemplateForm from './pages/finance/ActivityTemplateForm';
 import CompanyAccessCredentials from './pages/finance/CompanyAccessCredentials';
+import SunatDueDatesCalendar from './pages/finance/SunatDueDatesCalendar';
 import AssistantWorkspace from './pages/assistant/AssistantWorkspace';
 import AssistantCompaniesPage from './pages/assistant/AssistantCompaniesPage';
 import AssistantSunatInboxListPage from './pages/assistant/activities/AssistantSunatInboxListPage';
@@ -166,6 +167,7 @@ function App() {
               <Route path=":id/edit" element={guard([P.financeCalendarManage, P.settingsFirmView], <ActivityTemplateForm />)} />
             </Route>
             <Route path="finance/claves-sol" element={guard(P.companyCredentialsView, <CompanyAccessCredentials />)} />
+            <Route path="finance/sunat-due-dates" element={guard(P.financeSunatDueDatesView, <SunatDueDatesCalendar />)} />
             <Route path="assistant" element={guard(P.supervisorsControlsView, <AssistantWorkspace />)} />
             <Route path="assistant/companies" element={guard(P.supervisorsControlsView, <AssistantCompaniesPage />)} />
             <Route path="assistant/activities" element={<Navigate to="/assistant" replace />} />

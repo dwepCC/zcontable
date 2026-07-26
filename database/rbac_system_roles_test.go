@@ -63,6 +63,48 @@ func TestPrivilegedRolesExcludeStudioAndUsers(t *testing.T) {
 	}
 }
 
+// TestSunatDueDatesManageIsAdministradorOnly: solo Administrador (y super_usuario) puede editar
+// el cronograma de vencimientos SUNAT. Supervisor, Gerencia y Contador NO, aunque compartan
+// otros permisos con Administrador — es la primera separación real entre esos roles.
+func TestSunatDueDatesManageIsAdministradorOnly(t *testing.T) {
+	hasManage := func(roleCode string) bool {
+		for _, c := range rbac.RolePermissionCodes(roleCode) {
+			if c == rbac.FinanceSunatDueDatesManage {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasManage(rbac.RoleAdministrador) {
+		t.Fatal("Administrador debería poder editar el cronograma SUNAT")
+	}
+	if !hasManage(rbac.RoleSuperusuario) {
+		t.Fatal("super_usuario debería poder editar el cronograma SUNAT")
+	}
+	for _, roleCode := range []string{rbac.RoleSupervisor, rbac.RoleGerencia, rbac.RoleContador, rbac.RoleAsistente, rbac.RoleAnalista} {
+		if hasManage(roleCode) {
+			t.Fatalf("rol %s NO debería poder editar el cronograma SUNAT", roleCode)
+		}
+	}
+	// Pero la VISTA sí es compartida por todos los roles operativos.
+	hasView := func(roleCode string) bool {
+		for _, c := range rbac.RolePermissionCodes(roleCode) {
+			if c == rbac.FinanceSunatDueDatesView {
+				return true
+			}
+		}
+		return false
+	}
+	for _, roleCode := range []string{
+		rbac.RoleAdministrador, rbac.RoleSupervisor, rbac.RoleGerencia,
+		rbac.RoleContador, rbac.RoleAsistente, rbac.RoleAnalista,
+	} {
+		if !hasView(roleCode) {
+			t.Fatalf("rol %s debería poder VER el cronograma SUNAT", roleCode)
+		}
+	}
+}
+
 // TestAsistenteHasKeyPermissions el Asistente debe conservar permisos clave de su flujo.
 func TestAsistenteHasKeyPermissions(t *testing.T) {
 	have := make(map[string]struct{})
