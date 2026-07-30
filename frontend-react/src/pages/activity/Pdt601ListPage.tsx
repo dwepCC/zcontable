@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Pagination from '../../components/Pagination';
 import ActivityPeriodFilter from '../../components/activity/ActivityPeriodFilter';
+import CompanyDigitoFilter from '../../components/finance/CompanyDigitoFilter';
 import {
   pdt601StatusBadgeClass,
   pdt601StatusLabel,
@@ -14,6 +15,10 @@ import {
   type ActivityWorkspace,
 } from '../../navigation/activityRoutes';
 import { pdt601Service, type Pdt601ListRow } from '../../services/pdt601';
+import {
+  companyAccessCredentialsService,
+  type CredentialFilterUserOption,
+} from '../../services/companyAccessCredentials';
 import { currentPeriodYM } from '../../utils/supervisorLabels';
 import { extractApiErrorMessage } from '../../utils/apiError';
 
@@ -53,12 +58,35 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
   const [q, setQ] = useState('');
   const debouncedQ = useDebouncedValue(q, 400);
   const [statusFilter, setStatusFilter] = useState('');
+  const [filterDig, setFilterDig] = useState<string | null>(null);
+  const [filterAssistantId, setFilterAssistantId] = useState<number | null>(null);
+  const [assistants, setAssistants] = useState<CredentialFilterUserOption[]>([]);
+  const [digColorsJson, setDigColorsJson] = useState<string | null>(null);
+  const [facetsLoading, setFacetsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
   const [rows, setRows] = useState<Pdt601ListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const loadFacets = useCallback(async () => {
+    try {
+      setFacetsLoading(true);
+      const data = await companyAccessCredentialsService.filterFacets();
+      setDigColorsJson(data.claves_sol_dig_colors_json ?? null);
+      setAssistants(data.assistants ?? []);
+    } catch {
+      setDigColorsJson(null);
+      setAssistants([]);
+    } finally {
+      setFacetsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFacets();
+  }, [loadFacets]);
 
   useEffect(() => {
     setSearchParams(
@@ -79,6 +107,8 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
         period_ym: periodYm,
         q: debouncedQ.trim().length >= 2 ? debouncedQ.trim() : undefined,
         status: statusFilter || undefined,
+        dig: filterDig ?? undefined,
+        assistant_user_id: filterAssistantId ?? undefined,
         page,
         per_page: perPage,
       });
@@ -92,7 +122,7 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
     } finally {
       setLoading(false);
     }
-  }, [periodYm, debouncedQ, statusFilter, page, perPage]);
+  }, [periodYm, debouncedQ, statusFilter, filterDig, filterAssistantId, page, perPage]);
 
   useEffect(() => {
     void load();
@@ -100,7 +130,7 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
 
   useEffect(() => {
     setPage(1);
-  }, [periodYm, debouncedQ, statusFilter]);
+  }, [periodYm, debouncedQ, statusFilter, filterDig, filterAssistantId]);
 
   const detailLink = (companyId: number) => {
     const path = `${activityModulePath(workspace, 'pdt-601')}/${companyId}`;
@@ -116,7 +146,14 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm space-y-3">
+        <CompanyDigitoFilter
+          filterDig={filterDig}
+          onFilterDigChange={setFilterDig}
+          digColorsJson={digColorsJson}
+          loading={facetsLoading}
+        />
+        <div className="flex flex-wrap items-end gap-3 pt-1 border-t border-slate-100">
         <ActivityPeriodFilter value={periodYm} onChange={setPeriodYm} />
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
@@ -127,6 +164,21 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
             placeholder="RUC, razón social o código (mín. 2 caracteres)…"
             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
           />
+        </div>
+        <div className="min-w-[10rem]">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Asistente</label>
+          <select
+            value={filterAssistantId ?? ''}
+            onChange={(e) => setFilterAssistantId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">Todos</option>
+            {assistants.map((a) => (
+              <option key={a.user_id} value={a.user_id}>
+                {a.username}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="min-w-[10rem]">
           <label className="block text-xs font-medium text-slate-500 mb-1">Estado</label>
@@ -145,6 +197,7 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
         <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 shrink-0 min-w-[9rem]">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Empresas</p>
           <p className="text-lg font-semibold text-slate-800 tabular-nums leading-tight">{loading ? '—' : total}</p>
+        </div>
         </div>
       </div>
 
@@ -224,25 +277,36 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                           {pdt601StatusLabel(row.status)}
                         </span>
                       </td>
-                      <td className={`${TDN} ${GROUP_BORDER}`}>{pl ? pl.trabajadores_onp : '—'}</td>
-                      <td className={TDN}>{pl ? pl.trabajadores_afp : '—'}</td>
-                      <td className={`${TDN} font-semibold`}>{pl ? pl.trabajadores_total : '—'}</td>
-                      <td className={`${TDM} ${GROUP_BORDER}`}>{pl ? formatMoney(pl.essalud) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.onp) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.afp) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.sis) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.rta_4ta) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.rta_5ta) : '—'}</td>
-                      <td className={TDM}>{pl ? formatMoney(pl.rh) : '—'}</td>
-                      <td className={`${TD} whitespace-nowrap ${GROUP_BORDER}`}>{pl?.fecha_entrega || '—'}</td>
+                      {pl?.sin_planilla ? (
+                        <td colSpan={10} className={`${TD} ${GROUP_BORDER} text-center`}>
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                            <i className="fas fa-ban" aria-hidden />
+                            Sin planilla
+                          </span>
+                        </td>
+                      ) : (
+                        <>
+                          <td className={`${TDN} ${GROUP_BORDER}`}>{pl ? pl.trabajadores_onp : ''}</td>
+                          <td className={TDN}>{pl ? pl.trabajadores_afp : ''}</td>
+                          <td className={`${TDN} font-semibold`}>{pl ? pl.trabajadores_total : ''}</td>
+                          <td className={`${TDM} ${GROUP_BORDER}`}>{pl ? formatMoney(pl.essalud) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.onp) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.afp) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.sis) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.rta_4ta) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.rta_5ta) : ''}</td>
+                          <td className={TDM}>{pl ? formatMoney(pl.rh) : ''}</td>
+                        </>
+                      )}
+                      <td className={`${TD} whitespace-nowrap ${GROUP_BORDER}`}>{pl?.fecha_entrega || ''}</td>
                       <td className={`${TD} max-w-[12rem]`} title={pl?.observaciones || ''}>
-                        <span className="block truncate">{pl?.observaciones || '—'}</span>
+                        <span className="block truncate">{pl?.observaciones || ''}</span>
                       </td>
-                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_declaracion_pdt || '—'}</td>
-                      <td className={`${TD} whitespace-nowrap`}>{pl?.nps || '—'}</td>
-                      <td className={`${TD} whitespace-nowrap`}>{pl?.ticket_afp || '—'}</td>
-                      <td className={`${TD} whitespace-nowrap`}>{pl?.estado_envio_boletas || '—'}</td>
-                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_envio_nps_tickets_boletas || '—'}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_declaracion_pdt || ''}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.nps || ''}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.ticket_afp || ''}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.estado_envio_boletas || ''}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{pl?.fecha_envio_nps_tickets_boletas || ''}</td>
                       <td className={TD}>
                         <Link
                           to={detailLink(row.company_id)}

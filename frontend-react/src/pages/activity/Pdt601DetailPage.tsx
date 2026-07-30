@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  formatStoredAt,
   computePdt601DueMeta,
   formatPdt601DueDetail,
   pdt601StatusBadgeClass,
@@ -13,12 +12,7 @@ import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { activityModulePath, type ActivityWorkspace } from '../../navigation/activityRoutes';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
-import {
-  supervisorsService,
-  type SupervisorAttachment,
-  type SupervisorDeclaration,
-  type SupervisorObservation,
-} from '../../services/supervisors';
+import { supervisorsService, type SupervisorDeclaration } from '../../services/supervisors';
 import {
   pdt601Service,
   type Pdt601Detail,
@@ -31,6 +25,7 @@ import { extractApiErrorMessage } from '../../utils/apiError';
 const PDT601_APPROVED_STATUSES = new Set(['aprobado', 'presentado', 'cerrado']);
 
 const EMPTY_PLANILLA: Pdt601PlanillaInput = {
+  sin_planilla: false,
   trabajadores_onp: 0,
   trabajadores_afp: 0,
   essalud: 0,
@@ -49,10 +44,30 @@ const EMPTY_PLANILLA: Pdt601PlanillaInput = {
   fecha_envio_nps_tickets_boletas: '',
 };
 
+/** Campos que no aplican cuando se marca "sin planilla" (se limpian al activar el flag). */
+const SIN_PLANILLA_RESET: Partial<Pdt601PlanillaInput> = {
+  trabajadores_onp: 0,
+  trabajadores_afp: 0,
+  essalud: 0,
+  onp: 0,
+  afp: 0,
+  sis: 0,
+  rta_4ta: 0,
+  rta_5ta: 0,
+  rh: 0,
+  fecha_entrega: '',
+  fecha_declaracion_pdt: '',
+  nps: '',
+  ticket_afp: '',
+  estado_envio_boletas: '',
+  fecha_envio_nps_tickets_boletas: '',
+};
+
 /** Mapea la planilla que devuelve el backend al formulario editable. */
 function planillaToInput(p: Pdt601Planilla | null | undefined): Pdt601PlanillaInput {
   if (!p) return { ...EMPTY_PLANILLA };
   return {
+    sin_planilla: p.sin_planilla ?? false,
     trabajadores_onp: p.trabajadores_onp ?? 0,
     trabajadores_afp: p.trabajadores_afp ?? 0,
     essalud: p.essalud ?? 0,
@@ -89,26 +104,18 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
   const listPath = `${activityModulePath(workspace, 'pdt-601')}?period_ym=${encodeURIComponent(periodYm)}`;
 
   const canUpdate = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsUpdate), []);
-  const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
   const canObserve = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsObserve), []);
   const canApprove = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
-  const canCreateObservation = useMemo(() => auth.hasPermission(P.supervisorsObservationsCreate), []);
 
   const [detail, setDetail] = useState<Pdt601Detail | null>(null);
-  const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
-  const [observations, setObservations] = useState<SupervisorObservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [obsText, setObsText] = useState('');
-  const [obsSaving, setObsSaving] = useState(false);
   const [supervisorNotes, setSupervisorNotes] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [planilla, setPlanilla] = useState<Pdt601PlanillaInput>({ ...EMPTY_PLANILLA });
   const [planillaSaving, setPlanillaSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const declaration = detail?.declaration;
   const trabajadoresTotal = (planilla.trabajadores_onp || 0) + (planilla.trabajadores_afp || 0);
@@ -128,23 +135,16 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
     const n = Number(raw);
     patchPlanilla({ [key]: Number.isFinite(n) ? n : 0 } as Partial<Pdt601PlanillaInput>);
   };
+  const handleToggleSinPlanilla = (checked: boolean) => {
+    patchPlanilla(checked ? { sin_planilla: true, ...SIN_PLANILLA_RESET } : { sin_planilla: false });
+  };
 
   const dueResolved = useMemo(() => {
     if (!detail || !declaration) return { dueDate: undefined, isOverdue: false, daysRemaining: null as number | null };
     const dueDate = resolvePdt601DueDate(declaration.due_date, detail.control_due_date);
-    const meta = computePdt601DueMeta(declaration.status, dueDate);
+    const meta = computePdt601DueMeta(declaration.status, dueDate, detail.planilla?.sin_planilla);
     return { dueDate, ...meta };
   }, [detail, declaration]);
-
-  const loadAttachments = useCallback(async (declarationId: number) => {
-    const rows = await supervisorsService.listAttachments(0, declarationId);
-    setAttachments(rows);
-  }, []);
-
-  const loadObservations = useCallback(async (declarationId: number) => {
-    const rows = await supervisorsService.listObservations(0, declarationId);
-    setObservations(rows);
-  }, []);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(companyId) || companyId <= 0) {
@@ -158,10 +158,6 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       const data = await pdt601Service.getDetail(companyId, periodYm);
       setDetail(data);
       setPlanilla(planillaToInput(data.planilla));
-      await Promise.all([
-        loadAttachments(data.declaration.id),
-        loadObservations(data.declaration.id),
-      ]);
     } catch (err) {
       console.error(err);
       setError(extractApiErrorMessage(err, 'No se pudo cargar el detalle.'));
@@ -169,7 +165,7 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
     } finally {
       setLoading(false);
     }
-  }, [companyId, periodYm, loadAttachments, loadObservations]);
+  }, [companyId, periodYm]);
 
   useEffect(() => {
     void load();
@@ -191,42 +187,6 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       setMsg(extractApiErrorMessage(err, 'No se pudo actualizar el estado.'));
     } finally {
       setStatusSaving(false);
-    }
-  };
-
-  const handleUpload = async (files: FileList | null) => {
-    if (!declaration || !canUpload || !files?.length) return;
-    try {
-      setUploading(true);
-      setMsg('');
-      for (const file of Array.from(files)) {
-        await supervisorsService.uploadAttachment(detail!.control_id, declaration.id, file);
-      }
-      await loadAttachments(declaration.id);
-      setMsg('Archivo(s) subido(s) correctamente.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'Error al subir archivo.'));
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
-  const handleAddObservation = async () => {
-    if (!declaration || !canCreateObservation) return;
-    const body = obsText.trim();
-    if (!body) return;
-    try {
-      setObsSaving(true);
-      setMsg('');
-      await supervisorsService.createObservation({ declaration_id: declaration.id, body });
-      setObsText('');
-      await loadObservations(declaration.id);
-      setMsg('Observación registrada.');
-    } catch (err) {
-      setMsg(extractApiErrorMessage(err, 'No se pudo registrar la observación.'));
-    } finally {
-      setObsSaving(false);
     }
   };
 
@@ -274,7 +234,6 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       const updated = await supervisorsService.observeDeclaration(declaration.id, notes);
       refreshDeclaration(updated);
       setSupervisorNotes('');
-      await loadObservations(declaration.id);
       setMsg('Observación registrada.');
     } catch (err) {
       setMsg(extractApiErrorMessage(err, 'No se pudo observar.'));
@@ -401,182 +360,196 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Planilla PDT 601 — Período {periodYm}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Datos de planilla del período. Se guardan por empresa y período.
-            </p>
-          </div>
-          {canUpdate ? (
-            <button
-              type="button"
-              disabled={planillaSaving}
-              onClick={() => void handleSavePlanilla()}
-              className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
-            >
-              {planillaSaving ? 'Guardando…' : 'Guardar planilla'}
-            </button>
-          ) : null}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-800">Planilla PDT 601 — Período {periodYm}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Datos de planilla del período. Se guardan por empresa y período.
+          </p>
         </div>
 
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-            N° de trabajadores
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">ONP</label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                disabled={!canUpdate}
-                value={planilla.trabajadores_onp || ''}
-                onChange={(e) => patchPlanillaNumber('trabajadores_onp', e.target.value)}
-                placeholder="0"
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">AFP</label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                disabled={!canUpdate}
-                value={planilla.trabajadores_afp || ''}
-                onChange={(e) => patchPlanillaNumber('trabajadores_afp', e.target.value)}
-                placeholder="0"
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Total</label>
-              <input
-                type="number"
-                disabled
-                value={trabajadoresTotal}
-                className={`${PLANILLA_INPUT} font-semibold`}
-              />
-            </div>
-          </div>
-        </div>
+        <label
+          className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
+            planilla.sin_planilla
+              ? 'border-amber-300 bg-amber-50 text-amber-900'
+              : 'border-slate-200 bg-slate-50 text-slate-700'
+          } ${canUpdate ? 'cursor-pointer' : 'cursor-default opacity-80'}`}
+        >
+          <input
+            type="checkbox"
+            disabled={!canUpdate}
+            checked={planilla.sin_planilla}
+            onChange={(e) => handleToggleSinPlanilla(e.target.checked)}
+            className="mt-0.5 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span>
+            <span className="block font-medium">Esta empresa no tiene planilla en este período</span>
+            <span className="block text-xs mt-0.5 opacity-80">
+              No es necesario registrar N° de trabajadores, importes ni seguimiento.
+            </span>
+          </span>
+        </label>
 
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-            PDT 601 (importes)
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-4">
-            {([
-              ['essalud', 'ESSALUD'],
-              ['onp', 'ONP'],
-              ['afp', 'AFP'],
-              ['sis', 'SIS'],
-              ['rta_4ta', '4TA'],
-              ['rta_5ta', '5TA'],
-              ['rh', 'RH'],
-            ] as Array<[keyof Pdt601PlanillaInput, string]>).map(([key, label]) => (
-              <div key={key}>
-                <label className="block text-xs text-slate-500 mb-1">{label}</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  disabled={!canUpdate}
-                  value={(planilla[key] as number) || ''}
-                  onChange={(e) => patchPlanillaNumber(key, e.target.value)}
-                  placeholder="0.00"
-                  className={PLANILLA_INPUT}
-                />
+        {!planilla.sin_planilla ? (
+          <>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                N° de trabajadores
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">ONP</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    disabled={!canUpdate}
+                    value={planilla.trabajadores_onp || ''}
+                    onChange={(e) => patchPlanillaNumber('trabajadores_onp', e.target.value)}
+                    placeholder="0"
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">AFP</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    disabled={!canUpdate}
+                    value={planilla.trabajadores_afp || ''}
+                    onChange={(e) => patchPlanillaNumber('trabajadores_afp', e.target.value)}
+                    placeholder="0"
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Total</label>
+                  <input
+                    type="number"
+                    disabled
+                    value={trabajadoresTotal}
+                    className={`${PLANILLA_INPUT} font-semibold`}
+                  />
+                </div>
               </div>
-            ))}
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Total aportes</label>
-              <input
-                type="number"
-                disabled
-                value={totalAportes.toFixed(2)}
-                className={`${PLANILLA_INPUT} font-semibold`}
-              />
             </div>
-          </div>
-        </div>
 
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-            Seguimiento
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Fecha de entrega</label>
-              <input
-                type="date"
-                disabled={!canUpdate}
-                value={planilla.fecha_entrega}
-                onChange={(e) => patchPlanilla({ fecha_entrega: e.target.value })}
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Fecha de declaración PDT</label>
-              <input
-                type="date"
-                disabled={!canUpdate}
-                value={planilla.fecha_declaracion_pdt}
-                onChange={(e) => patchPlanilla({ fecha_declaracion_pdt: e.target.value })}
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">NPS</label>
-              <input
-                type="text"
-                disabled={!canUpdate}
-                value={planilla.nps}
-                onChange={(e) => patchPlanilla({ nps: e.target.value })}
-                placeholder="—"
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Ticket AFP</label>
-              <input
-                type="text"
-                disabled={!canUpdate}
-                value={planilla.ticket_afp}
-                onChange={(e) => patchPlanilla({ ticket_afp: e.target.value })}
-                placeholder="—"
-                className={PLANILLA_INPUT}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Estado de envío boletas de trabajadores</label>
-              <select
-                disabled={!canUpdate}
-                value={planilla.estado_envio_boletas}
-                onChange={(e) => patchPlanilla({ estado_envio_boletas: e.target.value })}
-                className={PLANILLA_INPUT}
-              >
-                {ESTADO_BOLETAS_OPTIONS.map((opt) => (
-                  <option key={opt || 'none'} value={opt}>
-                    {opt || '—'}
-                  </option>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                PDT 601 (importes)
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-4">
+                {([
+                  ['essalud', 'ESSALUD'],
+                  ['onp', 'ONP'],
+                  ['afp', 'AFP'],
+                  ['sis', 'SIS'],
+                  ['rta_4ta', '4TA'],
+                  ['rta_5ta', '5TA'],
+                  ['rh', 'RH'],
+                ] as Array<[keyof Pdt601PlanillaInput, string]>).map(([key, label]) => (
+                  <div key={key}>
+                    <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      disabled={!canUpdate}
+                      value={(planilla[key] as number) || ''}
+                      onChange={(e) => patchPlanillaNumber(key, e.target.value)}
+                      placeholder="0.00"
+                      className={PLANILLA_INPUT}
+                    />
+                  </div>
                 ))}
-              </select>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Total aportes</label>
+                  <input
+                    type="number"
+                    disabled
+                    value={totalAportes.toFixed(2)}
+                    className={`${PLANILLA_INPUT} font-semibold`}
+                  />
+                </div>
+              </div>
             </div>
+
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Fecha de envío de NPS, tickets y boletas</label>
-              <input
-                type="date"
-                disabled={!canUpdate}
-                value={planilla.fecha_envio_nps_tickets_boletas}
-                onChange={(e) => patchPlanilla({ fecha_envio_nps_tickets_boletas: e.target.value })}
-                className={PLANILLA_INPUT}
-              />
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                Seguimiento
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Fecha de entrega</label>
+                  <input
+                    type="date"
+                    disabled={!canUpdate}
+                    value={planilla.fecha_entrega}
+                    onChange={(e) => patchPlanilla({ fecha_entrega: e.target.value })}
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Fecha de declaración PDT</label>
+                  <input
+                    type="date"
+                    disabled={!canUpdate}
+                    value={planilla.fecha_declaracion_pdt}
+                    onChange={(e) => patchPlanilla({ fecha_declaracion_pdt: e.target.value })}
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">NPS</label>
+                  <input
+                    type="text"
+                    disabled={!canUpdate}
+                    value={planilla.nps}
+                    onChange={(e) => patchPlanilla({ nps: e.target.value })}
+                    placeholder="—"
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Ticket AFP</label>
+                  <input
+                    type="text"
+                    disabled={!canUpdate}
+                    value={planilla.ticket_afp}
+                    onChange={(e) => patchPlanilla({ ticket_afp: e.target.value })}
+                    placeholder="—"
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Estado de envío boletas de trabajadores</label>
+                  <select
+                    disabled={!canUpdate}
+                    value={planilla.estado_envio_boletas}
+                    onChange={(e) => patchPlanilla({ estado_envio_boletas: e.target.value })}
+                    className={PLANILLA_INPUT}
+                  >
+                    {ESTADO_BOLETAS_OPTIONS.map((opt) => (
+                      <option key={opt || 'none'} value={opt}>
+                        {opt || '—'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Fecha de envío de NPS, tickets y boletas</label>
+                  <input
+                    type="date"
+                    disabled={!canUpdate}
+                    value={planilla.fecha_envio_nps_tickets_boletas}
+                    onChange={(e) => patchPlanilla({ fecha_envio_nps_tickets_boletas: e.target.value })}
+                    className={PLANILLA_INPUT}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        ) : null}
 
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
@@ -591,85 +564,19 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
             className={PLANILLA_INPUT}
           />
         </div>
-      </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-800">Evidencias ({attachments.length})</h2>
-          {canUpload ? (
-            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium cursor-pointer hover:bg-primary-700">
-              <i className="fas fa-upload" aria-hidden />
-              {uploading ? 'Subiendo…' : 'Subir archivos'}
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                accept=".pdf,image/*"
-                className="hidden"
-                disabled={uploading}
-                onChange={(e) => void handleUpload(e.target.files)}
-              />
-            </label>
-          ) : null}
-        </div>
-        {attachments.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin archivos cargados.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {attachments.map((a) => (
-              <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">
-                  <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
-                  {a.file_name}
-                </span>
-                <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
-                <a
-                  href={a.file_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary-700 text-xs font-medium shrink-0 hover:underline"
-                >
-                  Abrir
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <h2 className="text-sm font-semibold text-slate-800">Observaciones</h2>
-        {canCreateObservation ? (
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              value={obsText}
-              onChange={(e) => setObsText(e.target.value)}
-              placeholder="Nueva observación…"
-              className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-            />
+        {canUpdate ? (
+          <div className="flex justify-end pt-1">
             <button
               type="button"
-              disabled={obsSaving || !obsText.trim()}
-              onClick={() => void handleAddObservation()}
-              className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
+              disabled={planillaSaving}
+              onClick={() => void handleSavePlanilla()}
+              className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
             >
-              Agregar
+              {planillaSaving ? 'Guardando…' : 'Guardar planilla'}
             </button>
           </div>
         ) : null}
-        {observations.length === 0 ? (
-          <p className="text-sm text-slate-500">Sin observaciones.</p>
-        ) : (
-          <ul className="space-y-2">
-            {observations.map((o) => (
-              <li key={o.id} className="text-sm border border-slate-100 rounded-lg px-3 py-2 bg-slate-50/50">
-                <p className="text-slate-800">{o.body}</p>
-                <p className="text-xs text-slate-500 mt-1">{formatStoredAt(o.created_at)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   );

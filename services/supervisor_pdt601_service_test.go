@@ -147,3 +147,128 @@ func TestSavePdt601PlanillaRoundTrip(t *testing.T) {
 		t.Fatalf("trabajadores_total tras upsert=%d want 13", again.Planilla.TrabajadoresTotal)
 	}
 }
+
+// TestListPdt601FiltersByDigAndAssistant cubre los filtros de dígito de empresa y asistente.
+func TestListPdt601FiltersByDigAndAssistant(t *testing.T) {
+	db := setupPdt601TestDB(t)
+	svc := NewSupervisorService()
+	coA := seedEstudioCompany(t, db, "P005")
+	coB := seedEstudioCompany(t, db, "P006")
+
+	assistantA := uint(101)
+	assistantB := uint(202)
+	if err := db.Model(&coA).Update("assistant_user_id", assistantA).Error; err != nil {
+		t.Fatalf("set assistant A: %v", err)
+	}
+	if err := db.Model(&coB).Update("assistant_user_id", assistantB).Error; err != nil {
+		t.Fatalf("set assistant B: %v", err)
+	}
+	if err := db.Create(&models.CompanyAccessCredential{CompanyID: coA.ID, Dig: "3"}).Error; err != nil {
+		t.Fatalf("cred A: %v", err)
+	}
+	if err := db.Create(&models.CompanyAccessCredential{CompanyID: coB.ID, Dig: "7"}).Error; err != nil {
+		t.Fatalf("cred B: %v", err)
+	}
+
+	if _, err := svc.CreatePeriod("2026-07", "test"); err != nil {
+		t.Fatalf("CreatePeriod: %v", err)
+	}
+
+	byAssistant, err := svc.ListPdt601(Pdt601ListParams{PeriodYM: "2026-07", AssistantUserID: assistantA, Page: 1, PerPage: 20})
+	if err != nil {
+		t.Fatalf("ListPdt601 by assistant: %v", err)
+	}
+	if len(byAssistant.Rows) != 1 || byAssistant.Rows[0].CompanyID != coA.ID {
+		t.Fatalf("filtro asistente trajo filas inesperadas: %+v", byAssistant.Rows)
+	}
+
+	byDig, err := svc.ListPdt601(Pdt601ListParams{PeriodYM: "2026-07", Dig: "7", Page: 1, PerPage: 20})
+	if err != nil {
+		t.Fatalf("ListPdt601 by dig: %v", err)
+	}
+	if len(byDig.Rows) != 1 || byDig.Rows[0].CompanyID != coB.ID {
+		t.Fatalf("filtro dig trajo filas inesperadas: %+v", byDig.Rows)
+	}
+}
+
+// TestGetPdt601PlanillaOnlyNoLazyCreate cubre que la lectura pura no crea control/declaración
+// cuando no existen, y que sí devuelve los datos cuando la planilla fue guardada antes.
+func TestGetPdt601PlanillaOnlyNoLazyCreate(t *testing.T) {
+	db := setupPdt601TestDB(t)
+	svc := NewSupervisorService()
+	co := seedEstudioCompany(t, db, "P004")
+
+	if _, err := svc.CreatePeriod("2026-07", "test"); err != nil {
+		t.Fatalf("CreatePeriod: %v", err)
+	}
+
+	// Sin control/planilla previos: no debe crear nada ni fallar.
+	got, err := svc.GetPdt601PlanillaOnly(co.ID, "2026-07")
+	if err != nil {
+		t.Fatalf("GetPdt601PlanillaOnly (vacío): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("esperaba nil sin control/planilla, got=%+v", got)
+	}
+	var controlCount int64
+	if err := db.Model(&models.SupervisorMonthlyControl{}).Count(&controlCount).Error; err != nil {
+		t.Fatalf("count controls: %v", err)
+	}
+	if controlCount != 0 {
+		t.Fatalf("GetPdt601PlanillaOnly no debería crear monthly_control, count=%d", controlCount)
+	}
+
+	// Tras guardar la planilla (vía el flujo normal, que sí crea control), la lectura pura la trae.
+	if _, err := svc.SavePdt601Planilla(co.ID, "2026-07", Pdt601PlanillaInput{Afp: 250}); err != nil {
+		t.Fatalf("SavePdt601Planilla: %v", err)
+	}
+	got2, err := svc.GetPdt601PlanillaOnly(co.ID, "2026-07")
+	if err != nil {
+		t.Fatalf("GetPdt601PlanillaOnly (con datos): %v", err)
+	}
+	if got2 == nil || got2.Afp != 250 {
+		t.Fatalf("planilla leída inesperada: %+v", got2)
+	}
+}
+
+// TestSavePdt601PlanillaSinPlanilla cubre marcar "sin planilla": persiste el flag, se refleja en
+// el detalle y el listado, y el filtro sintético "sin_planilla" solo trae esas empresas.
+func TestSavePdt601PlanillaSinPlanilla(t *testing.T) {
+	db := setupPdt601TestDB(t)
+	svc := NewSupervisorService()
+	coA := seedEstudioCompany(t, db, "P002")
+	coB := seedEstudioCompany(t, db, "P003")
+
+	if _, err := svc.CreatePeriod("2026-07", "test"); err != nil {
+		t.Fatalf("CreatePeriod: %v", err)
+	}
+
+	// Empresa A: sin planilla (marcada, sin importes).
+	savedA, err := svc.SavePdt601Planilla(coA.ID, "2026-07", Pdt601PlanillaInput{SinPlanilla: true})
+	if err != nil {
+		t.Fatalf("SavePdt601Planilla A: %v", err)
+	}
+	if savedA.Planilla == nil || !savedA.Planilla.SinPlanilla {
+		t.Fatalf("planilla A debería tener sin_planilla=true: %+v", savedA.Planilla)
+	}
+	if savedA.Planilla.TotalAportes != 0 {
+		t.Fatalf("planilla A total_aportes=%v want 0", savedA.Planilla.TotalAportes)
+	}
+
+	// Empresa B: planilla normal con importes.
+	if _, err := svc.SavePdt601Planilla(coB.ID, "2026-07", Pdt601PlanillaInput{Essalud: 100}); err != nil {
+		t.Fatalf("SavePdt601Planilla B: %v", err)
+	}
+
+	// El filtro sintético "sin_planilla" solo trae la empresa A.
+	filtered, err := svc.ListPdt601(Pdt601ListParams{PeriodYM: "2026-07", Status: "sin_planilla", Page: 1, PerPage: 20})
+	if err != nil {
+		t.Fatalf("ListPdt601 filtrado: %v", err)
+	}
+	if len(filtered.Rows) != 1 || filtered.Rows[0].CompanyID != coA.ID {
+		t.Fatalf("filtro sin_planilla trajo filas inesperadas: %+v", filtered.Rows)
+	}
+	if filtered.Rows[0].IsOverdue {
+		t.Fatalf("fila sin_planilla no debería marcarse vencida")
+	}
+}

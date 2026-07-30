@@ -3,6 +3,7 @@ import type { SupervisorDeclaration } from './supervisors';
 
 /** Datos de planilla PDT 601 del período (salida del backend). */
 export interface Pdt601Planilla {
+  sin_planilla: boolean;
   trabajadores_onp: number;
   trabajadores_afp: number;
   trabajadores_total: number;
@@ -25,6 +26,7 @@ export interface Pdt601Planilla {
 
 /** Cuerpo que envía el supervisor al guardar la planilla (fechas como AAAA-MM-DD). */
 export interface Pdt601PlanillaInput {
+  sin_planilla: boolean;
   trabajadores_onp: number;
   trabajadores_afp: number;
   essalud: number;
@@ -90,6 +92,8 @@ export const pdt601Service = {
     period_ym: string;
     q?: string;
     status?: string;
+    dig?: string;
+    assistant_user_id?: number;
     page?: number;
     per_page?: number;
   }): Promise<Pdt601ListResponse> {
@@ -100,6 +104,15 @@ export const pdt601Service = {
   async getDetail(companyId: number, periodYm: string): Promise<Pdt601Detail> {
     const res = await client.get<{ data: Pdt601Detail }>(
       `/supervisors/activity-modules/pdt-601/companies/${companyId}`,
+      { params: { period_ym: periodYm } },
+    );
+    return res.data.data;
+  },
+
+  /** Lectura pura de la planilla del período (sin crear control/declaración PDT 601). */
+  async getPlanillaOnly(companyId: number, periodYm: string): Promise<Pdt601Planilla | null> {
+    const res = await client.get<{ data: Pdt601Planilla | null }>(
+      `/supervisors/activity-modules/pdt-601/companies/${companyId}/planilla`,
       { params: { period_ym: periodYm } },
     );
     return res.data.data;

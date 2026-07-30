@@ -122,10 +122,13 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 9,
   },
-  infoCell: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9 },
   infoCellDivider: { borderLeftWidth: 1, borderLeftColor: V2.rule },
   infoLabel: { fontSize: 5.8, fontWeight: 700, color: V2.muted, textTransform: 'uppercase', letterSpacing: 0.3 },
   infoValue: { fontSize: 7.6, fontWeight: 700, color: V2.text, marginTop: 1.5, lineHeight: 1.2 },
+  /** Columna con 2 filas apiladas (p. ej. Cliente encima de RUC). */
+  infoGroupCell: { flex: 1, paddingHorizontal: 9 },
+  infoStackRow: { flexDirection: 'row', alignItems: 'center' },
+  infoStackRowSpacing: { marginBottom: 5 },
 
   /* Aviso borrador */
   draft: {
@@ -536,21 +539,26 @@ function HeaderV2({
 }
 
 function InfoStrip({
-  items,
+  groups,
 }: {
-  items: Array<{ label: string; value: string; color: string; icon: PdfIconName }>;
+  /** Cada grupo es una columna; sus filas se apilan una debajo de otra dentro de esa columna. */
+  groups: Array<Array<{ label: string; value: string; color: string; icon: PdfIconName }>>;
 }) {
   return (
     <View style={s.infoStrip}>
-      {items.map((it, idx) => (
-        <View key={it.label} style={[s.infoCell, idx > 0 ? s.infoCellDivider : {}]}>
-          <View style={{ marginRight: 6 }}>
-            <IconBadge name={it.icon} size={17} bg={it.color} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.infoLabel}>{it.label}</Text>
-            <Text style={s.infoValue}>{it.value}</Text>
-          </View>
+      {groups.map((group, idx) => (
+        <View key={group.map((it) => it.label).join('+')} style={[s.infoGroupCell, idx > 0 ? s.infoCellDivider : {}]}>
+          {group.map((it, i) => (
+            <View key={it.label} style={[s.infoStackRow, i < group.length - 1 ? s.infoStackRowSpacing : {}]}>
+              <View style={{ marginRight: 6 }}>
+                <IconBadge name={it.icon} size={17} bg={it.color} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.infoLabel}>{it.label}</Text>
+                <Text style={s.infoValue}>{it.value}</Text>
+              </View>
+            </View>
+          ))}
         </View>
       ))}
     </View>
@@ -1006,11 +1014,15 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <HeaderV2 firm={firm} logoPng={logoPng} liqNumber={liqNumber} />
 
         <InfoStrip
-          items={[
-            { label: 'Cliente', value: client?.business_name ?? '—', color: V2.blue, icon: 'users' },
-            { label: 'RUC', value: client?.ruc ?? '—', color: V2.green, icon: 'addressCard' },
-            { label: 'Periodo', value: periodDisplay, color: V2.navy, icon: 'calendarDays' },
-            { label: 'Fecha de emisión', value: issueStr, color: V2.green, icon: 'calendarCheck' },
+          groups={[
+            [
+              { label: 'Cliente', value: client?.business_name ?? '—', color: V2.blue, icon: 'users' },
+              { label: 'RUC', value: client?.ruc ?? '—', color: V2.green, icon: 'addressCard' },
+            ],
+            [
+              { label: 'Periodo', value: periodDisplay, color: V2.navy, icon: 'calendarDays' },
+              { label: 'Fecha de emisión', value: issueStr, color: V2.green, icon: 'calendarCheck' },
+            ],
           ]}
         />
 

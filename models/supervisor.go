@@ -192,6 +192,8 @@ func (SupervisorTaxLiquidation) TableName() string { return "supervisor_tax_liqu
 type SupervisorPdt601Planilla struct {
 	ID               uint `gorm:"primaryKey" json:"id"`
 	MonthlyControlID uint `gorm:"not null;uniqueIndex" json:"monthly_control_id"`
+	// La empresa no tiene planilla en este período: no se exige registrar nada más.
+	SinPlanilla bool `gorm:"not null;default:false" json:"sin_planilla"`
 	// Nro. de trabajadores (el TOTAL se deriva: ONP + AFP).
 	TrabajadoresONP int `gorm:"not null;default:0" json:"trabajadores_onp"`
 	TrabajadoresAFP int `gorm:"not null;default:0" json:"trabajadores_afp"`
