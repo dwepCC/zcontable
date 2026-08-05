@@ -44,7 +44,7 @@ import { formatIssueDateForPdf } from './pdfLiquidationTheme';
 import { PdfIcon, type PdfIconName } from './pdfIcons';
 import { PDF_TAX_RECOMMENDATIONS, PDF_TAX_RECOMMENDATIONS_TITLE } from './pdfTaxRecommendations';
 import type { LiquidationPdfAssets } from './pdfLiquidationFooter';
-import { lineTypeLabelForPdf, settlementTotalsForPdf, taxSettlementPdfFilename } from './taxSettlementDocument';
+import { settlementTotalsForPdf, taxSettlementPdfFilename } from './taxSettlementDocument';
 
 /**
  * Diseño v2 de la liquidación: misma información que `taxSettlementDocument`,
@@ -82,7 +82,7 @@ const s = StyleSheet.create({
   },
 
   /* Encabezado */
-  header: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
   headerLeft: { width: '52%', paddingRight: 14 },
   logo: { width: 132, height: 34, objectFit: 'contain', marginBottom: 3 },
   firmName: { fontSize: 15, fontWeight: 700, color: V2.green, marginBottom: 3 },
@@ -119,8 +119,8 @@ const s = StyleSheet.create({
     borderColor: V2.border,
     borderRadius: 5,
     backgroundColor: V2.white,
-    paddingVertical: 8,
-    marginBottom: 9,
+    paddingVertical: 6,
+    marginBottom: 6,
   },
   infoCellDivider: { borderLeftWidth: 1, borderLeftColor: V2.rule },
   infoLabel: { fontSize: 5.8, fontWeight: 700, color: V2.muted, textTransform: 'uppercase', letterSpacing: 0.3 },
@@ -135,10 +135,10 @@ const s = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: V2.amber,
     backgroundColor: V2.amberSoft,
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 9,
     borderRadius: 3,
-    marginBottom: 9,
+    marginBottom: 6,
   },
   draftText: { fontSize: 7, fontWeight: 700, color: V2.amber },
 
@@ -147,10 +147,10 @@ const s = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: V2.blue,
     backgroundColor: V2.bg,
-    paddingVertical: 7,
+    paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 3,
-    marginBottom: 11,
+    marginBottom: 7,
   },
   introText: { fontSize: 7.6, color: V2.text, lineHeight: 1.4 },
 
@@ -160,34 +160,34 @@ const s = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: V2.navy,
     borderRadius: 4,
-    paddingVertical: 7,
+    paddingVertical: 5,
     paddingHorizontal: 10,
-    marginBottom: 9,
+    marginBottom: 6,
   },
   bandText: { fontSize: 9, fontWeight: 700, color: V2.white, textTransform: 'uppercase', letterSpacing: 0.5 },
 
   /* Título de bloque fiscal */
-  subHeading: { marginBottom: 6 },
+  subHeading: { marginBottom: 4 },
   subHeadingText: { fontSize: 9, fontWeight: 700, color: V2.blue, textTransform: 'uppercase', letterSpacing: 0.3 },
-  subHeadingRule: { borderBottomWidth: 1, borderBottomColor: V2.rule, marginTop: 4 },
+  subHeadingRule: { borderBottomWidth: 1, borderBottomColor: V2.rule, marginTop: 3 },
 
   /* Split principal / lateral */
-  split: { flexDirection: 'row', marginBottom: 10 },
+  split: { flexDirection: 'row', marginBottom: 6 },
   splitMain: { width: '64%', paddingRight: 12 },
   splitAside: { width: '36%' },
 
   /* Título numerado */
-  stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
+  stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   stepText: { fontSize: 8.4, fontWeight: 700, color: V2.text, textTransform: 'uppercase', letterSpacing: 0.3 },
 
   /* Tabla */
   table: { borderWidth: 1, borderColor: V2.border, borderRadius: 4, overflow: 'hidden' },
   tHead: { flexDirection: 'row', backgroundColor: V2.bg, borderBottomWidth: 1, borderBottomColor: V2.border },
-  tHeadCell: { paddingVertical: 5, paddingHorizontal: 5 },
+  tHeadCell: { paddingVertical: 3.5, paddingHorizontal: 5 },
   tHeadText: { fontSize: 5.9, fontWeight: 700, color: V2.muted, textTransform: 'uppercase', letterSpacing: 0.3 },
   tRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: V2.rule },
   tRowLast: { borderBottomWidth: 0 },
-  tCell: { paddingVertical: 4.5, paddingHorizontal: 5 },
+  tCell: { paddingVertical: 3, paddingHorizontal: 5 },
   tText: { fontSize: 7, color: V2.text },
   tNum: { fontSize: 7, color: V2.text, textAlign: 'right' },
 
@@ -195,7 +195,7 @@ const s = StyleSheet.create({
   sumRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2.5,
     paddingHorizontal: 5,
     borderBottomWidth: 0.5,
     borderBottomColor: V2.rule,
@@ -217,9 +217,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#C9EBD9',
     borderRadius: 5,
-    paddingVertical: 9,
+    paddingVertical: 6,
     paddingHorizontal: 10,
-    marginBottom: 7,
+    marginBottom: 5,
   },
   pendLabel: { fontSize: 6.6, fontWeight: 700, color: V2.greenDark, textTransform: 'uppercase', letterSpacing: 0.3 },
   pendAmount: { fontSize: 13, fontWeight: 700, color: V2.greenDark, marginTop: 1 },
@@ -230,11 +230,11 @@ const s = StyleSheet.create({
     borderColor: V2.border,
     borderRadius: 5,
     backgroundColor: V2.white,
-    paddingVertical: 8,
+    paddingVertical: 5,
     paddingHorizontal: 10,
-    marginBottom: 7,
+    marginBottom: 4,
   },
-  infoCardHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  infoCardHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
   infoCardTitle: { fontSize: 7.6, fontWeight: 700, color: V2.navy },
   infoCardText: { fontSize: 6.8, color: V2.muted, lineHeight: 1.45 },
 
@@ -244,9 +244,9 @@ const s = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: V2.navy,
     borderRadius: 4,
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 10,
-    marginBottom: 11,
+    marginBottom: 7,
   },
   totalBandLabel: { flex: 1, fontSize: 9, fontWeight: 700, color: V2.white, textTransform: 'uppercase', letterSpacing: 0.5 },
   totalBandBox: {
@@ -505,7 +505,7 @@ function HeaderV2({
     <View style={s.header}>
       <View style={s.headerLeft}>
         {logoPng ? <Image style={s.logo} src={logoPng} /> : <Text style={s.firmName}>{firmName}</Text>}
-        <Text style={s.tagline}>Contabilidad clara, decisiones inteligentes.</Text>
+        <Text style={s.tagline}>Comprometidos con el éxito de tu empresa.</Text>
         {contactLines.map((line) => (
           <View key={line.icon} style={s.contactRow}>
             <View style={{ width: 9, marginRight: 5, marginTop: 1, alignItems: 'center' }}>
@@ -1043,63 +1043,60 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
 
         {sections ? renderSections(sections) : null}
 
-        <Band title="Honorarios y cargos del estudio" icon="userTie" />
-        <Split
-          main={
-            <View style={s.table}>
-              <View style={s.tHead}>
-                <View style={[s.tHeadCell, { width: '18%' }]}>
-                  <Text style={s.tHeadText}>Tipo</Text>
+        {/* Regla del PDF de liquidación: la 2ª página siempre empieza en Honorarios. */}
+        <View break>
+          <Band title="Honorarios y cargos del estudio" icon="userTie" />
+          <Split
+            main={
+              <View style={s.table}>
+                <View style={s.tHead}>
+                  <View style={[s.tHeadCell, { width: '52%' }]}>
+                    <Text style={s.tHeadText}>Concepto</Text>
+                  </View>
+                  <View style={[s.tHeadCell, { width: '24%' }]}>
+                    <Text style={s.tHeadText}>Periodo</Text>
+                  </View>
+                  <View style={[s.tHeadCell, { width: '24%' }]}>
+                    <Text style={[s.tHeadText, { textAlign: 'right' }]}>Monto</Text>
+                  </View>
                 </View>
-                <View style={[s.tHeadCell, { width: '16%' }]}>
-                  <Text style={s.tHeadText}>Periodo</Text>
-                </View>
-                <View style={[s.tHeadCell, { width: '44%' }]}>
-                  <Text style={s.tHeadText}>Concepto</Text>
-                </View>
-                <View style={[s.tHeadCell, { width: '24%' }]}>
-                  <Text style={[s.tHeadText, { textAlign: 'right' }]}>Monto</Text>
-                </View>
+                {sortedLines.length > 0 ? (
+                  sortedLines.map((ln, idx) => (
+                    <View key={ln.id ?? idx} style={[s.tRow, idx === sortedLines.length - 1 ? s.tRowLast : {}]}>
+                      <View style={[s.tCell, { width: '52%' }]}>
+                        <Text style={s.tText}>{ln.concept}</Text>
+                      </View>
+                      <View style={[s.tCell, { width: '24%' }]}>
+                        <Text style={s.tText}>
+                          {(ln.period_ym ?? '').trim() ||
+                            (ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : '') ||
+                            settlement.liquidation_period ||
+                            '—'}
+                        </Text>
+                      </View>
+                      <View style={[s.tCell, { width: '24%' }]}>
+                        <Text style={s.tNum}>{formatTaxMoney(ln.amount)}</Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={[s.tRow, s.tRowLast]}>
+                    <View style={[s.tCell, { width: '100%' }]}>
+                      <Text style={s.tText}>Sin líneas.</Text>
+                    </View>
+                  </View>
+                )}
               </View>
-              {sortedLines.length > 0 ? (
-                sortedLines.map((ln, idx) => (
-                  <View key={ln.id ?? idx} style={[s.tRow, idx === sortedLines.length - 1 ? s.tRowLast : {}]}>
-                    <View style={[s.tCell, { width: '18%' }]}>
-                      <Text style={s.tText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
-                    </View>
-                    <View style={[s.tCell, { width: '16%' }]}>
-                      <Text style={s.tText}>
-                        {(ln.period_ym ?? '').trim() ||
-                          (ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : '') ||
-                          settlement.liquidation_period ||
-                          '—'}
-                      </Text>
-                    </View>
-                    <View style={[s.tCell, { width: '44%' }]}>
-                      <Text style={s.tText}>{ln.concept}</Text>
-                    </View>
-                    <View style={[s.tCell, { width: '24%' }]}>
-                      <Text style={s.tNum}>{formatTaxMoney(ln.amount)}</Text>
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <View style={[s.tRow, s.tRowLast]}>
-                  <View style={[s.tCell, { width: '100%' }]}>
-                    <Text style={s.tText}>Sin líneas.</Text>
-                  </View>
-                </View>
-              )}
-            </View>
-          }
-          aside={
-            <PendingCard
-              label="Total honorarios a pagar"
-              amount={formatTaxMoney(totals.honorarios)}
-              icon="wallet"
-            />
-          }
-        />
+            }
+            aside={
+              <PendingCard
+                label="Total honorarios a pagar"
+                amount={formatTaxMoney(totals.honorarios)}
+                icon="wallet"
+              />
+            }
+          />
+        </View>
 
         {settlement.notes?.trim() ? (
           <View wrap={false} style={s.notes}>

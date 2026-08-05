@@ -6,6 +6,7 @@ import CompanyDigitoFilter from '../../components/finance/CompanyDigitoFilter';
 import {
   pdt601StatusBadgeClass,
   pdt601StatusLabel,
+  pdt601RowBgClass,
   PDT601_STATUS_FILTER,
 } from '../../components/activity/pdt601Config';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
@@ -262,7 +263,7 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                 rows.map((row) => {
                   const pl = row.planilla;
                   return (
-                    <tr key={row.company_id} className="hover:bg-slate-50/80">
+                    <tr key={row.company_id} className={pdt601RowBgClass(pl?.sin_planilla, row.timeliness)}>
                       <td className={`${TD} font-mono`}>{row.code || '—'}</td>
                       <td className={TD}>{row.dig || '—'}</td>
                       <td className={`${TD} max-w-[14rem] font-medium`} title={row.business_name}>
