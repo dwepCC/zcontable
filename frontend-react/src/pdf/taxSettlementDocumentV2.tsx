@@ -171,10 +171,15 @@ const s = StyleSheet.create({
   subHeadingText: { fontSize: 9, fontWeight: 700, color: V2.blue, textTransform: 'uppercase', letterSpacing: 0.3 },
   subHeadingRule: { borderBottomWidth: 1, borderBottomColor: V2.rule, marginTop: 4 },
 
-  /* Split principal / lateral */
-  split: { flexDirection: 'row', marginBottom: 10 },
-  splitMain: { width: '64%', paddingRight: 12 },
-  splitAside: { width: '36%' },
+  /* Tarjetas de resumen: SIEMPRE debajo de la tabla, nunca al lado en la misma fila flex.
+   * react-pdf no reparte bien una fila que mezcla una columna partible (tabla larga) con una
+   * columna no-partible (tarjeta) cuando esa fila debe cruzar una página: produce texto
+   * superpuesto/duplicado. Poniendo la tabla a ancho completo y las tarjetas debajo, en flujo
+   * normal de arriba hacia abajo, se elimina ese riesgo. Ancho fijo (no flex) para que una sola
+   * tarjeta no se estire a todo el ancho cuando no hay pareja (p. ej. honorarios).
+   */
+  cardsRow: { flexDirection: 'row', marginTop: 2, marginBottom: 10 },
+  cardsRowItem: { width: '48%', marginRight: '4%' },
 
   /* Título numerado */
   stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
@@ -362,18 +367,32 @@ function Band({ title, icon }: { title: string; icon: PdfIconName }) {
   );
 }
 
-function SubHeading({ title }: { title: string }) {
+/**
+ * `minPresenceAhead` reserva espacio mínimo antes de dibujar el título: si no queda suficiente
+ * hueco en la página actual, react-pdf difiere TODO el bloque (título incluido) a la siguiente
+ * página, evitando el título huérfano solo al pie de página con su contenido en la otra hoja.
+ * A diferencia de `wrap={false}`, esto no obliga a que el resto del bloque quepa entero.
+ */
+function SubHeading({ title, minPresenceAhead = 60 }: { title: string; minPresenceAhead?: number }) {
   return (
-    <View style={s.subHeading}>
+    <View minPresenceAhead={minPresenceAhead} style={s.subHeading}>
       <Text style={s.subHeadingText}>{title}</Text>
       <View style={s.subHeadingRule} />
     </View>
   );
 }
 
-function StepTitle({ title, icon }: { title: string; icon: PdfIconName }) {
+function StepTitle({
+  title,
+  icon,
+  minPresenceAhead = 60,
+}: {
+  title: string;
+  icon: PdfIconName;
+  minPresenceAhead?: number;
+}) {
   return (
-    <View style={s.stepRow}>
+    <View minPresenceAhead={minPresenceAhead} style={s.stepRow}>
       <View style={{ marginRight: 6 }}>
         <PdfIcon name={icon} size={10} color={V2.green} />
       </View>
@@ -383,24 +402,23 @@ function StepTitle({ title, icon }: { title: string; icon: PdfIconName }) {
 }
 
 /**
- * Fila principal + columna lateral. `keepTogether` evita que la tarjeta lateral
- * quede huérfana en la página siguiente cuando el bloque es compacto.
+ * Fila de tarjetas cortas debajo de una tabla (nunca al lado de contenido partible — ver nota
+ * en el estilo `cardsRow`). Cada hijo directo debe ser un `CardsRowItem`.
+ *
+ * `wrap={false}` aquí SÍ es seguro (a diferencia del extinto `Split`): los hijos de esta fila
+ * son siempre tarjetas cortas ya atómicas (PendingCard/InfoCard, ~50-70pt), nunca una tabla de
+ * longitud variable. Mantiene ambas tarjetas juntas en la misma página en vez de partir el par.
  */
-function Split({
-  main,
-  aside,
-  keepTogether = false,
-}: {
-  main: ReactNode;
-  aside: ReactNode;
-  keepTogether?: boolean;
-}) {
+function CardsRow({ children }: { children: ReactNode }) {
   return (
-    <View wrap={keepTogether ? false : undefined} style={s.split}>
-      <View style={s.splitMain}>{main}</View>
-      <View style={s.splitAside}>{aside}</View>
+    <View wrap={false} style={s.cardsRow}>
+      {children}
     </View>
   );
+}
+
+function CardsRowItem({ children }: { children: ReactNode }) {
+  return <View style={s.cardsRowItem}>{children}</View>;
 }
 
 function PendingCard({
@@ -458,7 +476,7 @@ function AmountTable({ rows }: { rows: Array<{ label: string; value: string }> }
   if (rows.length === 0) return null;
   return (
     <View style={s.table}>
-      <View style={s.tHead}>
+      <View wrap={false} style={s.tHead}>
         <View style={[s.tHeadCell, { width: '68%' }]}>
           <Text style={s.tHeadText}>Concepto</Text>
         </View>
@@ -467,7 +485,11 @@ function AmountTable({ rows }: { rows: Array<{ label: string; value: string }> }
         </View>
       </View>
       {rows.map((r, idx) => (
-        <View key={`${r.label}-${idx}`} style={[s.tRow, idx === rows.length - 1 ? s.tRowLast : {}]}>
+        <View
+          key={`${r.label}-${idx}`}
+          wrap={false}
+          style={[s.tRow, idx === rows.length - 1 ? s.tRowLast : {}]}
+        >
           <View style={[s.tCell, { width: '68%' }]}>
             <Text style={s.tText}>{r.label}</Text>
           </View>
@@ -576,7 +598,7 @@ function IgvTable({ p621 }: { p621: TaxSectionPdt621 }) {
   );
   return (
     <View style={s.table}>
-      <View style={s.tHead}>
+      <View wrap={false} style={s.tHead}>
         <View style={[s.tHeadCell, { width: COL_C }]}>
           <Text style={s.tHeadText}>Concepto</Text>
         </View>
@@ -587,7 +609,7 @@ function IgvTable({ p621 }: { p621: TaxSectionPdt621 }) {
         ))}
       </View>
       {rows.map(({ label, row }, idx) => (
-        <View key={label} style={[s.tRow, idx === rows.length - 1 ? s.tRowLast : {}]}>
+        <View key={label} wrap={false} style={[s.tRow, idx === rows.length - 1 ? s.tRowLast : {}]}>
           <View style={[s.tCell, { width: COL_C }]}>
             <Text style={s.tText}>{label}</Text>
           </View>
@@ -665,76 +687,67 @@ function Pdt621Block({ p621, rentaRatePct }: { p621: TaxSectionPdt621; rentaRate
     <Fragment>
       <SubHeading title="PDT 621 — IGV y Renta" />
 
-      <Split
-        main={
-          <Fragment>
-            <StepTitle title="1. IGV mensual" icon="cartShopping" />
-            <IgvTable p621={p621} />
-            <View style={{ marginTop: 4 }}>
-              {igvSummary.map((r) => (
-                <SumRow key={r.label} label={r.label} value={r.value} tone={r.tone} />
-              ))}
-              {detrLabelIgv ? (
-                <SumRow label={detrLabelIgv} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmount(p621))} />
-              ) : null}
-              <SumRow
-                label={igvBalance.label}
-                value={
-                  isNonZeroTaxAmount(igvBalance.amount)
-                    ? formatPdt621IgvBalanceAmount({ label: igvBalance.label, amount: igvBalance.amount })
-                    : '-'
-                }
-                tone="green"
-              />
-            </View>
-          </Fragment>
-        }
-        aside={
-          <Fragment>
-            {igvPayableBefore > 0 ? (
-              <PendingCard
-                label="IGV pendiente"
-                amount={formatTaxPdfTotalMoney(getPdt621IgvNetAfterDetraction(p621))}
-                icon="receipt"
-              />
-            ) : null}
-            <InfoCard
-              title="¿Qué es el IGV?"
-              text="Impuesto General a las Ventas. Se aplica a la venta de bienes y prestación de servicios."
+      <StepTitle title="1. IGV mensual" icon="cartShopping" />
+      <IgvTable p621={p621} />
+      <View style={{ marginTop: 4, marginBottom: 6 }}>
+        {igvSummary.map((r) => (
+          <SumRow key={r.label} label={r.label} value={r.value} tone={r.tone} />
+        ))}
+        {detrLabelIgv ? (
+          <SumRow label={detrLabelIgv} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmount(p621))} />
+        ) : null}
+        <SumRow
+          label={igvBalance.label}
+          value={
+            isNonZeroTaxAmount(igvBalance.amount)
+              ? formatPdt621IgvBalanceAmount({ label: igvBalance.label, amount: igvBalance.amount })
+              : '-'
+          }
+          tone="green"
+        />
+      </View>
+      <CardsRow>
+        {igvPayableBefore > 0 ? (
+          <CardsRowItem>
+            <PendingCard
+              label="IGV pendiente"
+              amount={formatTaxPdfTotalMoney(getPdt621IgvNetAfterDetraction(p621))}
+              icon="receipt"
             />
-          </Fragment>
-        }
-      />
+          </CardsRowItem>
+        ) : null}
+        <CardsRowItem>
+          <InfoCard
+            title="¿Qué es el IGV?"
+            text="Impuesto General a las Ventas. Se aplica a la venta de bienes y prestación de servicios."
+          />
+        </CardsRowItem>
+      </CardsRow>
 
-      <Split
-        keepTogether
-        main={
-          <Fragment>
-            <StepTitle title="2. Renta mensual" icon="chartColumn" />
-            <AmountTable rows={rentaSummary.map((r) => ({ label: r.label, value: r.value }))} />
-            {detrLabelRenta ? (
-              <View style={{ marginTop: 4 }}>
-                <SumRow label={detrLabelRenta} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmountRenta(p621))} />
-              </View>
-            ) : null}
-          </Fragment>
-        }
-        aside={
-          <Fragment>
-            {rentaPayableBefore > 0 ? (
-              <PendingCard
-                label="Renta pendiente"
-                amount={formatTaxPdfTotalMoney(getPdt621RentaNetAfterDetraction(p621))}
-                icon="chartColumn"
-              />
-            ) : null}
-            <InfoCard
-              title="¿Qué es la Renta?"
-              text="Impuesto a las utilidades obtenidas por la actividad económica de la empresa."
+      <StepTitle title="2. Renta mensual" icon="chartColumn" />
+      <AmountTable rows={rentaSummary.map((r) => ({ label: r.label, value: r.value }))} />
+      {detrLabelRenta ? (
+        <View style={{ marginTop: 4, marginBottom: 6 }}>
+          <SumRow label={detrLabelRenta} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmountRenta(p621))} />
+        </View>
+      ) : null}
+      <CardsRow>
+        {rentaPayableBefore > 0 ? (
+          <CardsRowItem>
+            <PendingCard
+              label="Renta pendiente"
+              amount={formatTaxPdfTotalMoney(getPdt621RentaNetAfterDetraction(p621))}
+              icon="chartColumn"
             />
-          </Fragment>
-        }
-      />
+          </CardsRowItem>
+        ) : null}
+        <CardsRowItem>
+          <InfoCard
+            title="¿Qué es la Renta?"
+            text="Impuesto a las utilidades obtenidas por la actividad económica de la empresa."
+          />
+        </CardsRowItem>
+      </CardsRow>
     </Fragment>
   );
 }
@@ -756,19 +769,22 @@ function SimpleBlock({
   infoText: string;
 }) {
   return (
-    <View wrap={false} minPresenceAhead={90}>
+    <Fragment>
+      {/* Sin wrap={false} aquí: solo el título reserva espacio mínimo (minPresenceAhead).
+          La tabla puede partirse entre filas si la sección no cabe entera en la página; las
+          tarjetas van DEBAJO de la tabla (nunca al lado) para no cruzar una página junto a
+          contenido partible. */}
       <SubHeading title={title} />
-      <Split
-        keepTogether
-        main={<AmountTable rows={rows} />}
-        aside={
-          <Fragment>
-            <PendingCard label={pendingLabel} amount={formatTaxPdfTotalMoney(pendingAmount)} />
-            <InfoCard title={infoTitle} text={infoText} />
-          </Fragment>
-        }
-      />
-    </View>
+      <AmountTable rows={rows} />
+      <CardsRow>
+        <CardsRowItem>
+          <PendingCard label={pendingLabel} amount={formatTaxPdfTotalMoney(pendingAmount)} />
+        </CardsRowItem>
+        <CardsRowItem>
+          <InfoCard title={infoTitle} text={infoText} />
+        </CardsRowItem>
+      </CardsRow>
+    </Fragment>
   );
 }
 
@@ -1044,62 +1060,64 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         {sections ? renderSections(sections) : null}
 
         <Band title="Honorarios y cargos del estudio" icon="userTie" />
-        <Split
-          main={
-            <View style={s.table}>
-              <View style={s.tHead}>
-                <View style={[s.tHeadCell, { width: '18%' }]}>
-                  <Text style={s.tHeadText}>Tipo</Text>
+        <View style={s.table}>
+          <View wrap={false} style={s.tHead}>
+            <View style={[s.tHeadCell, { width: '18%' }]}>
+              <Text style={s.tHeadText}>Tipo</Text>
+            </View>
+            <View style={[s.tHeadCell, { width: '16%' }]}>
+              <Text style={s.tHeadText}>Periodo</Text>
+            </View>
+            <View style={[s.tHeadCell, { width: '44%' }]}>
+              <Text style={s.tHeadText}>Concepto</Text>
+            </View>
+            <View style={[s.tHeadCell, { width: '24%' }]}>
+              <Text style={[s.tHeadText, { textAlign: 'right' }]}>Monto</Text>
+            </View>
+          </View>
+          {sortedLines.length > 0 ? (
+            sortedLines.map((ln, idx) => (
+              <View
+                key={ln.id ?? idx}
+                wrap={false}
+                style={[s.tRow, idx === sortedLines.length - 1 ? s.tRowLast : {}]}
+              >
+                <View style={[s.tCell, { width: '18%' }]}>
+                  <Text style={s.tText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
                 </View>
-                <View style={[s.tHeadCell, { width: '16%' }]}>
-                  <Text style={s.tHeadText}>Periodo</Text>
+                <View style={[s.tCell, { width: '16%' }]}>
+                  <Text style={s.tText}>
+                    {(ln.period_ym ?? '').trim() ||
+                      (ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : '') ||
+                      settlement.liquidation_period ||
+                      '—'}
+                  </Text>
                 </View>
-                <View style={[s.tHeadCell, { width: '44%' }]}>
-                  <Text style={s.tHeadText}>Concepto</Text>
+                <View style={[s.tCell, { width: '44%' }]}>
+                  <Text style={s.tText}>{ln.concept}</Text>
                 </View>
-                <View style={[s.tHeadCell, { width: '24%' }]}>
-                  <Text style={[s.tHeadText, { textAlign: 'right' }]}>Monto</Text>
+                <View style={[s.tCell, { width: '24%' }]}>
+                  <Text style={s.tNum}>{formatTaxMoney(ln.amount)}</Text>
                 </View>
               </View>
-              {sortedLines.length > 0 ? (
-                sortedLines.map((ln, idx) => (
-                  <View key={ln.id ?? idx} style={[s.tRow, idx === sortedLines.length - 1 ? s.tRowLast : {}]}>
-                    <View style={[s.tCell, { width: '18%' }]}>
-                      <Text style={s.tText}>{lineTypeLabelForPdf(ln.line_type)}</Text>
-                    </View>
-                    <View style={[s.tCell, { width: '16%' }]}>
-                      <Text style={s.tText}>
-                        {(ln.period_ym ?? '').trim() ||
-                          (ln.period_date && ln.period_date.length >= 10 ? ln.period_date.slice(0, 10) : '') ||
-                          settlement.liquidation_period ||
-                          '—'}
-                      </Text>
-                    </View>
-                    <View style={[s.tCell, { width: '44%' }]}>
-                      <Text style={s.tText}>{ln.concept}</Text>
-                    </View>
-                    <View style={[s.tCell, { width: '24%' }]}>
-                      <Text style={s.tNum}>{formatTaxMoney(ln.amount)}</Text>
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <View style={[s.tRow, s.tRowLast]}>
-                  <View style={[s.tCell, { width: '100%' }]}>
-                    <Text style={s.tText}>Sin líneas.</Text>
-                  </View>
-                </View>
-              )}
+            ))
+          ) : (
+            <View style={[s.tRow, s.tRowLast]}>
+              <View style={[s.tCell, { width: '100%' }]}>
+                <Text style={s.tText}>Sin líneas.</Text>
+              </View>
             </View>
-          }
-          aside={
+          )}
+        </View>
+        <CardsRow>
+          <CardsRowItem>
             <PendingCard
               label="Total honorarios a pagar"
               amount={formatTaxMoney(totals.honorarios)}
               icon="wallet"
             />
-          }
-        />
+          </CardsRowItem>
+        </CardsRow>
 
         {settlement.notes?.trim() ? (
           <View wrap={false} style={s.notes}>
