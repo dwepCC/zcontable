@@ -7,6 +7,7 @@ import { RowActionLink } from '../../components/activity/RowActionLink';
 import {
   pdt601StatusBadgeClass,
   pdt601StatusLabel,
+  pdt601RowBgClass,
   PDT601_STATUS_FILTER,
 } from '../../components/activity/pdt601Config';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
@@ -60,6 +61,21 @@ const COL_COUNT = 24;
 
 function formatMoney(n: number): string {
   return n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Fondo de fila por estado (sin planilla / a tiempo / atrasado), OPACO siempre — para las
+ * celdas fijas (Código…Asistente). A diferencia de `pdt601RowBgClass` (usada en el resto de la
+ * fila), acá el hover NUNCA usa opacidad `/NN`: durante el scroll horizontal el contenido de las
+ * columnas no fijas pasa por debajo de estas celdas, y cualquier transparencia dejaría verlo "a
+ * través" (ver components/activity/stickyTable.ts). Mismos estados/colores que
+ * `pdt601RowBgClass`, solo que con `group-hover` opaco en vez de `hover` translúcido.
+ */
+function frozenRowBgClass(sinPlanilla: boolean | undefined, timeliness: string | undefined): string {
+  if (sinPlanilla) return 'bg-slate-100 group-hover:bg-slate-200';
+  if (timeliness === 'on_time') return 'bg-emerald-50 group-hover:bg-emerald-100';
+  if (timeliness === 'missing' || timeliness === 'late') return 'bg-red-50 group-hover:bg-red-100';
+  return 'bg-white group-hover:bg-slate-50';
 }
 
 const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
@@ -306,31 +322,34 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                 rows.map((row) => {
                   const pl = row.planilla;
                   return (
-                    <tr key={row.company_id} className="group hover:bg-slate-50/80">
+                    <tr key={row.company_id} className={`group ${pdt601RowBgClass(pl?.sin_planilla, row.timeliness)}`}>
                       <td
-                        className={`${TD} font-mono bg-white group-hover:bg-slate-50`}
+                        className={`${TD} font-mono ${frozenRowBgClass(pl?.sin_planilla, row.timeliness)}`}
                         style={frozenIdBodyCellStyle('code')}
                       >
                         {row.code || '—'}
                       </td>
-                      <td className={`${TD} bg-white group-hover:bg-slate-50`} style={frozenIdBodyCellStyle('dig')}>
+                      <td
+                        className={`${TD} ${frozenRowBgClass(pl?.sin_planilla, row.timeliness)}`}
+                        style={frozenIdBodyCellStyle('dig')}
+                      >
                         {row.dig || '—'}
                       </td>
                       <td
-                        className={`${TD} font-medium bg-white group-hover:bg-slate-50`}
+                        className={`${TD} font-medium ${frozenRowBgClass(pl?.sin_planilla, row.timeliness)}`}
                         style={frozenIdBodyCellStyle('name')}
                         title={row.business_name}
                       >
                         <span className="block truncate">{row.business_name || '—'}</span>
                       </td>
                       <td
-                        className={`${TD} font-mono whitespace-nowrap bg-white group-hover:bg-slate-50`}
+                        className={`${TD} font-mono whitespace-nowrap ${frozenRowBgClass(pl?.sin_planilla, row.timeliness)}`}
                         style={frozenIdBodyCellStyle('ruc')}
                       >
                         {row.ruc || '—'}
                       </td>
                       <td
-                        className={`${TD} bg-white group-hover:bg-slate-50`}
+                        className={`${TD} ${frozenRowBgClass(pl?.sin_planilla, row.timeliness)}`}
                         style={frozenIdBodyCellStyle('assistant')}
                         title={row.assistant_username}
                       >
