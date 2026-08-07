@@ -1111,15 +1111,15 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
             </View>
           )}
         </View>
-        <CardsRow>
-          <CardsRowItem>
-            <PendingCard
-              label="Total honorarios a pagar"
-              amount={formatTaxMoney(totals.honorarios)}
-              icon="wallet"
-            />
-          </CardsRowItem>
-        </CardsRow>
+        <View wrap={false} style={s.totalBand}>
+          <View style={{ marginRight: 7 }}>
+            <PdfIcon name="wallet" size={12} color={V2.white} />
+          </View>
+          <Text style={s.totalBandLabel}>Total honorarios a pagar</Text>
+          <View style={s.totalBandBox}>
+            <Text style={s.totalBandAmount}>{formatTaxMoney(totals.honorarios)}</Text>
+          </View>
+        </View>
 
         {settlement.notes?.trim() ? (
           <View wrap={false} style={s.notes}>
