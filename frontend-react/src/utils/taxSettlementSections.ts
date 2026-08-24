@@ -894,6 +894,25 @@ export function getPdt621RentaPayableBeforeDetraction(p621: TaxSectionPdt621): n
   return roundMoney(Math.max(p621.renta_impuesto_a_pagar, 0));
 }
 
+/**
+ * Resumen de ventas/compras del periodo para sincronizar de vuelta hacia el Control de
+ * Vencimientos PDT 621 (supervisor_pdt621_records: total_ventas, total_compras). Suma todas las
+ * tasas IGV activas de la liquidación (no solo la tasa por defecto de la empresa). total_ventas
+ * reutiliza `computePdt621RentaVentasBase` (misma regla de neteo de notas de crédito y de
+ * redondeo que usa el resto de la sección, en vez de reimplementarla con su propio redondeo).
+ */
+export function getPdt621SyncTotals(p621: TaxSectionPdt621): { total_ventas: number; total_compras: number } {
+  const totalCompras =
+    (p621.compras_18?.base ?? 0) +
+    (p621.compras_18?.no_gravadas ?? 0) +
+    (p621.compras_105?.base ?? 0) +
+    (p621.compras_105?.no_gravadas ?? 0);
+  return {
+    total_ventas: computePdt621RentaVentasBase(p621),
+    total_compras: roundMoney(totalCompras),
+  };
+}
+
 export function getPdt621AppliedDetractionAmountRenta(p621: TaxSectionPdt621): number {
   const renta = getPdt621RentaPayableBeforeDetraction(p621);
   return normalizePdt621DetractionPayment(p621.detraction_payment_renta, renta, true).applied_amount;
