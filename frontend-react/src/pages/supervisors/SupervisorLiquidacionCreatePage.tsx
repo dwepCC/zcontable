@@ -418,6 +418,7 @@ const SupervisorLiquidacionCreatePage = () => {
         rta_5ta: p601.rta_5ta,
         rh: base?.rh ?? 0,
         fecha_entrega: base?.fecha_entrega ?? '',
+        hora_entrega: base?.hora_entrega ?? '',
         observaciones: base?.observaciones ?? '',
         fecha_declaracion_pdt: base?.fecha_declaracion_pdt ?? '',
         nps: base?.nps ?? '',

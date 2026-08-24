@@ -24,7 +24,6 @@ import {
   getPdt621IgvSaldoFavorLabel,
   getPdt621PercepcionesRetencionesFieldLabel,
   getPdt621RentaNetAfterDetraction,
-  getPdt621RentaPayableBeforeDetraction,
   getPdt710AppliedDetractionAmount,
   isNonZeroTaxAmount,
   isTaxIgvRowVisibleInPdf,
@@ -170,15 +169,17 @@ const s = StyleSheet.create({
   subHeadingText: { fontSize: 9, fontWeight: 700, color: V2.blue, textTransform: 'uppercase', letterSpacing: 0.3 },
   subHeadingRule: { borderBottomWidth: 1, borderBottomColor: V2.rule, marginTop: 3 },
 
-  /* Tarjetas de resumen: SIEMPRE debajo de la tabla, nunca al lado en la misma fila flex.
-   * react-pdf no reparte bien una fila que mezcla una columna partible (tabla larga) con una
-   * columna no-partible (tarjeta) cuando esa fila debe cruzar una página: produce texto
-   * superpuesto/duplicado. Poniendo la tabla a ancho completo y las tarjetas debajo, en flujo
-   * normal de arriba hacia abajo, se elimina ese riesgo. Ancho fijo (no flex) para que una sola
-   * tarjeta no se estire a todo el ancho cuando no hay pareja (p. ej. honorarios).
+  /* Bloque partido: contenido (título+tabla+resumen) a la izquierda, tarjetas al costado
+   * a la derecha. A diferencia de `cardsRow` (que reparte 2 tarjetas cortas), aquí una de las
+   * columnas SÍ es de largo variable (tabla), así que el par entero se envuelve con
+   * `wrap={false}` en el nivel del bloque (ver `SplitBlock`) para que nunca se corte a mitad
+   * de página — o el bloque cabe entero, o salta entero a la siguiente. Como estas tablas son
+   * de tamaño acotado (conceptos fijos, no un listado de transacciones), el bloque es siempre
+   * corto y ese salto no deja huecos grandes.
    */
-  cardsRow: { flexDirection: 'row', marginTop: 2, marginBottom: 10 },
-  cardsRowItem: { width: '48%', marginRight: '4%' },
+  splitRow: { flexDirection: 'row', marginBottom: 10 },
+  splitLeft: { width: '63%', paddingRight: 12 },
+  splitRight: { width: '37%' },
 
   /* Título numerado */
   stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
@@ -194,6 +195,10 @@ const s = StyleSheet.create({
   tCell: { paddingVertical: 3, paddingHorizontal: 5 },
   tText: { fontSize: 7, color: V2.text },
   tNum: { fontSize: 7, color: V2.text, textAlign: 'right' },
+  /** Fila de total dentro de la tabla (última fila, resaltada en verde — p. ej. "Impuesto a pagar"). */
+  tRowTotal: { backgroundColor: V2.greenSoft, borderBottomWidth: 0 },
+  tTextTotal: { fontSize: 7.4, fontWeight: 700, color: V2.greenDark, textTransform: 'uppercase' },
+  tNumTotal: { fontSize: 7.4, fontWeight: 700, color: V2.greenDark, textAlign: 'right' },
 
   /* Filas resumen */
   sumRow: {
@@ -228,6 +233,19 @@ const s = StyleSheet.create({
   pendLabel: { fontSize: 6.6, fontWeight: 700, color: V2.greenDark, textTransform: 'uppercase', letterSpacing: 0.3 },
   pendAmount: { fontSize: 13, fontWeight: 700, color: V2.greenDark, marginTop: 1 },
 
+  /* Distintivo "IGV Justo": solo aparece cuando la liquidación está acogida. */
+  igvJustoTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: V2.blueSoft,
+    borderRadius: 3,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    marginBottom: 5,
+  },
+  igvJustoTagText: { fontSize: 6.4, fontWeight: 700, color: V2.blue, textTransform: 'uppercase', letterSpacing: 0.3 },
+
   /* Tarjeta explicativa */
   infoCard: {
     borderWidth: 1,
@@ -242,7 +260,9 @@ const s = StyleSheet.create({
   infoCardTitle: { fontSize: 7.6, fontWeight: 700, color: V2.navy },
   infoCardText: { fontSize: 6.8, color: V2.muted, lineHeight: 1.45 },
 
-  /* Banda total */
+  /* Banda total. La caja blanca va con el margen normal dentro de la banda (sin pegarse al
+   * borde); lo que se ajusta es el padding INTERNO de la caja — más angosto a la derecha para
+   * que el monto se acerque a su propio borde derecho. */
   totalBand: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -256,11 +276,44 @@ const s = StyleSheet.create({
   totalBandBox: {
     backgroundColor: V2.white,
     borderRadius: 3,
+    alignItems: 'flex-end',
     paddingVertical: 5,
-    paddingHorizontal: 12,
-    minWidth: 96,
+    paddingLeft: 9,
+    paddingRight: 6,
+    minWidth: 66,
   },
   totalBandAmount: { fontSize: 11, fontWeight: 700, color: V2.navy, textAlign: 'right' },
+
+  /* Banda total de honorarios: más chica que `totalBand` — debe verse subordinada al
+   * encabezado de la sección ("Honorarios y cargos del estudio"), no al mismo nivel. */
+  honorariosTotalBand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: V2.navy,
+    borderRadius: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  honorariosTotalBandLabel: {
+    flex: 1,
+    fontSize: 7.6,
+    fontWeight: 700,
+    color: V2.white,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  honorariosTotalBandBox: {
+    backgroundColor: V2.white,
+    borderRadius: 3,
+    alignItems: 'flex-end',
+    paddingVertical: 2.5,
+    paddingLeft: 7,
+    paddingRight: 5,
+    minWidth: 54,
+  },
+  honorariosTotalBandAmount: { fontSize: 9, fontWeight: 700, color: V2.navy, textAlign: 'right' },
 
   /* Pagos */
   payWrap: { flexDirection: 'row', marginTop: 4, marginBottom: 10 },
@@ -355,9 +408,18 @@ function IconBadge({
   );
 }
 
-function Band({ title, icon }: { title: string; icon: PdfIconName }) {
+function Band({
+  title,
+  icon,
+  forcePageBreak = false,
+}: {
+  title: string;
+  icon: PdfIconName;
+  /** Fuerza que esta banda (y todo lo que sigue) arranque en una página nueva. */
+  forcePageBreak?: boolean;
+}) {
   return (
-    <View style={s.band}>
+    <View style={s.band} break={forcePageBreak}>
       <View style={{ marginRight: 7 }}>
         <PdfIcon name={icon} size={11} color={V2.white} />
       </View>
@@ -371,8 +433,12 @@ function Band({ title, icon }: { title: string; icon: PdfIconName }) {
  * hueco en la página actual, react-pdf difiere TODO el bloque (título incluido) a la siguiente
  * página, evitando el título huérfano solo al pie de página con su contenido en la otra hoja.
  * A diferencia de `wrap={false}`, esto no obliga a que el resto del bloque quepa entero.
+ *
+ * 130pt (no 60): el mínimo real de un bloque completo (título + tabla + tarjeta lateral) nunca
+ * baja de ~150pt incluso para secciones cortas como ITAN; con 60pt el título igual quedaba
+ * huérfano a centímetros del pie de página, con su tabla recién empezando en la hoja siguiente.
  */
-function SubHeading({ title, minPresenceAhead = 60 }: { title: string; minPresenceAhead?: number }) {
+function SubHeading({ title, minPresenceAhead = 130 }: { title: string; minPresenceAhead?: number }) {
   return (
     <View minPresenceAhead={minPresenceAhead} style={s.subHeading}>
       <Text style={s.subHeadingText}>{title}</Text>
@@ -384,7 +450,7 @@ function SubHeading({ title, minPresenceAhead = 60 }: { title: string; minPresen
 function StepTitle({
   title,
   icon,
-  minPresenceAhead = 60,
+  minPresenceAhead = 110,
 }: {
   title: string;
   icon: PdfIconName;
@@ -401,33 +467,38 @@ function StepTitle({
 }
 
 /**
- * Fila de tarjetas cortas debajo de una tabla (nunca al lado de contenido partible — ver nota
- * en el estilo `cardsRow`). Cada hijo directo debe ser un `CardsRowItem`.
+ * Bloque partido: contenido principal (título + tabla + resumen) a la izquierda, tarjetas de
+ * monto pendiente y explicación apiladas a la derecha — ver estilo `splitRow`.
  *
- * `wrap={false}` aquí SÍ es seguro (a diferencia del extinto `Split`): los hijos de esta fila
- * son siempre tarjetas cortas ya atómicas (PendingCard/InfoCard, ~50-70pt), nunca una tabla de
- * longitud variable. Mantiene ambas tarjetas juntas en la misma página en vez de partir el par.
+ * `wrap={false}` en el nivel del bloque completo: como las tablas de estas secciones son de
+ * tamaño acotado (conceptos fiscales fijos, no un listado de transacciones), el bloque nunca es
+ * tan alto como para necesitar partirse. O cabe entero en la página actual, o react-pdf lo mueve
+ * entero a la siguiente — nunca se corta a mitad de tabla junto a una tarjeta, que es el caso que
+ * antes producía texto superpuesto/duplicado cuando se intentó una fila mixta tabla+tarjeta.
  */
-function CardsRow({ children }: { children: ReactNode }) {
+function SplitBlock({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
-    <View wrap={false} style={s.cardsRow}>
-      {children}
+    <View wrap={false} style={s.splitRow}>
+      <View style={s.splitLeft}>{left}</View>
+      <View style={s.splitRight}>{right}</View>
     </View>
   );
 }
 
-function CardsRowItem({ children }: { children: ReactNode }) {
-  return <View style={s.cardsRowItem}>{children}</View>;
-}
-
+/**
+ * `tag`, si se pasa (p. ej. "IGV Justo"), se muestra pegado al costado del monto — no arriba de
+ * la tarjeta — para que quede claro que ESE monto pendiente es el que está bajo ese régimen.
+ */
 function PendingCard({
   label,
   amount,
   icon = 'receipt',
+  tag,
 }: {
   label: string;
   amount: string;
   icon?: PdfIconName;
+  tag?: string;
 }) {
   return (
     <View wrap={false} style={s.pendCard}>
@@ -436,7 +507,14 @@ function PendingCard({
       </View>
       <View style={{ flex: 1 }}>
         <Text style={s.pendLabel}>{label}</Text>
-        <Text style={s.pendAmount}>{amount}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={s.pendAmount}>{amount}</Text>
+          {tag ? (
+            <View style={[s.igvJustoTag, { marginLeft: 6, marginBottom: 0 }]}>
+              <Text style={s.igvJustoTagText}>{tag}</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -470,9 +548,19 @@ function SumRow({ label, value, tone = 'normal' }: { label: string; value: strin
   );
 }
 
-/** Tabla simple etiqueta/monto (secciones distintas a IGV). */
-function AmountTable({ rows }: { rows: Array<{ label: string; value: string }> }) {
-  if (rows.length === 0) return null;
+/**
+ * Tabla simple etiqueta/monto (secciones distintas a IGV). `totalRow`, si se pasa, se agrega
+ * como última fila resaltada en verde (mismo tratamiento que el total de IGV) — p. ej.
+ * "Impuesto a pagar".
+ */
+function AmountTable({
+  rows,
+  totalRow,
+}: {
+  rows: Array<{ label: string; value: string }>;
+  totalRow?: { label: string; value: string };
+}) {
+  if (rows.length === 0 && !totalRow) return null;
   return (
     <View style={s.table}>
       <View wrap={false} style={s.tHead}>
@@ -487,7 +575,7 @@ function AmountTable({ rows }: { rows: Array<{ label: string; value: string }> }
         <View
           key={`${r.label}-${idx}`}
           wrap={false}
-          style={[s.tRow, idx === rows.length - 1 ? s.tRowLast : {}]}
+          style={[s.tRow, !totalRow && idx === rows.length - 1 ? s.tRowLast : {}]}
         >
           <View style={[s.tCell, { width: '68%' }]}>
             <Text style={s.tText}>{r.label}</Text>
@@ -497,6 +585,16 @@ function AmountTable({ rows }: { rows: Array<{ label: string; value: string }> }
           </View>
         </View>
       ))}
+      {totalRow ? (
+        <View wrap={false} style={[s.tRow, s.tRowLast, s.tRowTotal]}>
+          <View style={[s.tCell, { width: '68%' }]}>
+            <Text style={s.tTextTotal}>{totalRow.label}</Text>
+          </View>
+          <View style={[s.tCell, { width: '32%' }]}>
+            <Text style={s.tNumTotal}>{totalRow.value}</Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -588,8 +686,13 @@ function InfoStrip({
 
 /* ---------- Secciones fiscales ---------- */
 
-const COL_C = '32%';
-const COL_N = '17%';
+/* Anchas relativas al contenedor de la tabla, ahora más angosto (columna izquierda del split). */
+const COL_C = '34%';
+const COL_N = '16.5%';
+/* Encabezados algo más compactos que `s.tHeadCell`/`s.tHeadText`: en la columna angosta del
+ * split, "Base imponible"/"No gravadas" a tamaño normal se parten en dos líneas. */
+const COL_N_HEAD_CELL = { paddingVertical: 3.5, paddingHorizontal: 3 };
+const COL_N_HEAD_TEXT = { fontSize: 5.3, letterSpacing: 0 };
 
 function IgvTable({ p621 }: { p621: TaxSectionPdt621 }) {
   const rows = listPdt621IgvDisplayRows(p621, { forPdf: true }).filter(
@@ -602,8 +705,8 @@ function IgvTable({ p621 }: { p621: TaxSectionPdt621 }) {
           <Text style={s.tHeadText}>Concepto</Text>
         </View>
         {['Base imponible', 'No gravadas', 'Impuesto', 'Total'].map((h) => (
-          <View key={h} style={[s.tHeadCell, { width: COL_N }]}>
-            <Text style={[s.tHeadText, { textAlign: 'right' }]}>{h}</Text>
+          <View key={h} style={[s.tHeadCell, COL_N_HEAD_CELL, { width: COL_N }]}>
+            <Text style={[s.tHeadText, COL_N_HEAD_TEXT, { textAlign: 'right' }]}>{h}</Text>
           </View>
         ))}
       </View>
@@ -635,7 +738,6 @@ function Pdt621Block({ p621, rentaRatePct }: { p621: TaxSectionPdt621; rentaRate
   const igvBalance = getPdt621IgvBalanceLabel(p621);
   const detrLabelIgv = getPdt621DetractionPdfRowLabel(p621.detraction_payment_igv);
   const detrLabelRenta = getPdt621DetractionPdfRowLabel(p621.detraction_payment_renta);
-  const rentaPayableBefore = getPdt621RentaPayableBeforeDetraction(p621);
   const rentaRateLabel = rentaRatePct != null ? formatRentaRateLabel(rentaRatePct) : null;
 
   const igvSummary: Array<{ label: string; value: string; tone: SumTone }> = [
@@ -668,90 +770,102 @@ function Pdt621Block({ p621, rentaRatePct }: { p621: TaxSectionPdt621; rentaRate
     },
   ];
 
-  const rentaSummary: Array<{ label: string; value: string; tone: SumTone }> = [
+  const rentaRows: Array<{ label: string; value: string }> = [
     ...(isNonZeroTaxAmount(p621.renta_ventas_base)
-      ? [{ label: 'Ingresos netos (base)', value: formatTaxPdfRowMoney(p621.renta_ventas_base), tone: 'normal' as SumTone }]
+      ? [{ label: 'Ingresos netos (base)', value: formatTaxPdfRowMoney(p621.renta_ventas_base) }]
       : []),
     {
       label: `Impuesto renta${rentaRateLabel ? ` (${rentaRateLabel})` : ''}`,
       value: formatTaxPdfRowMoney(p621.renta_ventas_impuesto),
-      tone: 'normal',
     },
-    { label: 'Saldo a favor ITAN', value: formatTaxPdfMoney(p621.renta_saldo_favor_itan), tone: 'normal' },
-    { label: 'Impuesto a pagar (renta)', value: formatTaxPdfTotalMoney(p621.renta_impuesto_a_pagar), tone: 'strong' },
+    { label: 'Saldo a favor ITAN', value: formatTaxPdfMoney(p621.renta_saldo_favor_itan) },
+    ...(detrLabelRenta
+      ? [{ label: detrLabelRenta, value: formatTaxPdfMoney(getPdt621AppliedDetractionAmountRenta(p621)) }]
+      : []),
   ];
+  /* Neto de detracción, igual que la tarjeta "Renta pendiente": el total resaltado en verde es
+   * siempre la última fila y ya refleja cualquier ajuste anterior (detracción incluida). */
+  const rentaTotalRow = {
+    label: 'Impuesto a pagar (renta)',
+    value: formatTaxPdfTotalMoney(getPdt621RentaNetAfterDetraction(p621)),
+  };
 
   return (
     <Fragment>
       <SubHeading title="PDT 621 — IGV y Renta" />
 
       <StepTitle title="1. IGV mensual" icon="cartShopping" />
-      <IgvTable p621={p621} />
-      <View style={{ marginTop: 4, marginBottom: 6 }}>
-        {igvSummary.map((r) => (
-          <SumRow key={r.label} label={r.label} value={r.value} tone={r.tone} />
-        ))}
-        {detrLabelIgv ? (
-          <SumRow label={detrLabelIgv} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmount(p621))} />
-        ) : null}
-        <SumRow
-          label={igvBalance.label}
-          value={
-            isNonZeroTaxAmount(igvBalance.amount)
-              ? formatPdt621IgvBalanceAmount({ label: igvBalance.label, amount: igvBalance.amount })
-              : '-'
-          }
-          tone="green"
-        />
-      </View>
-      <CardsRow>
-        <CardsRowItem>
-          <PendingCard
-            label="IGV pendiente"
-            amount={formatTaxPdfTotalMoney(getPdt621IgvNetAfterDetraction(p621))}
-            icon="receipt"
-          />
-        </CardsRowItem>
-        <CardsRowItem>
-          <InfoCard
-            title="¿Qué es el IGV?"
-            text="Impuesto General a las Ventas. Se aplica a la venta de bienes y prestación de servicios."
-          />
-        </CardsRowItem>
-      </CardsRow>
+      <SplitBlock
+        left={
+          <Fragment>
+            <IgvTable p621={p621} />
+            <View style={{ marginTop: 4 }}>
+              {igvSummary.map((r) => (
+                <SumRow key={r.label} label={r.label} value={r.value} tone={r.tone} />
+              ))}
+              {detrLabelIgv ? (
+                <SumRow label={detrLabelIgv} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmount(p621))} />
+              ) : null}
+              <SumRow
+                label={igvBalance.label}
+                value={
+                  isNonZeroTaxAmount(igvBalance.amount)
+                    ? formatPdt621IgvBalanceAmount({ label: igvBalance.label, amount: igvBalance.amount })
+                    : '-'
+                }
+                tone="green"
+              />
+            </View>
+          </Fragment>
+        }
+        right={
+          <Fragment>
+            <PendingCard
+              label="IGV pendiente"
+              amount={formatTaxPdfTotalMoney(getPdt621IgvNetAfterDetraction(p621))}
+              icon="receipt"
+              tag={p621.igv_justo ? 'IGV Justo' : undefined}
+            />
+            <InfoCard
+              title="¿Qué es el IGV?"
+              text="Impuesto General a las Ventas. Se aplica a la venta de bienes y prestación de servicios."
+            />
+            {p621.igv_justo ? (
+              <InfoCard
+                title="¿Qué es IGV Justo?"
+                text="Régimen que permite a las MYPE postergar el pago del IGV según un cronograma especial, sin intereses ni multas."
+              />
+            ) : null}
+          </Fragment>
+        }
+      />
 
       <StepTitle title="2. Renta mensual" icon="chartColumn" />
-      <AmountTable rows={rentaSummary.map((r) => ({ label: r.label, value: r.value }))} />
-      {detrLabelRenta ? (
-        <View style={{ marginTop: 4, marginBottom: 6 }}>
-          <SumRow label={detrLabelRenta} value={formatTaxPdfMoney(getPdt621AppliedDetractionAmountRenta(p621))} />
-        </View>
-      ) : null}
-      <CardsRow>
-        {rentaPayableBefore > 0 ? (
-          <CardsRowItem>
+      <SplitBlock
+        left={<AmountTable rows={rentaRows} totalRow={rentaTotalRow} />}
+        right={
+          <Fragment>
             <PendingCard
               label="Renta pendiente"
               amount={formatTaxPdfTotalMoney(getPdt621RentaNetAfterDetraction(p621))}
               icon="chartColumn"
             />
-          </CardsRowItem>
-        ) : null}
-        <CardsRowItem>
-          <InfoCard
-            title="¿Qué es la Renta?"
-            text="Impuesto a las utilidades obtenidas por la actividad económica de la empresa."
-          />
-        </CardsRowItem>
-      </CardsRow>
+            <InfoCard
+              title="¿Qué es la Renta?"
+              text="Impuesto a las utilidades obtenidas por la actividad económica de la empresa."
+            />
+          </Fragment>
+        }
+      />
     </Fragment>
   );
 }
 
-/** Bloque genérico: título + tabla de conceptos + tarjeta pendiente + nota. */
+/** Bloque genérico: título + tabla de conceptos (con total en verde) + tarjeta pendiente + nota. */
 function SimpleBlock({
   title,
   rows,
+  totalLabel,
   pendingLabel,
   pendingAmount,
   infoTitle,
@@ -759,6 +873,7 @@ function SimpleBlock({
 }: {
   title: string;
   rows: Array<{ label: string; value: string }>;
+  totalLabel: string;
   pendingLabel: string;
   pendingAmount: number;
   infoTitle: string;
@@ -766,20 +881,21 @@ function SimpleBlock({
 }) {
   return (
     <Fragment>
-      {/* Sin wrap={false} aquí: solo el título reserva espacio mínimo (minPresenceAhead).
-          La tabla puede partirse entre filas si la sección no cabe entera en la página; las
-          tarjetas van DEBAJO de la tabla (nunca al lado) para no cruzar una página junto a
-          contenido partible. */}
       <SubHeading title={title} />
-      <AmountTable rows={rows} />
-      <CardsRow>
-        <CardsRowItem>
-          <PendingCard label={pendingLabel} amount={formatTaxPdfTotalMoney(pendingAmount)} />
-        </CardsRowItem>
-        <CardsRowItem>
-          <InfoCard title={infoTitle} text={infoText} />
-        </CardsRowItem>
-      </CardsRow>
+      <SplitBlock
+        left={
+          <AmountTable
+            rows={rows}
+            totalRow={{ label: totalLabel, value: formatTaxPdfTotalMoney(pendingAmount) }}
+          />
+        }
+        right={
+          <Fragment>
+            <PendingCard label={pendingLabel} amount={formatTaxPdfTotalMoney(pendingAmount)} />
+            <InfoCard title={infoTitle} text={infoText} />
+          </Fragment>
+        }
+      />
     </Fragment>
   );
 }
@@ -843,6 +959,112 @@ function buildPdt710Rows(p710: TaxSectionPdt710): Array<{ label: string; value: 
     rows.push({ label: detrLabel, value: formatTaxPdfMoney(getPdt710AppliedDetractionAmount(p710)) });
   }
   return rows;
+}
+
+/* ---------- Estimador de altura: ¿cabe "Detalle de impuestos" entero en la página 1? ---------- */
+
+/**
+ * Constantes calibradas midiendo la posición Y real (en pt, vía `textContent` de pdf.js) de
+ * cada elemento en PDFs generados con este mismo componente — no son un cálculo teórico desde
+ * el CSS. Se usan solo para decidir si conviene forzar el salto de página de "Honorarios" (ver
+ * `forcePageBreak` en `TaxSettlementPdfDocumentV2`): si el detalle de impuestos ya se desborda
+ * de la página 1 por sí solo, forzar el salto es innecesario y deja media página en blanco.
+ */
+const HEIGHT_EST = {
+  ROW: 14.5,
+  STEPTITLE: 16,
+  SUBHEADING: 18,
+  SUMMARY_TRANSITION: 18.3,
+  SUMROW: 13.6,
+  /** Piso conservador (peor caso ~3 líneas) para la columna de tarjetas al costado de cada
+   * bloque: cuando la tabla tiene pocas filas, la tarjeta+explicación puede ser más alta. */
+  CARD_FLOOR: 84,
+  GAP_WITHIN_PDT621: 23,
+  GAP_BETWEEN_BLOCKS: 29,
+  TOTAL_BAND: 44,
+  PREFIX_NO_DRAFT: 236,
+  DRAFT_EXTRA: 22,
+  PAGE_CONTENT_BOTTOM: 798,
+  SAFETY_MARGIN: 15,
+};
+
+function estimateIgvSplitHeight(p621: TaxSectionPdt621): number {
+  const igvRows = listPdt621IgvDisplayRows(p621, { forPdf: true }).filter(
+    ({ row, alwaysShowInPdf }) => alwaysShowInPdf || isTaxIgvRowVisibleInPdf(row),
+  ).length;
+  const igvSummaryRows = 7 + (getPdt621DetractionPdfRowLabel(p621.detraction_payment_igv) ? 1 : 0) + 1;
+  const tableColumn =
+    igvRows * HEIGHT_EST.ROW + HEIGHT_EST.SUMMARY_TRANSITION + (igvSummaryRows - 1) * HEIGHT_EST.SUMROW;
+  // Con IGV Justo activo la columna de tarjetas suma el distintivo + una tarjeta explicativa más.
+  const cardColumn = p621.igv_justo ? HEIGHT_EST.CARD_FLOOR + 50 : HEIGHT_EST.CARD_FLOOR;
+  return Math.max(tableColumn, cardColumn);
+}
+
+function estimateRentaSplitHeight(p621: TaxSectionPdt621): number {
+  const rentaRows =
+    (isNonZeroTaxAmount(p621.renta_ventas_base) ? 1 : 0) +
+    2 + // impuesto renta + saldo a favor ITAN
+    (getPdt621DetractionPdfRowLabel(p621.detraction_payment_renta) ? 1 : 0) +
+    1; // fila total
+  return Math.max(rentaRows * HEIGHT_EST.ROW, HEIGHT_EST.CARD_FLOOR);
+}
+
+function estimatePdt621Height(p621: TaxSectionPdt621): number {
+  return (
+    HEIGHT_EST.SUBHEADING +
+    HEIGHT_EST.STEPTITLE +
+    estimateIgvSplitHeight(p621) +
+    HEIGHT_EST.GAP_WITHIN_PDT621 +
+    HEIGHT_EST.STEPTITLE +
+    estimateRentaSplitHeight(p621)
+  );
+}
+
+/** Bloque genérico (PDT 601, ITAN, PDT 617, ICBPER, PDT 710): título + tabla (+1 fila de total). */
+function estimateSimpleBlockHeight(rowCount: number): number {
+  const tableColumn = (rowCount + 1) * HEIGHT_EST.ROW;
+  return HEIGHT_EST.SUBHEADING + Math.max(tableColumn, HEIGHT_EST.CARD_FLOOR);
+}
+
+/**
+ * Altura estimada (en pt) del bloque "Detalle de impuestos" completo, desde el título de la
+ * banda hasta el final de la banda "Total impuestos a pagar" — es decir, todo lo que precede a
+ * "Honorarios" en el flujo normal de la página 1.
+ */
+function estimateDetalleImpuestosHeight(sec: TaxSettlementSectionsPayload): number {
+  let height = 0;
+  let firstBlock = true;
+  const addBlock = (blockHeight: number) => {
+    if (!firstBlock) height += HEIGHT_EST.GAP_BETWEEN_BLOCKS;
+    height += blockHeight;
+    firstBlock = false;
+  };
+  if (sec.pdt621?.enabled) addBlock(estimatePdt621Height(sec.pdt621));
+  if (sec.pdt601?.enabled) addBlock(estimateSimpleBlockHeight(buildPdt601Rows(sec.pdt601).length));
+  if (sec.itan?.enabled) addBlock(estimateSimpleBlockHeight(buildItanRows(sec.itan).length));
+  if (sec.pdt617?.enabled) addBlock(estimateSimpleBlockHeight(buildPdt617Rows(sec.pdt617).length));
+  if (sec.bolsas_plasticas?.enabled) {
+    addBlock(estimateSimpleBlockHeight(buildBolsasRows(sec.bolsas_plasticas).length));
+  }
+  if (sec.pdt710?.enabled) addBlock(estimateSimpleBlockHeight(buildPdt710Rows(sec.pdt710).length));
+  return height + HEIGHT_EST.TOTAL_BAND;
+}
+
+/**
+ * true → forzar que "Honorarios" arranque en una página nueva (el detalle de impuestos cabe
+ * entero en la página 1, así que sin forzar el salto Honorarios compartiría esa página).
+ * false → dejarlo fluir en flujo normal (el detalle ya se desborda de la página 1 por su cuenta,
+ * forzar aquí solo empujaría Honorarios a una página más, dejando la anterior con mucho espacio
+ * en blanco — exactamente el bug reportado en producción).
+ */
+function shouldForceHonorariosPageBreak(
+  sections: TaxSettlementSectionsPayload | null,
+  draftBannerShown: boolean,
+): boolean {
+  if (!sections) return true;
+  const prefix = HEIGHT_EST.PREFIX_NO_DRAFT + (draftBannerShown ? HEIGHT_EST.DRAFT_EXTRA : 0);
+  const estimatedEnd = prefix + estimateDetalleImpuestosHeight(sections);
+  return estimatedEnd <= HEIGHT_EST.PAGE_CONTENT_BOTTOM - HEIGHT_EST.SAFETY_MARGIN;
 }
 
 /* ---------- Pagos y recomendaciones ---------- */
@@ -961,6 +1183,7 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <SimpleBlock
           title="PDT 601 — Planilla electrónica"
           rows={buildPdt601Rows(sec.pdt601)}
+          totalLabel="Impuesto a pagar (planilla)"
           pendingLabel="Planilla pendiente"
           pendingAmount={sec.pdt601.impuesto_a_pagar}
           infoTitle="¿Qué es el PDT 601?"
@@ -971,6 +1194,7 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <SimpleBlock
           title={`ITAN ${sec.itan.year}`}
           rows={buildItanRows(sec.itan)}
+          totalLabel="Impuesto a pagar (ITAN)"
           pendingLabel="ITAN pendiente"
           pendingAmount={sec.itan.impuesto_a_pagar}
           infoTitle="¿Qué es el ITAN?"
@@ -981,6 +1205,7 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <SimpleBlock
           title="PDT 617 — Otras retenciones"
           rows={buildPdt617Rows(sec.pdt617)}
+          totalLabel="Impuesto a pagar (retenciones)"
           pendingLabel="Retenciones pendientes"
           pendingAmount={sec.pdt617.impuesto_a_pagar}
           infoTitle="¿Qué son las retenciones?"
@@ -991,6 +1216,7 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <SimpleBlock
           title="Impuesto al consumo de bolsas plásticas"
           rows={buildBolsasRows(sec.bolsas_plasticas)}
+          totalLabel="Impuesto a pagar (ICBPER)"
           pendingLabel="ICBPER pendiente"
           pendingAmount={sec.bolsas_plasticas.impuesto_a_pagar}
           infoTitle="¿Qué es el ICBPER?"
@@ -1001,6 +1227,7 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         <SimpleBlock
           title={`PDT 710 — Renta anual ${sec.pdt710.year}`}
           rows={buildPdt710Rows(sec.pdt710)}
+          totalLabel="Impuesto a pagar (renta anual)"
           pendingLabel="Renta anual pendiente"
           pendingAmount={sec.pdt710.impuesto_a_pagar}
           infoTitle="¿Qué es la renta anual?"
@@ -1056,14 +1283,19 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
         {sections ? renderSections(sections) : null}
 
         {/*
-          Honorarios fluye en el flujo normal (SIN `break` forzado): forzar que siempre empiece
-          en una página nueva se probó y rompe la regla real del documento — "máximo el contenido
-          necesario, sin espacio en blanco" — cuando el bloque anterior (p. ej. un PDT 601 con
-          varias líneas) ya se desborda un poco a la página 2 antes de llegar aquí: el resto de
-          esa página 2 queda vacío y Honorarios se empuja a una 3ª página innecesaria. Dejarlo en
-          flujo normal hace que arranque donde alcance el espacio, sin desperdiciarlo.
+          Honorarios nunca debe compartir la página 1 con el detalle de impuestos — regla de
+          negocio explícita. Pero forzar el salto SIEMPRE (sin condición) causaba el bug real:
+          cuando el detalle de impuestos ya se desborda de la página 1 por su cuenta (el caso
+          común con varios PDT), forzar otro salto empuja Honorarios a una página de más y deja
+          la anterior con muchísimo espacio en blanco. `shouldForceHonorariosPageBreak` estima
+          (a partir de conteos de filas reales, calibrado contra PDFs renderizados) si el detalle
+          alcanza a caber entero en la página 1; solo en ese caso se fuerza el salto.
         */}
-        <Band title="Honorarios y cargos del estudio" icon="userTie" />
+        <Band
+          title="Honorarios y cargos del estudio"
+          icon="userTie"
+          forcePageBreak={shouldForceHonorariosPageBreak(sections, !totals.emitted)}
+        />
         <View style={s.table}>
           <View wrap={false} style={s.tHead}>
             <View style={[s.tHeadCell, { width: '52%' }]}>
@@ -1107,13 +1339,13 @@ export function TaxSettlementPdfDocumentV2({ settlement, firm, logoPng, footerAs
             </View>
           )}
         </View>
-        <View wrap={false} style={s.totalBand}>
-          <View style={{ marginRight: 7 }}>
-            <PdfIcon name="wallet" size={12} color={V2.white} />
+        <View wrap={false} style={s.honorariosTotalBand}>
+          <View style={{ marginRight: 6 }}>
+            <PdfIcon name="wallet" size={10} color={V2.white} />
           </View>
-          <Text style={s.totalBandLabel}>Total honorarios a pagar</Text>
-          <View style={s.totalBandBox}>
-            <Text style={s.totalBandAmount}>{formatTaxMoney(totals.honorarios)}</Text>
+          <Text style={s.honorariosTotalBandLabel}>Total honorarios a pagar</Text>
+          <View style={s.honorariosTotalBandBox}>
+            <Text style={s.honorariosTotalBandAmount}>{formatTaxMoney(totals.honorarios)}</Text>
           </View>
         </View>
 

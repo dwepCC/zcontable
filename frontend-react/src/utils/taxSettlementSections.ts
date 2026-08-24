@@ -42,6 +42,9 @@ export type TaxSectionPdt621 = {
   saldo_favor_final: number;
   detraction_payment_igv?: Pdt621DetractionPayment;
   detraction_payment_renta?: Pdt621DetractionPayment;
+  /** Acogimiento al régimen "IGV Justo" (postergación del pago del IGV para MYPE). Bandera
+   * manual del supervisor — no se recalcula ni afecta ningún monto. */
+  igv_justo?: boolean;
   renta_impuesto_a_pagar: number;
   impuesto_a_pagar: number;
 };
@@ -302,6 +305,7 @@ export function defaultPdt621Section(): TaxSectionPdt621 {
       applied_amount: 0,
       original_amount: 0,
     },
+    igv_justo: false,
     renta_impuesto_a_pagar: 0,
     impuesto_a_pagar: 0,
   };
