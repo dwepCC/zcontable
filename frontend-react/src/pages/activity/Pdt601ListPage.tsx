@@ -410,13 +410,16 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                           </span>
                           {/* Cumplimiento del plazo del calendario de actividades (tipo "pdt_601")
                               para la entrega del asistente (fecha_entrega) — antes solo coloreaba
-                              el fondo de la fila (pdt601RowBgClass), sin texto explícito acá. */}
-                          <span
-                            title="Cumplimiento del plazo de entrega según el calendario de actividades"
-                            className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${timelinessBadgeClass(row.timeliness)}`}
-                          >
-                            {timelinessLabel(row.timeliness)}
-                          </span>
+                              el fondo de la fila (pdt601RowBgClass), sin texto explícito acá.
+                              Sin planilla no tiene plazo de entrega que cumplir: se omite. */}
+                          {!pl?.sin_planilla ? (
+                            <span
+                              title="Cumplimiento del plazo de entrega según el calendario de actividades"
+                              className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${timelinessBadgeClass(row.timeliness)}`}
+                            >
+                              {timelinessLabel(row.timeliness)}
+                            </span>
+                          ) : null}
                         </div>
                       </td>
                       <td className={TD}>
@@ -436,12 +439,9 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                         )}
                       </td>
                       {pl?.sin_planilla ? (
-                        <td colSpan={10} className={`${TD} ${GROUP_BORDER} text-center`}>
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                            <i className="fas fa-ban" aria-hidden />
-                            Sin planilla
-                          </span>
-                        </td>
+                        // "Sin planilla" ya se indica en la columna Estado — acá solo se dejan
+                        // en blanco los campos numéricos (no aplica), sin repetir la etiqueta.
+                        <td colSpan={10} className={`${TD} ${GROUP_BORDER}`} />
                       ) : (
                         <>
                           <td className={`${TDN} ${GROUP_BORDER}`}>{pl ? pl.trabajadores_onp : ''}</td>
