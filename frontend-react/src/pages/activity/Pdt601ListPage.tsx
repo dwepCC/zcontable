@@ -400,10 +400,13 @@ const Pdt601ListPage = ({ workspace }: Pdt601ListPageProps) => {
                       </td>
                       <td className={TD}>
                         <div className="flex flex-col items-start gap-1">
+                          {/* Igual que en el detalle (combinedStatusValue): "sin_planilla" no es un
+                              estado real de la declaración, pero se muestra acá en vez del estado
+                              de revisión para no decir "Pendiente" en una empresa sin planilla. */}
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt601StatusBadgeClass(row.status)}`}
+                            className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt601StatusBadgeClass(pl?.sin_planilla ? 'sin_planilla' : row.status)}`}
                           >
-                            {pdt601StatusLabel(row.status)}
+                            {pdt601StatusLabel(pl?.sin_planilla ? 'sin_planilla' : row.status)}
                           </span>
                           {/* Cumplimiento del plazo del calendario de actividades (tipo "pdt_601")
                               para la entrega del asistente (fecha_entrega) — antes solo coloreaba

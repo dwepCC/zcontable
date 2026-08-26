@@ -113,18 +113,23 @@ export async function exportPdt601ReportExcel(options: { periodYm: string; rows:
     };
     // "Sin planilla" deja los campos numéricos en blanco (no aplica) en vez de 0 — igual que la
     // tabla en pantalla, que directamente los oculta.
+    // Formato de 3 secciones (positivo;negativo;cero): un 0 real se muestra como "-" (un solo
+    // guion), sin dejar de ser un número para filtros/sumas en el Excel.
     const setNum = (v: number | undefined) => {
       const c = dataRow.getCell(col++);
       if (!sinPlanilla) {
         c.value = v ?? 0;
-        c.numFmt = '#,##0.00';
+        c.numFmt = '#,##0.00;-#,##0.00;"-"';
       }
       styleCell(c, rowFill);
       c.alignment = { vertical: 'middle', horizontal: 'right' };
     };
     const setInt = (v: number | undefined) => {
       const c = dataRow.getCell(col++);
-      if (!sinPlanilla) c.value = v ?? 0;
+      if (!sinPlanilla) {
+        c.value = v ?? 0;
+        c.numFmt = '#,##0;-#,##0;"-"';
+      }
       styleCell(c, rowFill);
       c.alignment = { vertical: 'middle', horizontal: 'right' };
     };
