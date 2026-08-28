@@ -27,7 +27,7 @@ import {
   clearPdt621IgvRateRows,
   computeTaxSettlementSections,
   defaultTaxSections,
-  getPdt621IgvPayableBeforeDetraction,
+  getPdt621IgvPendienteSigned,
   getPdt621RentaPayableBeforeDetraction,
   getPdt621SyncTotals,
   normalizePdt621IgvVentas,
@@ -432,23 +432,25 @@ const SupervisorLiquidacionCreatePage = () => {
     }
   };
 
-  // Sincroniza de vuelta al Control de Vencimientos PDT 621 el resumen de la liquidación:
-  // - total_ventas / total_compras: suma de base + no gravadas de las filas activas (todas las
-  //   tasas IGV habilitadas en la liquidación), no solo la tasa por defecto de la empresa.
-  // - igv / rta: el impuesto DECLARADO del periodo (antes de aplicar detracción) — coincide con
-  //   lo presentado en el PDT ante SUNAT, independiente del medio de pago usado después.
-  // Solo al CREAR (igual que el autocompletar es de una sola vez): si se sincronizara en cada
-  // edición posterior, una corrección menor a la liquidación (ajena al PDT 621) sobreescribiría
-  // silenciosamente cifras del Control que el supervisor ya haya corregido a mano contra lo
-  // realmente declarado en SUNAT.
+  // Sincroniza de vuelta al Control de Vencimientos PDT 621 el resumen de la liquidación —
+  // tanto al crear como al editar (la liquidación se registra primero; el Control PDT 621 jala
+  // de ahí cada vez que se guarda):
+  // - total_ventas: "Ingresos netos (base)" de la sección Renta mensual.
+  // - total_compras: SOLO la suma de "no gravadas" de compras 18% + 10.5% (no el total real de
+  //   compras — regla de negocio confirmada, no un error).
+  // - igv: "IGV pendiente" CON SIGNO — después de detracción, negativo si hay saldo a favor
+  //   (no se recorta a 0 como en la pantalla de la liquidación).
+  // - rta: "Impuesto a pagar (renta)", el mismo valor que se muestra en el PDF v2 (nunca negativo
+  //   por su propia fórmula).
   const syncPdt621Record = async (targetCompanyId: number, periodYm: string) => {
-    if (isEdit) return;
     const p621 = taxSectionsComputed.pdt621;
     if (!p621?.enabled) return;
     const { total_ventas: totalVentas, total_compras: totalCompras } = getPdt621SyncTotals(p621);
-    const igvDeclarado = getPdt621IgvPayableBeforeDetraction(p621);
+    const igvPendiente = getPdt621IgvPendienteSigned(p621);
     const rentaDeclarada = getPdt621RentaPayableBeforeDetraction(p621);
-    const hasData = totalVentas > 0 || totalCompras > 0 || igvDeclarado > 0 || rentaDeclarada > 0;
+    // igvPendiente puede ser negativo (saldo a favor) — eso también cuenta como "hay algo que
+    // sincronizar", por eso es `!== 0` y no `> 0` acá.
+    const hasData = totalVentas > 0 || totalCompras > 0 || igvPendiente !== 0 || rentaDeclarada > 0;
     if (!hasData) return;
     try {
       const current = await pdt621Service.getDetail(targetCompanyId, periodYm);
@@ -462,7 +464,7 @@ const SupervisorLiquidacionCreatePage = () => {
         fecha_declaracion: base?.fecha_declaracion ?? '',
         total_ventas: totalVentas,
         total_compras: totalCompras,
-        igv: igvDeclarado,
+        igv: igvPendiente,
         rta: rentaDeclarada,
         envio_sire: base?.envio_sire ?? '',
         fecha_envio_sire: base?.fecha_envio_sire ?? '',
