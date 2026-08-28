@@ -31,12 +31,10 @@ import {
   getPdt621RentaPayableBeforeDetraction,
   getPdt621SyncTotals,
   normalizePdt621IgvVentas,
-  patchPdt621VentasRow,
   parseTaxSectionsJson,
   type TaxSettlementSectionsPayload,
 } from '../../utils/taxSettlementSections';
 import {
-  computeIgvFromBase,
   defaultLiquidationIgvRates,
   formatCompanyIgvRateLabel,
   LIQUIDATION_IGV_RATES,
@@ -192,61 +190,10 @@ const SupervisorLiquidacionCreatePage = () => {
     })();
   }, [isEdit, isView, companyId, liquidationPeriod, currentYear]);
 
-  // "Jala" datos ya registrados en el Control de Vencimientos PDT 621 al crear una liquidación
-  // nueva: total_ventas/total_compras van como base de la fila de ventas/compras en la tasa IGV
-  // por defecto de la empresa (company.igv_rate) — el impuesto de esa fila se recalcula solo.
-  // igv/rta del control NO se copian: son resultados del periodo, no insumos; se recalculan aquí.
-  // Guardamos el período ya autocompletado (no un simple booleano) para no repetir el fetch en
-  // cada render, pero sí volver a traer datos si el supervisor cambia el período del formulario
-  // antes de guardar — de lo contrario quedaría guardando (y luego re-sincronizando hacia atrás)
-  // los importes del período equivocado.
-  const pdt621AutoFilledPeriodRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (isEdit || isView) return;
-    if (!companyId || companyId <= 0) return;
-    if (!/^\d{4}-\d{2}$/.test(liquidationPeriod)) return;
-    if (!companyIgvRate) return;
-    if (pdt621AutoFilledPeriodRef.current === liquidationPeriod) return;
-    pdt621AutoFilledPeriodRef.current = liquidationPeriod;
-    void (async () => {
-      try {
-        const record = await pdt621Service.getRecord(companyId, liquidationPeriod);
-        if (!record) return;
-        const hasData = record.total_ventas > 0 || record.total_compras > 0;
-        if (!hasData) return;
-        setTaxSections((prev) => {
-          const base621 = prev.pdt621 ?? defaultTaxSections(currentYear).pdt621!;
-          // El Control solo trae un total sin desglose por tasa: si para cuando resuelve el
-          // fetch el supervisor ya activó más de una tasa IGV (18% y 10.5%), no hay forma segura
-          // de repartir el total — mejor no autocompletar que meter todo en una sola tasa.
-          if ((base621.igv_aplicable_ventas?.length ?? 0) > 1) return prev;
-          const comprasKey = companyIgvRate === 10.5 ? 'compras_105' : 'compras_18';
-          const withVentas = patchPdt621VentasRow(base621, companyIgvRate, {
-            base: record.total_ventas,
-            impuesto: computeIgvFromBase(record.total_ventas, companyIgvRate),
-          });
-          return computeTaxSettlementSections({
-            ...prev,
-            pdt621: {
-              ...withVentas,
-              enabled: true,
-              igv_aplicable_ventas: base621.igv_aplicable_ventas?.length
-                ? base621.igv_aplicable_ventas
-                : defaultLiquidationIgvRates(companyIgvRate),
-              [comprasKey]: {
-                ...base621[comprasKey],
-                base: record.total_compras,
-                impuesto: computeIgvFromBase(record.total_compras, companyIgvRate),
-              },
-            },
-          });
-        });
-      } catch (err) {
-        // Sin registro de Control PDT 621 o sin acceso: no se autocompleta, el supervisor llena manualmente.
-        console.error('No se pudo autocompletar desde el Control PDT 621:', err);
-      }
-    })();
-  }, [isEdit, isView, companyId, liquidationPeriod, companyIgvRate, currentYear]);
+  // NOTA: ya no existe un autocompletar Control PDT 621 → liquidación al crear. La liquidación
+  // se registra primero y es la única fuente de verdad; el Control PDT 621 jala de ella (ver
+  // Pdt621DetailPage.tsx), nunca al revés — un total suelto en el Control no se puede repartir
+  // de vuelta entre las tasas 18%/10.5% de la liquidación sin perder información.
 
   const taxSectionsComputed = useMemo(() => computeTaxSettlementSections(taxSections), [taxSections]);
   const igvAplicableVentas = useMemo((): CompanyIgvRate[] => {
