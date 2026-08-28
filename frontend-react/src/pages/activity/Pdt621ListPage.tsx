@@ -54,7 +54,7 @@ const TDM = `${TD} tabular-nums text-right whitespace-nowrap`;
 /** Separador vertical entre grupos de columnas. */
 const GROUP_BORDER = 'border-l border-slate-200';
 /** Total de columnas hoja (para el colSpan de filas vacías/estado de carga). */
-const COL_COUNT = 23;
+const COL_COUNT = 22;
 
 function formatMoney(n: number): string {
   return n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -305,7 +305,6 @@ const Pdt621ListPage = ({ workspace }: Pdt621ListPageProps) => {
                   SIRE
                 </th>
                 <th className={`${TH} ${GROUP_BORDER}`} rowSpan={2}>Archivos</th>
-                <th className={TH} rowSpan={2} />
               </tr>
               <tr className="bg-slate-50" style={{ position: 'sticky', top: headRow1H, zIndex: Z_HEAD_ROW }}>
                 <th className={`${SUBTH} ${GROUP_BORDER}`}>Fecha</th>
@@ -370,11 +369,16 @@ const Pdt621ListPage = ({ workspace }: Pdt621ListPageProps) => {
                       <td className={TD}>{row.assistant_username || '—'}</td>
                       <td className={TD}>
                         <div className="flex flex-col items-start gap-1">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt621StatusBadgeClass(row.status)}`}
-                          >
-                            {pdt621StatusLabel(row.status)}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt621StatusBadgeClass(row.status)}`}
+                            >
+                              {pdt621StatusLabel(row.status)}
+                            </span>
+                            {/* Botón de acción (registrar/ver) movido acá desde la última columna,
+                                junto al estado en vez de al fondo de la fila. */}
+                            <RowActionLink to={detailLink(row.company_id)} icon="fa-eye" label="Ver" />
+                          </div>
                           {/* Plazo INTERNO del estudio (calendario de actividades) para la 1ra
                               entrega del asistente — no valida nada contra SUNAT, ver
                               pdt621Config.ts / supervisor_pdt621_service.go (AssistantTimeliness). */}
@@ -410,9 +414,6 @@ const Pdt621ListPage = ({ workspace }: Pdt621ListPageProps) => {
                         <span className="block truncate">{rec?.motivo_no_envio || ''}</span>
                       </td>
                       <td className={`${TDN} ${GROUP_BORDER}`}>{row.attachment_count}</td>
-                      <td className={TD}>
-                        <RowActionLink to={detailLink(row.company_id)} icon="fa-eye" label="Ver" />
-                      </td>
                     </tr>
                   );
                 })
