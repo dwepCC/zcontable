@@ -99,6 +99,17 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
 
   const declaration = detail?.declaration;
 
+  // Estos 4 campos se llenan por sincronización desde la liquidación (ver syncPdt621Record en
+  // SupervisorLiquidacionCreatePage.tsx) — si ya tienen algún valor, dejarlos editables a mano
+  // no sirve de nada (la liquidación es la fuente de verdad y los va a volver a sobreescribir en
+  // el próximo guardado), así que se bloquean. Si están todos en cero es porque aún no hay
+  // liquidación registrada para esta empresa/período — ahí se siguen llenando a mano como antes.
+  const pdt621Locked = useMemo(() => {
+    const rec = detail?.record;
+    if (!rec) return false;
+    return rec.total_ventas > 0 || rec.total_compras > 0 || rec.igv !== 0 || rec.rta > 0;
+  }, [detail?.record]);
+
   const dueResolved = useMemo(() => {
     if (!detail || !declaration) return { dueDate: undefined, isOverdue: false, daysRemaining: null as number | null };
     const dueDate = resolvePdt621DueDate(declaration.due_date, detail.control_due_date);
@@ -437,6 +448,12 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
         <h2 className="text-sm font-semibold text-slate-800 pt-2 border-t border-slate-100">
           Fecha de declaración e importes PDT 621
         </h2>
+        {pdt621Locked ? (
+          <p className="text-xs text-slate-500 -mt-2">
+            Total ventas, Total compras, IGV y Renta se sincronizan desde la liquidación de esta empresa/período — no
+            se editan a mano acá.
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Fecha de declaración</label>
@@ -453,7 +470,7 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
             <input
               type="number"
               step="0.01"
-              disabled={!canUpdate}
+              disabled={!canUpdate || pdt621Locked}
               value={record.total_ventas}
               onChange={(e) => patchRecord({ total_ventas: Number(e.target.value) || 0 })}
               className={FIELD_INPUT}
@@ -464,7 +481,7 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
             <input
               type="number"
               step="0.01"
-              disabled={!canUpdate}
+              disabled={!canUpdate || pdt621Locked}
               value={record.total_compras}
               onChange={(e) => patchRecord({ total_compras: Number(e.target.value) || 0 })}
               className={FIELD_INPUT}
@@ -475,7 +492,7 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
             <input
               type="number"
               step="0.01"
-              disabled={!canUpdate}
+              disabled={!canUpdate || pdt621Locked}
               value={record.igv}
               onChange={(e) => patchRecord({ igv: Number(e.target.value) || 0 })}
               className={FIELD_INPUT}
@@ -486,7 +503,7 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
             <input
               type="number"
               step="0.01"
-              disabled={!canUpdate}
+              disabled={!canUpdate || pdt621Locked}
               value={record.rta}
               onChange={(e) => patchRecord({ rta: Number(e.target.value) || 0 })}
               className={FIELD_INPUT}
