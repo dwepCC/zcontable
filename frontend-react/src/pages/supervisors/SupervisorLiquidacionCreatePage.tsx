@@ -383,8 +383,8 @@ const SupervisorLiquidacionCreatePage = () => {
   // tanto al crear como al editar (la liquidación se registra primero; el Control PDT 621 jala
   // de ahí cada vez que se guarda):
   // - total_ventas: "Ingresos netos (base)" de la sección Renta mensual.
-  // - total_compras: SOLO la suma de "no gravadas" de compras 18% + 10.5% (no el total real de
-  //   compras — regla de negocio confirmada, no un error).
+  // - total_compras: suma de las 4 bases de compras — base imponible (18% + 10.5%) más
+  //   "no gravadas" (18% + 10.5%) — regla de negocio confirmada.
   // - igv: "IGV pendiente" CON SIGNO — después de detracción, negativo si hay saldo a favor
   //   (no se recorta a 0 como en la pantalla de la liquidación).
   // - rta: "Impuesto a pagar (renta)", el mismo valor que se muestra en el PDF v2 (nunca negativo

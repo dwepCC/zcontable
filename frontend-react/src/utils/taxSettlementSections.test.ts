@@ -50,23 +50,23 @@ describe('getPdt621SyncTotals — sincronización hacia el Control de Vencimient
     expect(totals.total_ventas).toBe(0); // 1000 - 1500 clamp a 0, nunca negativo
   });
 
-  it('total_compras es SOLO la suma de "no gravadas" de compras 18%/10.5% — no el total de compras', () => {
+  it('total_compras suma las 4 bases: base imponible (18% + 10.5%) más no gravadas (18% + 10.5%)', () => {
     const p = buildPdt621({
       igv_aplicable_ventas: [18, 10.5],
       compras_18: { base: 400, no_gravadas: 50, impuesto: 72, total: 522 },
       compras_105: { base: 200, no_gravadas: 30, impuesto: 21, total: 251 },
     });
     const totals = getPdt621SyncTotals(p.pdt621!);
-    expect(totals.total_compras).toBe(80); // 50 + 30 — ignora la base gravada (400 + 200)
+    expect(totals.total_compras).toBe(680); // 400 + 200 + 50 + 30
   });
 
-  it('total_compras es 0 cuando las compras no tienen monto no gravado, aunque sí tengan base gravada', () => {
+  it('total_compras solo cuenta la base gravada cuando no hay monto no gravado', () => {
     const p = buildPdt621({
       igv_aplicable_ventas: [18],
       compras_18: { base: 400, no_gravadas: 0, impuesto: 72, total: 472 },
     });
     const totals = getPdt621SyncTotals(p.pdt621!);
-    expect(totals.total_compras).toBe(0);
+    expect(totals.total_compras).toBe(400);
   });
 });
 

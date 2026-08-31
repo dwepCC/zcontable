@@ -903,11 +903,15 @@ export function getPdt621RentaPayableBeforeDetraction(p621: TaxSectionPdt621): n
  * Vencimientos PDT 621 (supervisor_pdt621_records: total_ventas, total_compras). total_ventas
  * reutiliza `computePdt621RentaVentasBase` (misma regla de neteo de notas de crédito y de
  * redondeo que usa el resto de la sección, en vez de reimplementarla con su propio redondeo).
- * total_compras es SOLO la suma de "no gravadas" de compras 18% + 10.5% (no la base gravada) —
- * regla de negocio confirmada por el usuario, no un total real de compras.
+ * total_compras es la suma de las 4 bases de compras: base imponible (18% + 10.5%) más
+ * "no gravadas" (18% + 10.5%) — regla de negocio confirmada por el usuario.
  */
 export function getPdt621SyncTotals(p621: TaxSectionPdt621): { total_ventas: number; total_compras: number } {
-  const totalCompras = (p621.compras_18?.no_gravadas ?? 0) + (p621.compras_105?.no_gravadas ?? 0);
+  const totalCompras =
+    (p621.compras_18?.base ?? 0) +
+    (p621.compras_105?.base ?? 0) +
+    (p621.compras_18?.no_gravadas ?? 0) +
+    (p621.compras_105?.no_gravadas ?? 0);
   return {
     total_ventas: computePdt621RentaVentasBase(p621),
     total_compras: roundMoney(totalCompras),
