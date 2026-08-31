@@ -37,6 +37,8 @@ const EMPTY_RECORD: Pdt621RecordInput = {
   total_compras: 0,
   igv: 0,
   rta: 0,
+  cantidad_comprobantes_venta: 0,
+  cantidad_comprobantes_compra: 0,
   envio_sire: '',
   fecha_envio_sire: '',
   motivo_no_envio: '',
@@ -55,6 +57,8 @@ function recordToInput(r: Pdt621Record | null | undefined): Pdt621RecordInput {
     total_compras: r.total_compras ?? 0,
     igv: r.igv ?? 0,
     rta: r.rta ?? 0,
+    cantidad_comprobantes_venta: r.cantidad_comprobantes_venta ?? 0,
+    cantidad_comprobantes_compra: r.cantidad_comprobantes_compra ?? 0,
     envio_sire: r.envio_sire ?? '',
     fecha_envio_sire: r.fecha_envio_sire ?? '',
     motivo_no_envio: r.motivo_no_envio ?? '',
@@ -506,6 +510,35 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
               disabled={!canUpdate || pdt621Locked}
               value={record.rta}
               onChange={(e) => patchRecord({ rta: Number(e.target.value) || 0 })}
+              className={FIELD_INPUT}
+            />
+          </div>
+        </div>
+
+        {/* Cantidad de comprobantes (NO montos) — solo registro manual del supervisor, nunca se
+            sincroniza desde la liquidación, así que no entra al candado `pdt621Locked` de arriba. */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de venta</label>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              disabled={!canUpdate}
+              value={record.cantidad_comprobantes_venta}
+              onChange={(e) => patchRecord({ cantidad_comprobantes_venta: Number(e.target.value) || 0 })}
+              className={FIELD_INPUT}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de compra</label>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              disabled={!canUpdate}
+              value={record.cantidad_comprobantes_compra}
+              onChange={(e) => patchRecord({ cantidad_comprobantes_compra: Number(e.target.value) || 0 })}
               className={FIELD_INPUT}
             />
           </div>

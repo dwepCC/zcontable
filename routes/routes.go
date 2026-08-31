@@ -260,6 +260,7 @@ func Setup(app *fiber.App) {
 	sup.Get("/activity-modules/pdt-601/companies/:companyId/planilla", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt601PlanillaOnlyAPI)
 	sup.Put("/activity-modules/pdt-601/companies/:companyId/planilla", middleware.RequirePermission(rbac.SupervisorsDeclarationsUpdate), supervisorCtrl.Pdt601SavePlanillaAPI)
 	sup.Get("/activity-modules/pdt-621", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621ListAPI)
+	sup.Get("/activity-modules/pdt-621/export", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621ExportAPI)
 	sup.Get("/activity-modules/pdt-621/companies/:companyId", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621DetailAPI)
 	sup.Get("/activity-modules/pdt-621/companies/:companyId/record", middleware.RequirePermission(rbac.SupervisorsControlsView), supervisorCtrl.Pdt621RecordOnlyAPI)
 	sup.Put("/activity-modules/pdt-621/companies/:companyId/record", middleware.RequirePermission(rbac.SupervisorsDeclarationsUpdate), supervisorCtrl.Pdt621SaveRecordAPI)

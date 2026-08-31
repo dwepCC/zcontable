@@ -413,6 +413,10 @@ const SupervisorLiquidacionCreatePage = () => {
         total_compras: totalCompras,
         igv: igvPendiente,
         rta: rentaDeclarada,
+        // Cantidad de comprobantes: registro manual del supervisor, NUNCA se sincroniza desde la
+        // liquidación — se preserva lo que ya había en el Control, no se resetea a 0.
+        cantidad_comprobantes_venta: base?.cantidad_comprobantes_venta ?? 0,
+        cantidad_comprobantes_compra: base?.cantidad_comprobantes_compra ?? 0,
         envio_sire: base?.envio_sire ?? '',
         fecha_envio_sire: base?.fecha_envio_sire ?? '',
         motivo_no_envio: base?.motivo_no_envio ?? '',
