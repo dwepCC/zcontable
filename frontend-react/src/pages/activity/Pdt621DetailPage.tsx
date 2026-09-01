@@ -525,8 +525,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
               step="1"
               min="0"
               disabled={!canUpdate}
-              value={record.cantidad_comprobantes_venta}
+              value={record.cantidad_comprobantes_venta || ''}
               onChange={(e) => patchRecord({ cantidad_comprobantes_venta: Number(e.target.value) || 0 })}
+              placeholder="0"
               className={FIELD_INPUT}
             />
           </div>
@@ -537,8 +538,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
               step="1"
               min="0"
               disabled={!canUpdate}
-              value={record.cantidad_comprobantes_compra}
+              value={record.cantidad_comprobantes_compra || ''}
               onChange={(e) => patchRecord({ cantidad_comprobantes_compra: Number(e.target.value) || 0 })}
+              placeholder="0"
               className={FIELD_INPUT}
             />
           </div>
@@ -605,11 +607,11 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-800">Evidencias ({attachments.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-800">PDT 621 ({attachments.length})</h2>
           {canUpload ? (
             <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium cursor-pointer hover:bg-primary-700">
               <i className="fas fa-upload" aria-hidden />
-              {uploading ? 'Subiendo…' : 'Subir archivos'}
+              {uploading ? 'Subiendo…' : 'Cargar PDT 621'}
               <input
                 ref={fileRef}
                 type="file"
