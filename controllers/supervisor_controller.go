@@ -826,7 +826,9 @@ func (ctrl *SupervisorController) ReportMonthlyAPI(c fiber.Ctx) error {
 	}
 	kind := c.Query("kind", "monthly")
 	if kind == "productivity" {
-		rows, err := ctrl.svc.ReportProductivity(params.PeriodYM, params.AllowedCompanyIDs)
+		rows, err := ctrl.svc.ReportProductivity(services.SupervisorDashboardParams{
+			PeriodYM: params.PeriodYM, AllowedCompanyIDs: params.AllowedCompanyIDs,
+		})
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}

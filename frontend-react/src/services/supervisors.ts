@@ -106,6 +106,7 @@ export interface SupervisorDashboardData {
   controls_pendiente: number;
   controls_vencido: number;
   controls_observado: number;
+  controls_cerrado: number;
   declarations_observed: number;
   nps_pending: number;
   payments_pending: number;

@@ -7,10 +7,11 @@ import { usersService } from '../../services/users';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
 import type { Company, User } from '../../types/dashboard';
-import { controlStatusLabel, currentPeriodYM } from '../../utils/supervisorLabels';
+import { controlStatusLabel, previousMonthPeriodYM } from '../../utils/supervisorLabels';
+import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
+import { extractApiErrorMessage } from '../../utils/apiError';
 import {
   fetchPdtWorkspaceData,
-  formatPdtMetricsLine,
   type PdtTypeSummary,
   type PdtWorkspaceData,
 } from '../../utils/pdtClientAggregation';
@@ -27,7 +28,9 @@ const SupervisorDashboard = () => {
     [],
   );
 
-  const [periodYm, setPeriodYm] = useState(currentPeriodYM());
+  // Por defecto, el mes calendario anterior: igual que Control PDT 601/621, los controles del
+  // dashboard se trabajan "pasando el mes" (en setiembre se controla lo de agosto).
+  const [periodYm, setPeriodYm] = useState(previousMonthPeriodYM());
   const [generalStatus, setGeneralStatus] = useState('');
   const [riskLevel, setRiskLevel] = useState('');
   const [companyId, setCompanyId] = useState('');
@@ -40,6 +43,7 @@ const SupervisorDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [pdtLoading, setPdtLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pdtError, setPdtError] = useState('');
 
   useEffect(() => {
     if (!allowed || !isAnalistaScope) return;
@@ -83,42 +87,58 @@ const SupervisorDashboard = () => {
     [users],
   );
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError('');
-      setData(
-        await supervisorsService.dashboard({
-          period_ym: periodYm,
-          general_status: generalStatus || undefined,
-          risk_level: riskLevel || undefined,
-          company_id: companyId ? Number(companyId) : undefined,
-          responsible_user_id: responsibleUserId ? Number(responsibleUserId) : undefined,
-          supervisor_user_id: supervisorUserId ? Number(supervisorUserId) : undefined,
-        }),
-      );
-    } catch {
-      setError('No se pudo cargar el dashboard de supervisores');
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [periodYm, generalStatus, riskLevel, companyId, responsibleUserId, supervisorUserId]);
+  const load = useCallback(
+    () =>
+      supervisorsService.dashboard({
+        period_ym: periodYm,
+        general_status: generalStatus || undefined,
+        risk_level: riskLevel || undefined,
+        company_id: companyId ? Number(companyId) : undefined,
+        responsible_user_id: responsibleUserId ? Number(responsibleUserId) : undefined,
+        supervisor_user_id: supervisorUserId ? Number(supervisorUserId) : undefined,
+      }),
+    [periodYm, generalStatus, riskLevel, companyId, responsibleUserId, supervisorUserId],
+  );
 
+  // Si el usuario cambia de filtro varias veces seguidas, descarta cualquier respuesta que llegue
+  // después de que este efecto ya haya sido reemplazado por uno más nuevo — evita que una
+  // respuesta vieja y lenta pise en pantalla a una más reciente que ya llegó antes.
   useEffect(() => {
-    if (allowed) void load();
+    if (!allowed) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    void load()
+      .then((res) => {
+        if (cancelled) return;
+        setData(res);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(extractApiErrorMessage(err, 'No se pudo cargar el dashboard de supervisores'));
+        setData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [allowed, load]);
 
   useEffect(() => {
     if (!allowed) return;
     let cancelled = false;
     setPdtLoading(true);
+    setPdtError('');
     void fetchPdtWorkspaceData(periodYm)
       .then((res) => {
         if (!cancelled) setPdtData(res);
       })
-      .catch(() => {
-        if (!cancelled) setPdtData(null);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setPdtData(null);
+        setPdtError(extractApiErrorMessage(err, 'No se pudo cargar el resumen PDT 601/621.'));
       })
       .finally(() => {
         if (!cancelled) setPdtLoading(false);
@@ -128,15 +148,27 @@ const SupervisorDashboard = () => {
     };
   }, [allowed, periodYm]);
 
+  // Incluye "cerrado" para que el total de la barra sea el MISMO universo que usa el backend
+  // para calcular monthly_compliance_pct (antes la barra excluía "cerrado" y el % de al lado sí
+  // lo incluía en su base — dos números uno junto al otro que no eran comparables entre sí).
   const chartTotal = useMemo(() => {
     if (!data) return 0;
     return (
       data.controls_al_dia +
       data.controls_pendiente +
       data.controls_vencido +
-      data.controls_observado
+      data.controls_observado +
+      data.controls_cerrado
     );
   }, [data]);
+
+  // El backend limita las alertas individuales de "control vencido" a 8 (Limit(8), para no
+  // inundar la lista) — esto cuenta cuántas de esas 8 vinieron, para poder avisar cuando el total
+  // real de vencidos (data.controls_vencido) es mayor y quedan más sin mostrar.
+  const overdueAlertCount = useMemo(
+    () => data?.alerts?.filter((a) => a.kind === 'overdue_control').length ?? 0,
+    [data],
+  );
 
   const hasExtraFilters = Boolean(companyId || responsibleUserId || supervisorUserId);
 
@@ -151,7 +183,7 @@ const SupervisorDashboard = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className={PAGE_WORKSPACE_CLASS}>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">Dashboard supervisores</h2>
@@ -277,9 +309,9 @@ const SupervisorDashboard = () => {
 
           <PdtSummarySection
             loading={pdtLoading}
+            error={pdtError}
             summary601={pdtData?.summaryByType.pdt_601}
             summary621={pdtData?.summaryByType.pdt_621}
-            metrics={pdtData?.metrics}
             workspace="supervisor"
           />
 
@@ -295,24 +327,36 @@ const SupervisorDashboard = () => {
                 <div
                   className="bg-amber-400 h-full"
                   style={{ width: `${(data.controls_pendiente / chartTotal) * 100}%` }}
+                  title={controlStatusLabel('pendiente')}
                 />
                 <div
                   className="bg-red-500 h-full"
                   style={{ width: `${(data.controls_vencido / chartTotal) * 100}%` }}
+                  title={controlStatusLabel('vencido')}
                 />
                 <div
                   className="bg-orange-400 h-full"
                   style={{ width: `${(data.controls_observado / chartTotal) * 100}%` }}
+                  title={controlStatusLabel('observado')}
+                />
+                <div
+                  className="bg-slate-400 h-full"
+                  style={{ width: `${(data.controls_cerrado / chartTotal) * 100}%` }}
+                  title={controlStatusLabel('cerrado')}
                 />
               </div>
-              <p className="text-xs text-slate-500 mt-2">Cumplimiento: {data.monthly_compliance_pct}%</p>
+              <p className="text-xs text-slate-500 mt-2">
+                Cumplimiento: {data.monthly_compliance_pct}% · {chartTotal} control{chartTotal === 1 ? '' : 'es'} en
+                el período
+              </p>
             </div>
           ) : null}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             <StatusPill label={controlStatusLabel('al_dia')} count={data.controls_al_dia} tone="emerald" />
             <StatusPill label={controlStatusLabel('pendiente')} count={data.controls_pendiente} tone="amber" />
             <StatusPill label={controlStatusLabel('vencido')} count={data.controls_vencido} tone="red" />
             <StatusPill label={controlStatusLabel('observado')} count={data.controls_observado} tone="orange" />
+            <StatusPill label={controlStatusLabel('cerrado')} count={data.controls_cerrado} tone="slate" />
           </div>
           {(data.alerts?.length ?? 0) > 0 ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-2">
@@ -331,6 +375,15 @@ const SupervisorDashboard = () => {
                   </li>
                 ))}
               </ul>
+              {overdueAlertCount > 0 && data.controls_vencido > overdueAlertCount ? (
+                <p className="text-xs text-amber-700">
+                  Mostrando {overdueAlertCount} de {data.controls_vencido} controles vencidos — revise{' '}
+                  <Link to="/supervisors/reports" className="underline">
+                    Reportes
+                  </Link>{' '}
+                  para ver el resto.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {(data.productivity?.length ?? 0) > 0 ? (
@@ -383,37 +436,34 @@ const SupervisorDashboard = () => {
 
 function PdtSummarySection({
   loading,
+  error,
   summary601,
   summary621,
-  metrics,
   workspace,
 }: {
   loading: boolean;
+  error?: string;
   summary601?: PdtTypeSummary;
   summary621?: PdtTypeSummary;
-  metrics?: PdtWorkspaceData['metrics'];
   workspace: 'supervisor' | 'assistant';
 }) {
   const base = workspace === 'assistant' ? '/assistant/activities' : '/supervisors/activities';
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">Declaraciones PDT (agregación cliente)</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Resumen por tipo a partir de controles y declaraciones del período.
-          </p>
-        </div>
-        {metrics ? (
-          <p className="text-[10px] text-slate-400 font-mono" title="Métricas de llamadas API para evaluar N+1">
-            {formatPdtMetricsLine(metrics)}
-            {metrics.isPartialSample ? ' · muestra parcial' : ''}
-          </p>
-        ) : null}
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800">Declaraciones PDT 601/621</h3>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Resumen por tipo a partir de controles y declaraciones del período.
+        </p>
       </div>
       {loading ? (
         <p className="text-sm text-slate-500">Cargando resumen PDT…</p>
+      ) : error ? (
+        <p className="text-sm text-red-600 flex items-center gap-1.5">
+          <i className="fas fa-exclamation-circle text-xs" aria-hidden />
+          {error}
+        </p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <PdtTypeCard title="PDT 601" summary={summary601 ?? emptyPdtSummary()} linkTo={`${base}/pdt-601`} />
@@ -500,7 +550,9 @@ function StatusPill({ label, count, tone }: { label: string; count: number; tone
         ? 'bg-amber-50 text-amber-800'
         : tone === 'red'
           ? 'bg-red-50 text-red-800'
-          : 'bg-orange-50 text-orange-800';
+          : tone === 'slate'
+            ? 'bg-slate-100 text-slate-700'
+            : 'bg-orange-50 text-orange-800';
   return (
     <div className={`rounded-lg px-4 py-3 ${bg} flex justify-between items-center`}>
       <span className="text-sm font-medium">{label}</span>
