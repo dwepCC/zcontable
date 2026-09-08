@@ -155,8 +155,11 @@ export function StatusDistributionDonut({ slices, total }: { slices: DonutSlice[
   );
 }
 
-/** Ranking de responsables por cumplimiento — misma tabla de siempre, ordenada de mayor a menor
- * y con una barra en vez de solo el número, para que el más atrasado salte a la vista. */
+/** Cumplimiento POR SUPERVISOR (no por responsable/contador) — como el resto del dashboard ya
+ * está acotado a las empresas del supervisor que lo está viendo, esto es su propio avance del
+ * período (una sola fila) para que se autoevalúe; con alcance de estudio sin restricción salen
+ * varias filas, una por supervisor, para compararlos entre sí. Mismo componente de siempre
+ * (barra + %), ordenado de mayor a menor cumplimiento. */
 export function ProductivityRanking({ rows }: { rows: SupervisorProductivityRow[] }) {
   const sorted = [...rows].sort((a, b) => b.compliance_pct - a.compliance_pct);
   const barColor = (pct: number) =>
@@ -164,7 +167,10 @@ export function ProductivityRanking({ rows }: { rows: SupervisorProductivityRow[
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
-      <p className="text-sm font-medium text-slate-700 px-4 pt-4">Productividad por responsable</p>
+      <p className="text-sm font-medium text-slate-700 px-4 pt-4">Productividad por supervisor</p>
+      <p className="text-xs text-slate-500 px-4 mt-0.5">
+        Cumplimiento de controles mensuales del período, por supervisor asignado.
+      </p>
       <div className="p-4 space-y-2.5 min-w-[26rem]">
         {sorted.map((r) => (
           <div key={r.user_id} className="flex items-center gap-3 text-sm">

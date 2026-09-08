@@ -346,11 +346,31 @@ const SupervisorDashboard = () => {
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <StatCard label="Empresas activas" value={data.total_active_companies} icon="fas fa-building" />
-            <StatCard label="Empresas al día" value={data.companies_al_dia ?? 0} icon="fas fa-check-circle" />
-            <StatCard label="Empresas pendientes" value={data.companies_pendiente ?? 0} icon="fas fa-clock" />
-            <StatCard label="Empresas vencidas" value={data.companies_vencido ?? 0} icon="fas fa-exclamation-circle" />
+            <StatCard
+              label="Empresas al día"
+              value={data.companies_al_dia ?? 0}
+              icon="fas fa-check-circle"
+              hint="Empresas cuyo control mensual del período está 'Al día' o 'Cerrado' — es decir, el supervisor ya recibió/tramitó su información. No mide pagos ni facturación."
+            />
+            <StatCard
+              label="Empresas pendientes"
+              value={data.companies_pendiente ?? 0}
+              icon="fas fa-clock"
+              hint="Empresas con control mensual en estado 'Pendiente' — aún no se registró recepción de información."
+            />
+            <StatCard
+              label="Empresas vencidas"
+              value={data.companies_vencido ?? 0}
+              icon="fas fa-exclamation-circle"
+              hint="Empresas cuyo control mensual pasó la fecha límite sin quedar al día."
+            />
             <StatCard label="Sin control en período" value={data.companies_without_control ?? 0} icon="fas fa-plus-circle" />
-            <StatCard label="Cumplimiento %" value={`${data.monthly_compliance_pct}%`} icon="fas fa-percent" />
+            <StatCard
+              label="Cumplimiento %"
+              value={`${data.monthly_compliance_pct}%`}
+              icon="fas fa-percent"
+              hint="(Controles al día + cerrados) / total de controles del período."
+            />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <StatCard label="Declaraciones observadas" value={data.declarations_observed} icon="fas fa-exclamation-triangle" />
@@ -487,7 +507,7 @@ function PdtSummarySection({
 }
 
 function emptyPdtSummary(): SupervisorPdtTypeSummary {
-  return { pendiente: 0, observado: 0, vencido: 0, completado: 0, total: 0 };
+  return { pendiente: 0, observado: 0, vencido: 0, completado: 0, sin_planilla: 0, total: 0 };
 }
 
 function PdtTypeCard({
@@ -512,6 +532,11 @@ function PdtTypeCard({
         <PdtMiniStat label="Observadas" value={summary.observado} tone="orange" />
         <PdtMiniStat label="Vencidas" value={summary.vencido} tone="red" />
         <PdtMiniStat label="Completadas" value={summary.completado} tone="emerald" />
+        {/* Solo PDT 601 tiene el concepto "sin planilla" (PDT 621 siempre trae 0 acá) — no se
+            cuenta como pendiente: la empresa no tiene nada que declarar en el período. */}
+        {summary.sin_planilla > 0 ? (
+          <PdtMiniStat label="Sin planilla" value={summary.sin_planilla} tone="slate" />
+        ) : null}
       </div>
       <p className="text-[10px] text-slate-400 mt-3">Total en período: {summary.total}</p>
     </div>
@@ -525,7 +550,7 @@ function PdtMiniStat({
 }: {
   label: string;
   value: number;
-  tone: 'amber' | 'orange' | 'red' | 'emerald';
+  tone: 'amber' | 'orange' | 'red' | 'emerald' | 'slate';
 }) {
   const bg =
     tone === 'emerald'
@@ -534,7 +559,9 @@ function PdtMiniStat({
         ? 'bg-amber-50 text-amber-800'
         : tone === 'red'
           ? 'bg-red-50 text-red-800'
-          : 'bg-orange-50 text-orange-800';
+          : tone === 'slate'
+            ? 'bg-slate-100 text-slate-700'
+            : 'bg-orange-50 text-orange-800';
   return (
     <div className={`rounded-lg px-3 py-2 flex justify-between items-center ${bg}`}>
       <span>{label}</span>
@@ -543,11 +570,24 @@ function PdtMiniStat({
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: number | string; icon: string }) {
+function StatCard({
+  label,
+  value,
+  icon,
+  hint,
+}: {
+  label: string;
+  value: number | string;
+  icon: string;
+  /** Tooltip explicando qué mide exactamente la tarjeta — para etiquetas ambiguas como "Empresas
+   * al día" (no es un indicador de pagos: se calcula sobre el estado del control mensual). */
+  hint?: string;
+}) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" title={hint}>
+      <div className="flex items-center gap-1.5 text-slate-500 text-xs mb-1">
         <i className={icon}></i> {label}
+        {hint ? <i className="fas fa-circle-info text-[10px] text-slate-300" aria-hidden /> : null}
       </div>
       <p className="text-2xl font-semibold text-slate-800">{value}</p>
     </div>

@@ -303,6 +303,14 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	if p.CompanyID > 0 {
 		qCompanies = qCompanies.Where("id = ?", p.CompanyID)
 	}
+	// Estado/riesgo/responsable/supervisor solo existen en el CONTROL del período (no en la
+	// empresa) — antes "Empresas activas" ignoraba estos 4 filtros y siempre mostraba el total del
+	// estudio completo, aunque el resto del dashboard (y "Sin control en período" más abajo) sí
+	// quedara acotado. Cuando alguno está activo, pasa a contar "activas Y con un control en el
+	// período que matchea ese filtro" — mismo criterio que dashboardControlsQuery.
+	if p.GeneralStatus != "" || p.RiskLevel != "" || p.ResponsibleUserID > 0 || p.SupervisorUserID > 0 {
+		qCompanies = qCompanies.Where("id IN (?)", s.dashboardControlsQuery(p).Select("supervisor_monthly_controls.company_id"))
+	}
 	_ = qCompanies.Count(&out.TotalActiveCompanies).Error
 
 	base := s.dashboardControlsQuery(p)
@@ -335,7 +343,28 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	if p.CompanyID > 0 {
 		subCtrl = subCtrl.Where("company_id = ?", p.CompanyID)
 	}
-	_ = qCompanies.Where("id NOT IN (?)", subCtrl).Count(&out.CompaniesWithoutControl).Error
+	if p.GeneralStatus != "" || p.RiskLevel != "" {
+		// Una empresa SIN control no puede matchear un filtro de estado/riesgo (ambos solo existen
+		// en el control que no tiene todavía) — el conjunto es vacío por definición.
+		out.CompaniesWithoutControl = 0
+	} else {
+		qMissing := database.DB.Model(&models.Company{}).Where("status = ?", "activo")
+		if p.AllowedCompanyIDs != nil {
+			qMissing = qMissing.Where("id IN ?", p.AllowedCompanyIDs)
+		}
+		if p.CompanyID > 0 {
+			qMissing = qMissing.Where("id = ?", p.CompanyID)
+		}
+		// Sin control todavía no hay responsable/supervisor DE CONTROL que leer — se usa la
+		// asignación por defecto de la empresa (mismo dato que bootstrapea el control al crearse).
+		if p.ResponsibleUserID > 0 {
+			qMissing = qMissing.Where("accountant_user_id = ?", p.ResponsibleUserID)
+		}
+		if p.SupervisorUserID > 0 {
+			qMissing = qMissing.Where("supervisor_user_id = ?", p.SupervisorUserID)
+		}
+		_ = qMissing.Where("id NOT IN (?)", subCtrl).Count(&out.CompaniesWithoutControl).Error
+	}
 
 	var controlsCerrado int64
 	countStatus(models.SupervisorControlCerrado, &controlsCerrado)
@@ -404,7 +433,9 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	out.ByStatus[models.SupervisorControlVencido] = out.ControlsVencido
 	out.ByStatus[models.SupervisorControlObservado] = out.ControlsObservado
 	s.buildDashboardAlerts(p, out)
-	if prod, err := s.ReportProductivity(p); err == nil {
+	// Productividad DEL SUPERVISOR (no del responsable/contador) — ver comentario en
+	// SupervisorComplianceRanking.
+	if prod, err := s.SupervisorComplianceRanking(p); err == nil {
 		out.Productivity = prod
 	}
 	if out.Productivity == nil {
@@ -418,16 +449,25 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 // que antes calculaba el navegador en utils/pdtClientAggregation.ts trayendo TODOS los controles
 // y declaraciones del período (1 listControls + N listDeclarations, hasta ~9 queries cada una).
 type PdtTypeSummary struct {
-	Pendiente  int64 `json:"pendiente"`
-	Observado  int64 `json:"observado"`
-	Vencido    int64 `json:"vencido"`
-	Completado int64 `json:"completado"`
-	Total      int64 `json:"total"`
+	Pendiente   int64 `json:"pendiente"`
+	Observado   int64 `json:"observado"`
+	Vencido     int64 `json:"vencido"`
+	Completado  int64 `json:"completado"`
+	SinPlanilla int64 `json:"sin_planilla"`
+	Total       int64 `json:"total"`
 }
 
 // PdtDashboardSummary calcula el resumen PDT 601/621 en el servidor con una sola consulta
 // agrupada — reemplaza la agregación 1+N que hacía el navegador. Acepta los mismos filtros que
 // el resto del dashboard (empresa, estado general, riesgo, responsable, supervisor, alcance).
+//
+// "Sin planilla" (planilla PDT 601 marcada por el supervisor/asistente, ver Pdt601DetailPage) es
+// un bucket propio, NO "pendiente": una empresa sin planilla no tiene nada que declarar en PDT
+// 601, así que clasificarla como pendiente la hacía ver "atrasada" para siempre (incluso
+// "vencida" una vez pasada la fecha límite, porque d.status se queda en "pendiente" — sin_planilla
+// no es un status de la declaración, ver combinedStatusValue en el frontend). Se prioriza el flag
+// de planilla sobre d.status para autocorregir registros previos a este fix que hayan quedado con
+// un status desalineado (p. ej. "observado" antes de marcarse sin planilla).
 func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (map[string]PdtTypeSummary, error) {
 	if !validPeriodYM(p.PeriodYM) {
 		return nil, errors.New("período inválido (use YYYY-MM)")
@@ -439,31 +479,42 @@ func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (ma
 		Observado       int64
 		Vencido         int64
 		Completado      int64
+		SinPlanilla     int64
 		Total           int64
 	}
 
 	// La fecha límite de cada declaración es la suya propia si la tiene, si no la de su control
 	// (mismo criterio que resolvePdt601DueDate en el frontend). "Vencido" solo aplica a
 	// declaraciones que siguen abiertas (ni observadas ni ya completadas) y cuya fecha límite
-	// resuelta ya pasó.
+	// resuelta ya pasó. pl.sin_planilla es un dato del CONTROL (una planilla por control, no por
+	// declaración) — el LEFT JOIN lo trae igual para las filas pdt_601 Y pdt_621 de ese control, así
+	// que hay que exigir además "d.declaration_type = pdt_601" en cada condición: si no, una
+	// empresa marcada sin planilla aparecía también como "sin planilla" en su PDT 621 (que no tiene
+	// ese concepto — es un documento aparte, de ventas/compras).
+	isSinPlanillaPDT601 := "d.declaration_type = ? AND COALESCE(pl.sin_planilla, 0) = 1"
 	q := database.DB.Table("supervisor_declarations AS d").
 		Select(`d.declaration_type AS declaration_type,
-			SUM(CASE WHEN d.status = ? THEN 1 ELSE 0 END) AS observado,
-			SUM(CASE WHEN d.status IN ? THEN 1 ELSE 0 END) AS completado,
-			SUM(CASE WHEN d.status NOT IN ? AND d.status <> ?
+			SUM(CASE WHEN `+isSinPlanillaPDT601+` THEN 1 ELSE 0 END) AS sin_planilla,
+			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status = ? THEN 1 ELSE 0 END) AS observado,
+			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status IN ? THEN 1 ELSE 0 END) AS completado,
+			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status NOT IN ? AND d.status <> ?
 				AND COALESCE(d.due_date, c.due_date) IS NOT NULL
 				AND COALESCE(d.due_date, c.due_date) < CURDATE()
 				THEN 1 ELSE 0 END) AS vencido,
-			SUM(CASE WHEN d.status NOT IN ? AND d.status <> ?
+			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status NOT IN ? AND d.status <> ?
 				AND NOT (COALESCE(d.due_date, c.due_date) IS NOT NULL AND COALESCE(d.due_date, c.due_date) < CURDATE())
 				THEN 1 ELSE 0 END) AS pendiente,
 			COUNT(*) AS total`,
-			models.SupervisorDeclObservado,
-			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado},
+			models.SupervisorDeclPDT601,
+			models.SupervisorDeclPDT601, models.SupervisorDeclObservado,
+			models.SupervisorDeclPDT601, []string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado},
+			models.SupervisorDeclPDT601,
 			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
+			models.SupervisorDeclPDT601,
 			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
 		).
 		Joins("JOIN supervisor_monthly_controls c ON c.id = d.monthly_control_id").
+		Joins("LEFT JOIN supervisor_pdt601_planillas pl ON pl.monthly_control_id = c.id AND pl.deleted_at IS NULL").
 		Where("c.period_ym = ? AND d.declaration_type IN ?", p.PeriodYM, []string{models.SupervisorDeclPDT601, models.SupervisorDeclPDT621})
 
 	if p.CompanyID > 0 {
@@ -497,7 +548,7 @@ func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (ma
 	for _, r := range rows {
 		out[r.DeclarationType] = PdtTypeSummary{
 			Pendiente: r.Pendiente, Observado: r.Observado, Vencido: r.Vencido,
-			Completado: r.Completado, Total: r.Total,
+			Completado: r.Completado, SinPlanilla: r.SinPlanilla, Total: r.Total,
 		}
 	}
 	return out, nil
@@ -1507,10 +1558,11 @@ func (s *SupervisorService) ReportList(kind string, p SupervisorReportListParams
 	return rows, total, nil
 }
 
-// ReportProductivity acepta los mismos filtros que el resto del dashboard (empresa, estado
-// general, riesgo, responsable, supervisor) — antes solo recibía período + alcance de empresas,
-// así que no cambiaba al filtrar por cualquiera de los otros controles del panel.
-func (s *SupervisorService) ReportProductivity(p SupervisorDashboardParams) ([]SupervisorProductivityRow, error) {
+// complianceRankingBy agrupa el cumplimiento de controles mensuales por la columna indicada
+// (siempre una constante interna — "responsible_user_id" o "supervisor_user_id", nunca algo
+// derivado de un request, así que no hay riesgo de inyección al concatenarla). Acepta los mismos
+// filtros que el resto del dashboard (empresa, estado general, riesgo, responsable, supervisor).
+func (s *SupervisorService) complianceRankingBy(p SupervisorDashboardParams, groupCol string) ([]SupervisorProductivityRow, error) {
 	if !validPeriodYM(p.PeriodYM) {
 		return nil, errors.New("período inválido")
 	}
@@ -1521,9 +1573,9 @@ func (s *SupervisorService) ReportProductivity(p SupervisorDashboardParams) ([]S
 	}
 	var raw []agg
 	q := database.DB.Table("supervisor_monthly_controls").
-		Select(`responsible_user_id AS user_id, COUNT(*) AS total,
+		Select(groupCol+` AS user_id, COUNT(*) AS total,
 			SUM(CASE WHEN general_status = ? THEN 1 ELSE 0 END) AS al_dia`, models.SupervisorControlAlDia).
-		Where("period_ym = ? AND responsible_user_id IS NOT NULL", p.PeriodYM)
+		Where("period_ym = ? AND "+groupCol+" IS NOT NULL", p.PeriodYM)
 	if p.CompanyID > 0 {
 		q = q.Where("company_id = ?", p.CompanyID)
 	}
@@ -1540,14 +1592,14 @@ func (s *SupervisorService) ReportProductivity(p SupervisorDashboardParams) ([]S
 		q = q.Where("supervisor_user_id = ?", p.SupervisorUserID)
 	}
 	q = s.applyCompanyScope(q, p.AllowedCompanyIDs)
-	if err := q.Group("responsible_user_id").Scan(&raw).Error; err != nil {
+	if err := q.Group(groupCol).Scan(&raw).Error; err != nil {
 		return nil, err
 	}
 	if len(raw) == 0 {
 		return []SupervisorProductivityRow{}, nil
 	}
 
-	// Resuelve todos los nombres de una sola consulta en vez de una por responsable (N+1).
+	// Resuelve todos los nombres de una sola consulta en vez de una por fila (N+1).
 	userIDs := make([]uint, 0, len(raw))
 	for _, r := range raw {
 		userIDs = append(userIDs, r.UserID)
@@ -1574,6 +1626,22 @@ func (s *SupervisorService) ReportProductivity(p SupervisorDashboardParams) ([]S
 		})
 	}
 	return out, nil
+}
+
+// ReportProductivity cumplimiento por RESPONSABLE (el contador/asistente que prepara la
+// información de cada control) — la usa /supervisors/reports ("Cumplimiento por analista
+// responsable en el período").
+func (s *SupervisorService) ReportProductivity(p SupervisorDashboardParams) ([]SupervisorProductivityRow, error) {
+	return s.complianceRankingBy(p, "responsible_user_id")
+}
+
+// SupervisorComplianceRanking cumplimiento por SUPERVISOR — a diferencia de ReportProductivity,
+// esto es lo que alimenta el widget "Productividad" del propio dashboard del supervisor: como el
+// resto de la pantalla ya está acotado a las empresas del supervisor que la está viendo, acá ve su
+// PROPIO avance (un supervisor con alcance de estudio sin restricción, en cambio, ve una fila por
+// cada supervisor — útil para comparar entre ellos).
+func (s *SupervisorService) SupervisorComplianceRanking(p SupervisorDashboardParams) ([]SupervisorProductivityRow, error) {
+	return s.complianceRankingBy(p, "supervisor_user_id")
 }
 
 func (s *SupervisorService) ReportObservationsHistory(p SupervisorReportListParams) ([]SupervisorObservationReportRow, int64, error) {

@@ -468,6 +468,9 @@ export interface SupervisorPdtTypeSummary {
   observado: number;
   vencido: number;
   completado: number;
+  // Solo aplica a PDT 601 (planilla marcada "sin planilla" — ver Pdt601DetailPage): siempre 0
+  // en PDT 621, que no tiene ese concepto. No cuenta como "pendiente": no hay nada que declarar.
+  sin_planilla: number;
   total: number;
 }
 
