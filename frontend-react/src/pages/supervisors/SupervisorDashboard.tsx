@@ -507,7 +507,7 @@ function PdtSummarySection({
 }
 
 function emptyPdtSummary(): SupervisorPdtTypeSummary {
-  return { pendiente: 0, observado: 0, vencido: 0, completado: 0, sin_planilla: 0, total: 0 };
+  return { pendiente: 0, observado: 0, vencido: 0, completado: 0, sin_planilla: 0, suspendida: 0, total: 0 };
 }
 
 function PdtTypeCard({
@@ -537,6 +537,11 @@ function PdtTypeCard({
         {summary.sin_planilla > 0 ? (
           <PdtMiniStat label="Sin planilla" value={summary.sin_planilla} tone="slate" />
         ) : null}
+        {/* "Suspendida" sí aplica a ambos módulos — tampoco cuenta como pendiente/vencido mientras
+            la empresa esté suspendida (ver PdtDashboardSummary). */}
+        {summary.suspendida > 0 ? (
+          <PdtMiniStat label="Suspendida" value={summary.suspendida} tone="purple" />
+        ) : null}
       </div>
       <p className="text-[10px] text-slate-400 mt-3">Total en período: {summary.total}</p>
     </div>
@@ -550,7 +555,7 @@ function PdtMiniStat({
 }: {
   label: string;
   value: number;
-  tone: 'amber' | 'orange' | 'red' | 'emerald' | 'slate';
+  tone: 'amber' | 'orange' | 'red' | 'emerald' | 'slate' | 'purple';
 }) {
   const bg =
     tone === 'emerald'
@@ -561,7 +566,9 @@ function PdtMiniStat({
           ? 'bg-red-50 text-red-800'
           : tone === 'slate'
             ? 'bg-slate-100 text-slate-700'
-            : 'bg-orange-50 text-orange-800';
+            : tone === 'purple'
+              ? 'bg-purple-100 text-purple-800'
+              : 'bg-orange-50 text-orange-800';
   return (
     <div className={`rounded-lg px-3 py-2 flex justify-between items-center ${bg}`}>
       <span>{label}</span>

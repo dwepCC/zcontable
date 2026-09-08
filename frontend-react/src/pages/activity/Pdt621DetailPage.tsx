@@ -27,6 +27,7 @@ import { extractApiErrorMessage } from '../../utils/apiError';
 const PDT621_APPROVED_STATUSES = new Set(['aprobado', 'presentado', 'cerrado']);
 
 const EMPTY_RECORD: Pdt621RecordInput = {
+  suspendida: false,
   primera_entrega_fecha: '',
   primera_entrega_hora: '',
   observacion: '',
@@ -44,9 +45,35 @@ const EMPTY_RECORD: Pdt621RecordInput = {
   motivo_no_envio: '',
 };
 
+/** Nota fija que se fuerza en Observación cuando la empresa está marcada "suspendida" — mismo
+ * texto que usa el backend (server-side, ver SavePdt621Record). */
+const SUSPENDIDA_NOTE = 'Empresa suspendida';
+
+/** Campos que no aplican cuando se marca "suspendida" (se limpian al activar el flag) — bloquea
+ * CUALQUIER otro registro, más restrictivo que cualquier otro estado de este módulo. Observación
+ * se fuerza a la nota fija en vez de limpiarse, para que quede visible en el listado y el Excel. */
+const SUSPENDIDA_RESET: Partial<Pdt621RecordInput> = {
+  primera_entrega_fecha: '',
+  primera_entrega_hora: '',
+  observacion: SUSPENDIDA_NOTE,
+  segunda_entrega_fecha: '',
+  segunda_entrega_hora: '',
+  fecha_declaracion: '',
+  total_ventas: 0,
+  total_compras: 0,
+  igv: 0,
+  rta: 0,
+  cantidad_comprobantes_venta: 0,
+  cantidad_comprobantes_compra: 0,
+  envio_sire: '',
+  fecha_envio_sire: '',
+  motivo_no_envio: '',
+};
+
 function recordToInput(r: Pdt621Record | null | undefined): Pdt621RecordInput {
   if (!r) return { ...EMPTY_RECORD };
-  return {
+  const base: Pdt621RecordInput = {
+    suspendida: r.suspendida ?? false,
     primera_entrega_fecha: r.primera_entrega_fecha ?? '',
     primera_entrega_hora: r.primera_entrega_hora ?? '',
     observacion: r.observacion ?? '',
@@ -63,6 +90,12 @@ function recordToInput(r: Pdt621Record | null | undefined): Pdt621RecordInput {
     fecha_envio_sire: r.fecha_envio_sire ?? '',
     motivo_no_envio: r.motivo_no_envio ?? '',
   };
+  if (base.suspendida) {
+    // Autocorrige registros previos a este fix (o guardados antes de que el backend reforzara el
+    // bloqueo) que hayan quedado con datos colgados pese a estar marcados "suspendida".
+    return { ...base, ...SUSPENDIDA_RESET };
+  }
+  return base;
 }
 
 const FIELD_INPUT =
@@ -102,6 +135,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const declaration = detail?.declaration;
+  // "Suspendida" no es un estado real de la declaración (es record.suspendida) — se muestra en el
+  // badge de Estado en su lugar, mismo criterio que combinedStatusValue en Pdt601DetailPage.tsx.
+  const combinedStatusValue = record.suspendida ? 'suspendida' : declaration?.status ?? '';
 
   // Estos 4 campos se llenan por sincronización desde la liquidación (ver syncPdt621Record en
   // SupervisorLiquidacionCreatePage.tsx) — si ya tienen algún valor, dejarlos editables a mano
@@ -117,9 +153,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
   const dueResolved = useMemo(() => {
     if (!detail || !declaration) return { dueDate: undefined, isOverdue: false, daysRemaining: null as number | null };
     const dueDate = resolvePdt621DueDate(declaration.due_date, detail.control_due_date);
-    const meta = computePdt621DueMeta(declaration.status, dueDate);
+    const meta = computePdt621DueMeta(declaration.status, dueDate, record.suspendida);
     return { dueDate, ...meta };
-  }, [detail, declaration]);
+  }, [detail, declaration, record.suspendida]);
 
   const loadAttachments = useCallback(async (declarationId: number) => {
     const rows = await supervisorsService.listAttachments(0, declarationId);
@@ -256,6 +292,21 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
     setRecord((prev) => ({ ...prev, ...patch }));
   };
 
+  // "Suspendida" bloquea registrar CUALQUIER otro dato (incluida Observación, que se fuerza a la
+  // nota fija) hasta que se desmarque — mismo criterio que PDT 601 (Pdt601DetailPage.tsx). Al
+  // desmarcar, se limpia la nota fija para que el supervisor pueda escribir una observación real.
+  const handleToggleSuspendida = (checked: boolean) => {
+    setRecord((prev) =>
+      checked
+        ? { ...prev, suspendida: true, ...SUSPENDIDA_RESET }
+        : {
+            ...prev,
+            suspendida: false,
+            observacion: prev.observacion === SUSPENDIDA_NOTE ? '' : prev.observacion,
+          },
+    );
+  };
+
   const handleSaveRecord = async () => {
     if (!canUpdate) return;
     if (record.envio_sire === 'no' && !record.motivo_no_envio.trim()) {
@@ -327,9 +378,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
             <dt className="text-slate-500">Estado</dt>
             <dd>
               <span
-                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt621StatusBadgeClass(declaration.status)}`}
+                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${pdt621StatusBadgeClass(combinedStatusValue)}`}
               >
-                {pdt621StatusLabel(declaration.status)}
+                {pdt621StatusLabel(combinedStatusValue)}
               </span>
             </dd>
             <dt className="text-slate-500">Vencimiento</dt>
@@ -342,9 +393,9 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
               <label className="block text-xs font-medium text-slate-500 mb-1">Cambiar estado</label>
               <select
                 value={declaration.status}
-                disabled={statusSaving}
+                disabled={statusSaving || record.suspendida}
                 onChange={(e) => void handleStatusChange(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-50 disabled:text-slate-500"
               >
                 {PDT621_STATUSES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -354,242 +405,295 @@ const Pdt621DetailPage = ({ workspace }: Pdt621DetailPageProps) => {
               </select>
             </div>
           ) : null}
+          {canUpdate ? (
+            <label
+              className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
+                record.suspendida ? 'border-purple-300 bg-purple-50 text-purple-900' : 'border-slate-200 bg-slate-50 text-slate-700'
+              } cursor-pointer`}
+            >
+              <input
+                type="checkbox"
+                checked={record.suspendida}
+                onChange={(e) => handleToggleSuspendida(e.target.checked)}
+                className="mt-0.5 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+              />
+              <span>
+                <span className="block font-medium">Esta empresa está suspendida en este período</span>
+                <span className="block text-xs mt-0.5 opacity-80">
+                  No se registra ningún otro dato (ni Observación) mientras esté suspendida.
+                </span>
+              </span>
+            </label>
+          ) : record.suspendida ? (
+            <p className="flex items-start gap-2 text-sm text-slate-500">
+              <i className="fas fa-ban mt-0.5 text-purple-600" aria-hidden />
+              Esta empresa está marcada "Suspendida" en este período.
+            </p>
+          ) : null}
         </div>
 
         {(canApprove || canObserve) && (
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
             <h2 className="text-sm font-semibold text-slate-800">Revisión supervisor</h2>
-            {canObserve ? (
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Observar</label>
-                <textarea
-                  value={supervisorNotes}
-                  onChange={(e) => setSupervisorNotes(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="Indique la observación…"
-                />
-                <button
-                  type="button"
-                  disabled={actionLoading}
-                  onClick={() => void handleObserve()}
-                  className="mt-2 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm font-medium hover:bg-amber-100 disabled:opacity-50"
-                >
-                  Observar
-                </button>
-              </div>
-            ) : null}
-            {canApprove ? (
-              <button
-                type="button"
-                disabled={actionLoading || PDT621_APPROVED_STATUSES.has(declaration.status)}
-                onClick={() => void handleApprove()}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Aprobar
-              </button>
-            ) : null}
+            {record.suspendida ? (
+              // Suspendida bloquea TODO registro, incluido el flujo de observar/aprobar.
+              <p className="flex items-start gap-2 text-sm text-slate-500">
+                <i className="fas fa-ban mt-0.5 text-purple-600" aria-hidden />
+                Esta empresa está marcada "Suspendida" en este período — no aplica observar ni
+                aprobar.
+              </p>
+            ) : (
+              <>
+                {canObserve ? (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Observar</label>
+                    <textarea
+                      value={supervisorNotes}
+                      onChange={(e) => setSupervisorNotes(e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="Indique la observación…"
+                    />
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => void handleObserve()}
+                      className="mt-2 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm font-medium hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      Observar
+                    </button>
+                  </div>
+                ) : null}
+                {canApprove ? (
+                  <button
+                    type="button"
+                    disabled={actionLoading || PDT621_APPROVED_STATUSES.has(declaration.status)}
+                    onClick={() => void handleApprove()}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Aprobar
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-4">
         <h2 className="text-sm font-semibold text-slate-800">Revisión de archivadores</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">1ra entrega — Fecha</label>
-            <input
-              type="date"
-              disabled={!canUpdate}
-              value={record.primera_entrega_fecha}
-              onChange={(e) => patchRecord({ primera_entrega_fecha: e.target.value })}
-              className={FIELD_INPUT}
-            />
+        {record.suspendida ? (
+          <div className="flex items-start gap-2.5 rounded-lg border border-purple-300 bg-purple-50 px-3 py-2.5 text-sm text-purple-900">
+            <i className="fas fa-ban mt-0.5" aria-hidden />
+            <span>
+              <span className="block font-medium">Esta empresa está suspendida en este período</span>
+              <span className="block text-xs mt-0.5 opacity-80">
+                No es necesario (ni se permite) registrar entregas, importes ni SIRE.
+              </span>
+            </span>
           </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">1ra entrega — Hora</label>
-            <input
-              type="time"
-              disabled={!canUpdate}
-              value={record.primera_entrega_hora}
-              onChange={(e) => patchRecord({ primera_entrega_hora: e.target.value })}
-              className={FIELD_INPUT}
-            />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">1ra entrega — Fecha</label>
+              <input
+                type="date"
+                disabled={!canUpdate}
+                value={record.primera_entrega_fecha}
+                onChange={(e) => patchRecord({ primera_entrega_fecha: e.target.value })}
+                className={FIELD_INPUT}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">1ra entrega — Hora</label>
+              <input
+                type="time"
+                disabled={!canUpdate}
+                value={record.primera_entrega_hora}
+                onChange={(e) => patchRecord({ primera_entrega_hora: e.target.value })}
+                className={FIELD_INPUT}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">2da entrega — Fecha</label>
+              <input
+                type="date"
+                disabled={!canUpdate}
+                value={record.segunda_entrega_fecha}
+                onChange={(e) => patchRecord({ segunda_entrega_fecha: e.target.value })}
+                className={FIELD_INPUT}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">2da entrega — Hora</label>
+              <input
+                type="time"
+                disabled={!canUpdate}
+                value={record.segunda_entrega_hora}
+                onChange={(e) => patchRecord({ segunda_entrega_hora: e.target.value })}
+                className={FIELD_INPUT}
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">2da entrega — Fecha</label>
-            <input
-              type="date"
-              disabled={!canUpdate}
-              value={record.segunda_entrega_fecha}
-              onChange={(e) => patchRecord({ segunda_entrega_fecha: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">2da entrega — Hora</label>
-            <input
-              type="time"
-              disabled={!canUpdate}
-              value={record.segunda_entrega_hora}
-              onChange={(e) => patchRecord({ segunda_entrega_hora: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-4">
-            <label className="block text-xs text-slate-500 mb-1">Observación</label>
-            <textarea
-              disabled={!canUpdate}
-              value={record.observacion}
-              onChange={(e) => patchRecord({ observacion: e.target.value })}
-              rows={2}
-              className={FIELD_INPUT}
-              placeholder="Observación sobre la revisión del archivador…"
-            />
-          </div>
+        )}
+
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Observación</label>
+          <textarea
+            disabled={!canUpdate || record.suspendida}
+            value={record.observacion}
+            onChange={(e) => patchRecord({ observacion: e.target.value })}
+            rows={2}
+            className={FIELD_INPUT}
+            placeholder="Observación sobre la revisión del archivador…"
+          />
         </div>
 
-        <h2 className="text-sm font-semibold text-slate-800 pt-2 border-t border-slate-100">
-          Fecha de declaración e importes PDT 621
-        </h2>
-        {pdt621Locked ? (
-          <p className="text-xs text-slate-500 -mt-2">
-            Total ventas, Total compras, IGV y Renta se sincronizan desde la liquidación de esta empresa/período — no
-            se editan a mano acá.
-          </p>
+        {!record.suspendida ? (
+          <>
+            <h2 className="text-sm font-semibold text-slate-800 pt-2 border-t border-slate-100">
+              Fecha de declaración e importes PDT 621
+            </h2>
+            {pdt621Locked ? (
+              <p className="text-xs text-slate-500 -mt-2">
+                Total ventas, Total compras, IGV y Renta se sincronizan desde la liquidación de esta empresa/período — no
+                se editan a mano acá.
+              </p>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Fecha de declaración</label>
+                <input
+                  type="date"
+                  disabled={!canUpdate}
+                  value={record.fecha_declaracion}
+                  onChange={(e) => patchRecord({ fecha_declaracion: e.target.value })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Total ventas</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canUpdate || pdt621Locked}
+                  value={record.total_ventas}
+                  onChange={(e) => patchRecord({ total_ventas: Number(e.target.value) || 0 })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Total compras</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canUpdate || pdt621Locked}
+                  value={record.total_compras}
+                  onChange={(e) => patchRecord({ total_compras: Number(e.target.value) || 0 })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">IGV</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canUpdate || pdt621Locked}
+                  value={record.igv}
+                  onChange={(e) => patchRecord({ igv: Number(e.target.value) || 0 })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Renta</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canUpdate || pdt621Locked}
+                  value={record.rta}
+                  onChange={(e) => patchRecord({ rta: Number(e.target.value) || 0 })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+            </div>
+
+            {/* Cantidad de comprobantes (NO montos) — solo registro manual del supervisor, nunca se
+                sincroniza desde la liquidación, así que no entra al candado `pdt621Locked` de arriba. */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de venta</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  disabled={!canUpdate}
+                  value={record.cantidad_comprobantes_venta || ''}
+                  onChange={(e) => patchRecord({ cantidad_comprobantes_venta: Number(e.target.value) || 0 })}
+                  placeholder="0"
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de compra</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  disabled={!canUpdate}
+                  value={record.cantidad_comprobantes_compra || ''}
+                  onChange={(e) => patchRecord({ cantidad_comprobantes_compra: Number(e.target.value) || 0 })}
+                  placeholder="0"
+                  className={FIELD_INPUT}
+                />
+              </div>
+            </div>
+
+            <h2 className="text-sm font-semibold text-slate-800 pt-2 border-t border-slate-100">SIRE</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">¿Se envió SIRE?</label>
+                <select
+                  disabled={!canUpdate}
+                  value={record.envio_sire}
+                  onChange={(e) => {
+                    const envio_sire = e.target.value;
+                    patchRecord(envio_sire === 'si' ? { envio_sire, motivo_no_envio: '' } : { envio_sire });
+                  }}
+                  className={FIELD_INPUT}
+                >
+                  {SIRE_ENVIO_OPTIONS.map((opt) => (
+                    <option key={opt.value || 'none'} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Fecha de envío</label>
+                <input
+                  type="date"
+                  disabled={!canUpdate}
+                  value={record.fecha_envio_sire}
+                  onChange={(e) => patchRecord({ fecha_envio_sire: e.target.value })}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Motivo por el que no se envió{record.envio_sire === 'no' ? ' *' : ''}
+                </label>
+                <input
+                  type="text"
+                  disabled={!canUpdate || record.envio_sire !== 'no'}
+                  value={record.motivo_no_envio}
+                  onChange={(e) => patchRecord({ motivo_no_envio: e.target.value })}
+                  placeholder={record.envio_sire === 'no' ? 'Indique el motivo…' : '—'}
+                  className={FIELD_INPUT}
+                />
+              </div>
+            </div>
+          </>
         ) : null}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Fecha de declaración</label>
-            <input
-              type="date"
-              disabled={!canUpdate}
-              value={record.fecha_declaracion}
-              onChange={(e) => patchRecord({ fecha_declaracion: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Total ventas</label>
-            <input
-              type="number"
-              step="0.01"
-              disabled={!canUpdate || pdt621Locked}
-              value={record.total_ventas}
-              onChange={(e) => patchRecord({ total_ventas: Number(e.target.value) || 0 })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Total compras</label>
-            <input
-              type="number"
-              step="0.01"
-              disabled={!canUpdate || pdt621Locked}
-              value={record.total_compras}
-              onChange={(e) => patchRecord({ total_compras: Number(e.target.value) || 0 })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">IGV</label>
-            <input
-              type="number"
-              step="0.01"
-              disabled={!canUpdate || pdt621Locked}
-              value={record.igv}
-              onChange={(e) => patchRecord({ igv: Number(e.target.value) || 0 })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Renta</label>
-            <input
-              type="number"
-              step="0.01"
-              disabled={!canUpdate || pdt621Locked}
-              value={record.rta}
-              onChange={(e) => patchRecord({ rta: Number(e.target.value) || 0 })}
-              className={FIELD_INPUT}
-            />
-          </div>
-        </div>
-
-        {/* Cantidad de comprobantes (NO montos) — solo registro manual del supervisor, nunca se
-            sincroniza desde la liquidación, así que no entra al candado `pdt621Locked` de arriba. */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de venta</label>
-            <input
-              type="number"
-              step="1"
-              min="0"
-              disabled={!canUpdate}
-              value={record.cantidad_comprobantes_venta || ''}
-              onChange={(e) => patchRecord({ cantidad_comprobantes_venta: Number(e.target.value) || 0 })}
-              placeholder="0"
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Cantidad de comprobantes de compra</label>
-            <input
-              type="number"
-              step="1"
-              min="0"
-              disabled={!canUpdate}
-              value={record.cantidad_comprobantes_compra || ''}
-              onChange={(e) => patchRecord({ cantidad_comprobantes_compra: Number(e.target.value) || 0 })}
-              placeholder="0"
-              className={FIELD_INPUT}
-            />
-          </div>
-        </div>
-
-        <h2 className="text-sm font-semibold text-slate-800 pt-2 border-t border-slate-100">SIRE</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">¿Se envió SIRE?</label>
-            <select
-              disabled={!canUpdate}
-              value={record.envio_sire}
-              onChange={(e) => {
-                const envio_sire = e.target.value;
-                patchRecord(envio_sire === 'si' ? { envio_sire, motivo_no_envio: '' } : { envio_sire });
-              }}
-              className={FIELD_INPUT}
-            >
-              {SIRE_ENVIO_OPTIONS.map((opt) => (
-                <option key={opt.value || 'none'} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Fecha de envío</label>
-            <input
-              type="date"
-              disabled={!canUpdate}
-              value={record.fecha_envio_sire}
-              onChange={(e) => patchRecord({ fecha_envio_sire: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">
-              Motivo por el que no se envió{record.envio_sire === 'no' ? ' *' : ''}
-            </label>
-            <input
-              type="text"
-              disabled={!canUpdate || record.envio_sire !== 'no'}
-              value={record.motivo_no_envio}
-              onChange={(e) => patchRecord({ motivo_no_envio: e.target.value })}
-              placeholder={record.envio_sire === 'no' ? 'Indique el motivo…' : '—'}
-              className={FIELD_INPUT}
-            />
-          </div>
-        </div>
 
         {canUpdate ? (
           <div className="flex justify-end pt-2">

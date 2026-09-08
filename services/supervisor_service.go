@@ -454,6 +454,7 @@ type PdtTypeSummary struct {
 	Vencido     int64 `json:"vencido"`
 	Completado  int64 `json:"completado"`
 	SinPlanilla int64 `json:"sin_planilla"`
+	Suspendida  int64 `json:"suspendida"`
 	Total       int64 `json:"total"`
 }
 
@@ -480,41 +481,56 @@ func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (ma
 		Vencido         int64
 		Completado      int64
 		SinPlanilla     int64
+		Suspendida      int64
 		Total           int64
 	}
 
 	// La fecha límite de cada declaración es la suya propia si la tiene, si no la de su control
 	// (mismo criterio que resolvePdt601DueDate en el frontend). "Vencido" solo aplica a
 	// declaraciones que siguen abiertas (ni observadas ni ya completadas) y cuya fecha límite
-	// resuelta ya pasó. pl.sin_planilla es un dato del CONTROL (una planilla por control, no por
-	// declaración) — el LEFT JOIN lo trae igual para las filas pdt_601 Y pdt_621 de ese control, así
-	// que hay que exigir además "d.declaration_type = pdt_601" en cada condición: si no, una
-	// empresa marcada sin planilla aparecía también como "sin planilla" en su PDT 621 (que no tiene
-	// ese concepto — es un documento aparte, de ventas/compras).
-	isSinPlanillaPDT601 := "d.declaration_type = ? AND COALESCE(pl.sin_planilla, 0) = 1"
+	// resuelta ya pasó. pl.sin_planilla/pl.suspendida son datos del CONTROL vía PDT 601 (una
+	// planilla por control, no por declaración) y r.suspendida el equivalente vía PDT 621 (un
+	// registro por control) — ambos LEFT JOIN traen la misma fila para pdt_601 Y pdt_621 de ese
+	// control, así que hay que exigir el declaration_type correspondiente en cada condición: si no,
+	// una empresa marcada sin planilla/suspendida en un módulo aparecía también así en el otro.
+	//
+	// Los nombres de tipo/estado de declaración (SupervisorDeclXxx) son constantes Go del propio
+	// código — nunca vienen del request — así que se insertan directo en el SQL (fmt.Sprintf) en
+	// vez de como parámetros `?`: evita tener que contar y ordenar a mano una veintena de
+	// placeholders posicionales repetidos, sin ningún riesgo de inyección (no hay input externo acá).
+	sq := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	isSinPlanilla := fmt.Sprintf("(d.declaration_type = %s AND COALESCE(pl.sin_planilla, 0) = 1)", sq(models.SupervisorDeclPDT601))
+	isSuspendida := fmt.Sprintf(
+		"((d.declaration_type = %s AND COALESCE(pl.suspendida, 0) = 1) OR (d.declaration_type = %s AND COALESCE(r.suspendida, 0) = 1))",
+		sq(models.SupervisorDeclPDT601), sq(models.SupervisorDeclPDT621),
+	)
+	isExempt := "(" + isSinPlanilla + " OR " + isSuspendida + ")"
+	completadoStatuses := fmt.Sprintf("(%s, %s, %s)", sq(models.SupervisorDeclAprobado), sq(models.SupervisorDeclPresentado), sq(models.SupervisorDeclCerrado))
+	observadoStatus := sq(models.SupervisorDeclObservado)
+
 	q := database.DB.Table("supervisor_declarations AS d").
-		Select(`d.declaration_type AS declaration_type,
-			SUM(CASE WHEN `+isSinPlanillaPDT601+` THEN 1 ELSE 0 END) AS sin_planilla,
-			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status = ? THEN 1 ELSE 0 END) AS observado,
-			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status IN ? THEN 1 ELSE 0 END) AS completado,
-			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status NOT IN ? AND d.status <> ?
+		Select(fmt.Sprintf(`d.declaration_type AS declaration_type,
+			SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS sin_planilla,
+			SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS suspendida,
+			SUM(CASE WHEN NOT %s AND d.status = %s THEN 1 ELSE 0 END) AS observado,
+			SUM(CASE WHEN NOT %s AND d.status IN %s THEN 1 ELSE 0 END) AS completado,
+			SUM(CASE WHEN NOT %s AND d.status NOT IN %s AND d.status <> %s
 				AND COALESCE(d.due_date, c.due_date) IS NOT NULL
 				AND COALESCE(d.due_date, c.due_date) < CURDATE()
 				THEN 1 ELSE 0 END) AS vencido,
-			SUM(CASE WHEN NOT (`+isSinPlanillaPDT601+`) AND d.status NOT IN ? AND d.status <> ?
+			SUM(CASE WHEN NOT %s AND d.status NOT IN %s AND d.status <> %s
 				AND NOT (COALESCE(d.due_date, c.due_date) IS NOT NULL AND COALESCE(d.due_date, c.due_date) < CURDATE())
 				THEN 1 ELSE 0 END) AS pendiente,
 			COUNT(*) AS total`,
-			models.SupervisorDeclPDT601,
-			models.SupervisorDeclPDT601, models.SupervisorDeclObservado,
-			models.SupervisorDeclPDT601, []string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado},
-			models.SupervisorDeclPDT601,
-			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
-			models.SupervisorDeclPDT601,
-			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
-		).
+			isSinPlanilla, isSuspendida,
+			isExempt, observadoStatus,
+			isExempt, completadoStatuses,
+			isExempt, completadoStatuses, observadoStatus,
+			isExempt, completadoStatuses, observadoStatus,
+		)).
 		Joins("JOIN supervisor_monthly_controls c ON c.id = d.monthly_control_id").
 		Joins("LEFT JOIN supervisor_pdt601_planillas pl ON pl.monthly_control_id = c.id AND pl.deleted_at IS NULL").
+		Joins("LEFT JOIN supervisor_pdt621_records r ON r.monthly_control_id = c.id AND r.deleted_at IS NULL").
 		Where("c.period_ym = ? AND d.declaration_type IN ?", p.PeriodYM, []string{models.SupervisorDeclPDT601, models.SupervisorDeclPDT621})
 
 	if p.CompanyID > 0 {
@@ -548,7 +564,7 @@ func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (ma
 	for _, r := range rows {
 		out[r.DeclarationType] = PdtTypeSummary{
 			Pendiente: r.Pendiente, Observado: r.Observado, Vencido: r.Vencido,
-			Completado: r.Completado, SinPlanilla: r.SinPlanilla, Total: r.Total,
+			Completado: r.Completado, SinPlanilla: r.SinPlanilla, Suspendida: r.Suspendida, Total: r.Total,
 		}
 	}
 	return out, nil

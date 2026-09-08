@@ -471,6 +471,9 @@ export interface SupervisorPdtTypeSummary {
   // Solo aplica a PDT 601 (planilla marcada "sin planilla" — ver Pdt601DetailPage): siempre 0
   // en PDT 621, que no tiene ese concepto. No cuenta como "pendiente": no hay nada que declarar.
   sin_planilla: number;
+  // Empresa suspendida en el período (PDT 601 Y PDT 621) — no cuenta como "pendiente" ni
+  // "vencido": mientras esté suspendida no se registra ningún otro dato.
+  suspendida: number;
   total: number;
 }
 
