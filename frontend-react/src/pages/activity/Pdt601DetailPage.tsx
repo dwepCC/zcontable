@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   computePdt601DueMeta,
   formatPdt601DueDetail,
+  formatStoredAt,
   pdt601StatusBadgeClass,
   pdt601StatusLabel,
   PDT601_APPROVED_STATUSES,
@@ -12,7 +13,11 @@ import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { activityModulePath, type ActivityWorkspace } from '../../navigation/activityRoutes';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
-import { supervisorsService, type SupervisorDeclaration } from '../../services/supervisors';
+import {
+  supervisorsService,
+  type SupervisorAttachment,
+  type SupervisorDeclaration,
+} from '../../services/supervisors';
 import {
   pdt601Service,
   type Pdt601Detail,
@@ -184,8 +189,10 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
   const canUpdate = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsUpdate), []);
   const canObserve = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsObserve), []);
   const canApprove = useMemo(() => auth.hasPermission(P.supervisorsDeclarationsApprove), []);
+  const canUpload = useMemo(() => auth.hasPermission(P.supervisorsAttachmentsUpload), []);
 
   const [detail, setDetail] = useState<Pdt601Detail | null>(null);
+  const [attachments, setAttachments] = useState<SupervisorAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
@@ -195,6 +202,8 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
   const [actionLoading, setActionLoading] = useState(false);
   const [planilla, setPlanilla] = useState<Pdt601PlanillaInput>({ ...EMPTY_PLANILLA });
   const [planillaSaving, setPlanillaSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const declaration = detail?.declaration;
   // El asistente solo registra Fecha/Hora de entrega — el resto del seguimiento (declaración PDT,
@@ -279,6 +288,11 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
     return { dueDate, ...meta };
   }, [detail, declaration]);
 
+  const loadAttachments = useCallback(async (declarationId: number) => {
+    const rows = await supervisorsService.listAttachments(0, declarationId);
+    setAttachments(rows);
+  }, []);
+
   const load = useCallback(async () => {
     if (!Number.isFinite(companyId) || companyId <= 0) {
       setError('Empresa inválida.');
@@ -291,6 +305,7 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       const data = await pdt601Service.getDetail(companyId, periodYm);
       setDetail(data);
       setPlanilla(planillaToInput(data.planilla));
+      await loadAttachments(data.declaration.id);
     } catch (err) {
       console.error(err);
       setError(extractApiErrorMessage(err, 'No se pudo cargar el detalle.'));
@@ -298,7 +313,7 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
     } finally {
       setLoading(false);
     }
-  }, [companyId, periodYm]);
+  }, [companyId, periodYm, loadAttachments]);
 
   useEffect(() => {
     void load();
@@ -320,6 +335,24 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
       showMsg(extractApiErrorMessage(err, 'No se pudo actualizar el estado.'), 'error');
     } finally {
       setStatusSaving(false);
+    }
+  };
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!declaration || !canUpload || !files?.length) return;
+    try {
+      setUploading(true);
+      showMsg('');
+      for (const file of Array.from(files)) {
+        await supervisorsService.uploadAttachment(detail!.control_id, declaration.id, file);
+      }
+      await loadAttachments(declaration.id);
+      showMsg('Archivo(s) subido(s) correctamente.', 'success');
+    } catch (err) {
+      showMsg(extractApiErrorMessage(err, 'Error al subir archivo.'), 'error');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
   };
 
@@ -831,6 +864,50 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
             </button>
           </div>
         ) : null}
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-800">PDT 601 ({attachments.length})</h2>
+          {canUpload ? (
+            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium cursor-pointer hover:bg-primary-700">
+              <i className="fas fa-upload" aria-hidden />
+              {uploading ? 'Subiendo…' : 'Cargar PDT 601'}
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept=".pdf,image/*"
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => void handleUpload(e.target.files)}
+              />
+            </label>
+          ) : null}
+        </div>
+        {attachments.length === 0 ? (
+          <p className="text-sm text-slate-500">Sin archivos cargados.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {attachments.map((a) => (
+              <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">
+                  <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
+                  {a.file_name}
+                </span>
+                <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
+                <a
+                  href={a.file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary-700 text-xs font-medium shrink-0 hover:underline"
+                >
+                  Abrir
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
