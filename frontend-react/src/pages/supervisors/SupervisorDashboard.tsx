@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SearchableSelect from '../../components/SearchableSelect';
-import { supervisorsService, type SupervisorDashboardData } from '../../services/supervisors';
+import {
+  supervisorsService,
+  type ComplianceTrendPoint,
+  type SupervisorDashboardData,
+  type SupervisorPdtTypeSummary,
+} from '../../services/supervisors';
 import { companiesService } from '../../services/companies';
 import { usersService } from '../../services/users';
 import { auth } from '../../services/auth';
 import { P } from '../../rbac/codes';
 import type { Company, User } from '../../types/dashboard';
 import { controlStatusLabel, previousMonthPeriodYM } from '../../utils/supervisorLabels';
+import {
+  ComplianceTrendChart,
+  ProductivityRanking,
+  StatusDistributionDonut,
+} from '../../components/supervisors/DashboardCharts';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { extractApiErrorMessage } from '../../utils/apiError';
-import {
-  fetchPdtWorkspaceData,
-  type PdtTypeSummary,
-  type PdtWorkspaceData,
-} from '../../utils/pdtClientAggregation';
 
 const SupervisorDashboard = () => {
   const allowed = useMemo(() => auth.hasPermission(P.supervisorsDashboardView), []);
@@ -39,11 +44,14 @@ const SupervisorDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<SupervisorDashboardData | null>(null);
-  const [pdtData, setPdtData] = useState<PdtWorkspaceData | null>(null);
+  const [pdtData, setPdtData] = useState<Record<'pdt_601' | 'pdt_621', SupervisorPdtTypeSummary> | null>(null);
   const [loading, setLoading] = useState(true);
   const [pdtLoading, setPdtLoading] = useState(false);
   const [error, setError] = useState('');
   const [pdtError, setPdtError] = useState('');
+  const [complianceTrend, setComplianceTrend] = useState<ComplianceTrendPoint[]>([]);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState('');
 
   useEffect(() => {
     if (!allowed || !isAnalistaScope) return;
@@ -126,12 +134,24 @@ const SupervisorDashboard = () => {
     };
   }, [allowed, load]);
 
+  // Antes esta sección se armaba en el navegador (1 listControls + N listDeclarations, hasta
+  // ~1800 consultas en el peor caso) y solo escuchaba el período, ignorando el resto de los
+  // filtros del panel. Ahora es una sola consulta agrupada en el servidor, con los mismos 5
+  // filtros que el resto del dashboard.
   useEffect(() => {
     if (!allowed) return;
     let cancelled = false;
     setPdtLoading(true);
     setPdtError('');
-    void fetchPdtWorkspaceData(periodYm)
+    void supervisorsService
+      .pdtDashboardSummary({
+        period_ym: periodYm,
+        general_status: generalStatus || undefined,
+        risk_level: riskLevel || undefined,
+        company_id: companyId ? Number(companyId) : undefined,
+        responsible_user_id: responsibleUserId ? Number(responsibleUserId) : undefined,
+        supervisor_user_id: supervisorUserId ? Number(supervisorUserId) : undefined,
+      })
       .then((res) => {
         if (!cancelled) setPdtData(res);
       })
@@ -146,7 +166,38 @@ const SupervisorDashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [allowed, periodYm]);
+  }, [allowed, periodYm, generalStatus, riskLevel, companyId, responsibleUserId, supervisorUserId]);
+
+  useEffect(() => {
+    if (!allowed) return;
+    let cancelled = false;
+    setTrendLoading(true);
+    setTrendError('');
+    void supervisorsService
+      .complianceTrend({
+        period_ym: periodYm,
+        months: 6,
+        general_status: generalStatus || undefined,
+        risk_level: riskLevel || undefined,
+        company_id: companyId ? Number(companyId) : undefined,
+        responsible_user_id: responsibleUserId ? Number(responsibleUserId) : undefined,
+        supervisor_user_id: supervisorUserId ? Number(supervisorUserId) : undefined,
+      })
+      .then((res) => {
+        if (!cancelled) setComplianceTrend(res);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setComplianceTrend([]);
+        setTrendError(extractApiErrorMessage(err, 'No se pudo cargar la tendencia de cumplimiento.'));
+      })
+      .finally(() => {
+        if (!cancelled) setTrendLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, periodYm, generalStatus, riskLevel, companyId, responsibleUserId, supervisorUserId]);
 
   // Incluye "cerrado" para que el total de la barra sea el MISMO universo que usa el backend
   // para calcular monthly_compliance_pct (antes la barra excluía "cerrado" y el % de al lado sí
@@ -310,53 +361,38 @@ const SupervisorDashboard = () => {
           <PdtSummarySection
             loading={pdtLoading}
             error={pdtError}
-            summary601={pdtData?.summaryByType.pdt_601}
-            summary621={pdtData?.summaryByType.pdt_621}
+            summary601={pdtData?.pdt_601}
+            summary621={pdtData?.pdt_621}
             workspace="supervisor"
           />
 
-          {chartTotal > 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <p className="text-sm font-medium text-slate-700 mb-3">Distribución por estado</p>
-              <div className="flex h-4 rounded-full overflow-hidden bg-slate-100">
-                <div
-                  className="bg-emerald-500 h-full"
-                  style={{ width: `${(data.controls_al_dia / chartTotal) * 100}%` }}
-                  title={controlStatusLabel('al_dia')}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {chartTotal > 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-medium text-slate-700 mb-3">Distribución por estado</p>
+                <StatusDistributionDonut
+                  total={chartTotal}
+                  slices={[
+                    { label: controlStatusLabel('al_dia'), value: data.controls_al_dia, colorClass: 'stroke-emerald-500' },
+                    { label: controlStatusLabel('pendiente'), value: data.controls_pendiente, colorClass: 'stroke-amber-400' },
+                    { label: controlStatusLabel('vencido'), value: data.controls_vencido, colorClass: 'stroke-red-500' },
+                    { label: controlStatusLabel('observado'), value: data.controls_observado, colorClass: 'stroke-orange-400' },
+                    { label: controlStatusLabel('cerrado'), value: data.controls_cerrado, colorClass: 'stroke-slate-400' },
+                  ]}
                 />
-                <div
-                  className="bg-amber-400 h-full"
-                  style={{ width: `${(data.controls_pendiente / chartTotal) * 100}%` }}
-                  title={controlStatusLabel('pendiente')}
-                />
-                <div
-                  className="bg-red-500 h-full"
-                  style={{ width: `${(data.controls_vencido / chartTotal) * 100}%` }}
-                  title={controlStatusLabel('vencido')}
-                />
-                <div
-                  className="bg-orange-400 h-full"
-                  style={{ width: `${(data.controls_observado / chartTotal) * 100}%` }}
-                  title={controlStatusLabel('observado')}
-                />
-                <div
-                  className="bg-slate-400 h-full"
-                  style={{ width: `${(data.controls_cerrado / chartTotal) * 100}%` }}
-                  title={controlStatusLabel('cerrado')}
-                />
+                <p className="text-xs text-slate-500 mt-3">Cumplimiento: {data.monthly_compliance_pct}%</p>
               </div>
-              <p className="text-xs text-slate-500 mt-2">
-                Cumplimiento: {data.monthly_compliance_pct}% · {chartTotal} control{chartTotal === 1 ? '' : 'es'} en
-                el período
-              </p>
+            ) : null}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-sm font-medium text-slate-700 mb-3">Tendencia de cumplimiento (6 meses)</p>
+              {trendLoading ? (
+                <p className="text-sm text-slate-500">Cargando tendencia…</p>
+              ) : trendError ? (
+                <p className="text-sm text-red-600">{trendError}</p>
+              ) : (
+                <ComplianceTrendChart points={complianceTrend} />
+              )}
             </div>
-          ) : null}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            <StatusPill label={controlStatusLabel('al_dia')} count={data.controls_al_dia} tone="emerald" />
-            <StatusPill label={controlStatusLabel('pendiente')} count={data.controls_pendiente} tone="amber" />
-            <StatusPill label={controlStatusLabel('vencido')} count={data.controls_vencido} tone="red" />
-            <StatusPill label={controlStatusLabel('observado')} count={data.controls_observado} tone="orange" />
-            <StatusPill label={controlStatusLabel('cerrado')} count={data.controls_cerrado} tone="slate" />
           </div>
           {(data.alerts?.length ?? 0) > 0 ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-2">
@@ -386,31 +422,7 @@ const SupervisorDashboard = () => {
               ) : null}
             </div>
           ) : null}
-          {(data.productivity?.length ?? 0) > 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
-              <p className="text-sm font-medium text-slate-700 px-4 pt-4">Productividad por responsable</p>
-              <table className="min-w-full text-sm mt-2">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="text-left px-4 py-3">Responsable</th>
-                    <th className="text-right px-4 py-3">Controles</th>
-                    <th className="text-right px-4 py-3">Al día</th>
-                    <th className="text-right px-4 py-3">Cumplimiento</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {data.productivity!.map((r) => (
-                    <tr key={r.user_id}>
-                      <td className="px-4 py-3 font-medium">{r.user_name}</td>
-                      <td className="px-4 py-3 text-right">{r.total}</td>
-                      <td className="px-4 py-3 text-right">{r.al_dia}</td>
-                      <td className="px-4 py-3 text-right">{r.compliance_pct}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
+          {(data.productivity?.length ?? 0) > 0 ? <ProductivityRanking rows={data.productivity!} /> : null}
           <div className="flex flex-wrap gap-3 text-sm">
             <Link to="/supervisors/activities/pdt-601" className="text-primary-700 font-medium">
               → PDT 601
@@ -443,8 +455,8 @@ function PdtSummarySection({
 }: {
   loading: boolean;
   error?: string;
-  summary601?: PdtTypeSummary;
-  summary621?: PdtTypeSummary;
+  summary601?: SupervisorPdtTypeSummary;
+  summary621?: SupervisorPdtTypeSummary;
   workspace: 'supervisor' | 'assistant';
 }) {
   const base = workspace === 'assistant' ? '/assistant/activities' : '/supervisors/activities';
@@ -474,7 +486,7 @@ function PdtSummarySection({
   );
 }
 
-function emptyPdtSummary(): PdtTypeSummary {
+function emptyPdtSummary(): SupervisorPdtTypeSummary {
   return { pendiente: 0, observado: 0, vencido: 0, completado: 0, total: 0 };
 }
 
@@ -484,7 +496,7 @@ function PdtTypeCard({
   linkTo,
 }: {
   title: string;
-  summary: PdtTypeSummary;
+  summary: SupervisorPdtTypeSummary;
   linkTo: string;
 }) {
   return (
@@ -542,23 +554,5 @@ function StatCard({ label, value, icon }: { label: string; value: number | strin
   );
 }
 
-function StatusPill({ label, count, tone }: { label: string; count: number; tone: string }) {
-  const bg =
-    tone === 'emerald'
-      ? 'bg-emerald-50 text-emerald-800'
-      : tone === 'amber'
-        ? 'bg-amber-50 text-amber-800'
-        : tone === 'red'
-          ? 'bg-red-50 text-red-800'
-          : tone === 'slate'
-            ? 'bg-slate-100 text-slate-700'
-            : 'bg-orange-50 text-orange-800';
-  return (
-    <div className={`rounded-lg px-4 py-3 ${bg} flex justify-between items-center`}>
-      <span className="text-sm font-medium">{label}</span>
-      <span className="text-lg font-bold">{count}</span>
-    </div>
-  );
-}
 
 export default SupervisorDashboard;

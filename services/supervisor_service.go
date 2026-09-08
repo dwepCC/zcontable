@@ -413,6 +413,190 @@ func (s *SupervisorService) Dashboard(p SupervisorDashboardParams) (*SupervisorD
 	return out, nil
 }
 
+// PdtTypeSummary conteo de declaraciones PDT 601/621 del período por bucket — mismas 4
+// categorías y misma prioridad de clasificación (observado > completado > vencido > pendiente)
+// que antes calculaba el navegador en utils/pdtClientAggregation.ts trayendo TODOS los controles
+// y declaraciones del período (1 listControls + N listDeclarations, hasta ~9 queries cada una).
+type PdtTypeSummary struct {
+	Pendiente  int64 `json:"pendiente"`
+	Observado  int64 `json:"observado"`
+	Vencido    int64 `json:"vencido"`
+	Completado int64 `json:"completado"`
+	Total      int64 `json:"total"`
+}
+
+// PdtDashboardSummary calcula el resumen PDT 601/621 en el servidor con una sola consulta
+// agrupada — reemplaza la agregación 1+N que hacía el navegador. Acepta los mismos filtros que
+// el resto del dashboard (empresa, estado general, riesgo, responsable, supervisor, alcance).
+func (s *SupervisorService) PdtDashboardSummary(p SupervisorDashboardParams) (map[string]PdtTypeSummary, error) {
+	if !validPeriodYM(p.PeriodYM) {
+		return nil, errors.New("período inválido (use YYYY-MM)")
+	}
+
+	type row struct {
+		DeclarationType string
+		Pendiente       int64
+		Observado       int64
+		Vencido         int64
+		Completado      int64
+		Total           int64
+	}
+
+	// La fecha límite de cada declaración es la suya propia si la tiene, si no la de su control
+	// (mismo criterio que resolvePdt601DueDate en el frontend). "Vencido" solo aplica a
+	// declaraciones que siguen abiertas (ni observadas ni ya completadas) y cuya fecha límite
+	// resuelta ya pasó.
+	q := database.DB.Table("supervisor_declarations AS d").
+		Select(`d.declaration_type AS declaration_type,
+			SUM(CASE WHEN d.status = ? THEN 1 ELSE 0 END) AS observado,
+			SUM(CASE WHEN d.status IN ? THEN 1 ELSE 0 END) AS completado,
+			SUM(CASE WHEN d.status NOT IN ? AND d.status <> ?
+				AND COALESCE(d.due_date, c.due_date) IS NOT NULL
+				AND COALESCE(d.due_date, c.due_date) < CURDATE()
+				THEN 1 ELSE 0 END) AS vencido,
+			SUM(CASE WHEN d.status NOT IN ? AND d.status <> ?
+				AND NOT (COALESCE(d.due_date, c.due_date) IS NOT NULL AND COALESCE(d.due_date, c.due_date) < CURDATE())
+				THEN 1 ELSE 0 END) AS pendiente,
+			COUNT(*) AS total`,
+			models.SupervisorDeclObservado,
+			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado},
+			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
+			[]string{models.SupervisorDeclAprobado, models.SupervisorDeclPresentado, models.SupervisorDeclCerrado}, models.SupervisorDeclObservado,
+		).
+		Joins("JOIN supervisor_monthly_controls c ON c.id = d.monthly_control_id").
+		Where("c.period_ym = ? AND d.declaration_type IN ?", p.PeriodYM, []string{models.SupervisorDeclPDT601, models.SupervisorDeclPDT621})
+
+	if p.CompanyID > 0 {
+		q = q.Where("c.company_id = ?", p.CompanyID)
+	}
+	if p.GeneralStatus != "" {
+		q = q.Where("c.general_status = ?", p.GeneralStatus)
+	}
+	if p.RiskLevel != "" {
+		q = q.Where("c.risk_level = ?", p.RiskLevel)
+	}
+	if p.ResponsibleUserID > 0 {
+		q = q.Where("c.responsible_user_id = ?", p.ResponsibleUserID)
+	}
+	if p.SupervisorUserID > 0 {
+		q = q.Where("c.supervisor_user_id = ?", p.SupervisorUserID)
+	}
+	if p.AllowedCompanyIDs != nil {
+		q = q.Where("c.company_id IN ?", p.AllowedCompanyIDs)
+	}
+
+	var rows []row
+	if err := q.Group("d.declaration_type").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := map[string]PdtTypeSummary{
+		models.SupervisorDeclPDT601: {},
+		models.SupervisorDeclPDT621: {},
+	}
+	for _, r := range rows {
+		out[r.DeclarationType] = PdtTypeSummary{
+			Pendiente: r.Pendiente, Observado: r.Observado, Vencido: r.Vencido,
+			Completado: r.Completado, Total: r.Total,
+		}
+	}
+	return out, nil
+}
+
+// ComplianceTrendPoint cumplimiento mensual de un período — misma fórmula que
+// SupervisorDashboard.MonthlyCompliancePct ((al_dia + cerrado) / total de controles).
+type ComplianceTrendPoint struct {
+	PeriodYM      string  `json:"period_ym"`
+	CompliancePct float64 `json:"compliance_pct"`
+	TotalControls int64   `json:"total_controls"`
+}
+
+// trailingPeriods devuelve los últimos `months` períodos AAAA-MM terminando en `periodYM`
+// (incluido), en orden cronológico ascendente. nil si periodYM no parsea.
+func trailingPeriods(periodYM string, months int) []string {
+	var y, m int
+	if _, err := fmt.Sscanf(periodYM, "%d-%d", &y, &m); err != nil || m < 1 || m > 12 {
+		return nil
+	}
+	out := make([]string, months)
+	for i := months - 1; i >= 0; i-- {
+		out[i] = fmt.Sprintf("%04d-%02d", y, m)
+		m--
+		if m < 1 {
+			m = 12
+			y--
+		}
+	}
+	return out
+}
+
+// ComplianceTrend cumplimiento mensual de los últimos `months` meses terminando en p.PeriodYM
+// (incluido) — mismos filtros que el resto del dashboard, en una sola consulta agrupada por
+// período (antes no existía ninguna vista de tendencia: solo se podía ver un mes a la vez).
+func (s *SupervisorService) ComplianceTrend(p SupervisorDashboardParams, months int) ([]ComplianceTrendPoint, error) {
+	if !validPeriodYM(p.PeriodYM) {
+		return nil, errors.New("período inválido (use YYYY-MM)")
+	}
+	if months <= 0 {
+		months = 6
+	}
+	if months > 24 {
+		months = 24
+	}
+	periods := trailingPeriods(p.PeriodYM, months)
+	if periods == nil {
+		return nil, errors.New("período inválido (use YYYY-MM)")
+	}
+
+	type row struct {
+		PeriodYM  string
+		Compliant int64
+		Total     int64
+	}
+	q := database.DB.Model(&models.SupervisorMonthlyControl{}).
+		Select(`period_ym,
+			SUM(CASE WHEN general_status IN ? THEN 1 ELSE 0 END) AS compliant,
+			COUNT(*) AS total`,
+			[]string{models.SupervisorControlAlDia, models.SupervisorControlCerrado}).
+		Where("period_ym IN ?", periods)
+	if p.CompanyID > 0 {
+		q = q.Where("company_id = ?", p.CompanyID)
+	}
+	if p.GeneralStatus != "" {
+		q = q.Where("general_status = ?", p.GeneralStatus)
+	}
+	if p.RiskLevel != "" {
+		q = q.Where("risk_level = ?", p.RiskLevel)
+	}
+	if p.ResponsibleUserID > 0 {
+		q = q.Where("responsible_user_id = ?", p.ResponsibleUserID)
+	}
+	if p.SupervisorUserID > 0 {
+		q = q.Where("supervisor_user_id = ?", p.SupervisorUserID)
+	}
+	q = s.applyCompanyScope(q, p.AllowedCompanyIDs)
+
+	var rows []row
+	if err := q.Group("period_ym").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	byPeriod := make(map[string]row, len(rows))
+	for _, r := range rows {
+		byPeriod[r.PeriodYM] = r
+	}
+
+	out := make([]ComplianceTrendPoint, 0, len(periods))
+	for _, ym := range periods {
+		r := byPeriod[ym]
+		pt := ComplianceTrendPoint{PeriodYM: ym, TotalControls: r.Total}
+		if r.Total > 0 {
+			pt.CompliancePct = math.Round((float64(r.Compliant)/float64(r.Total))*1000) / 10
+		}
+		out = append(out, pt)
+	}
+	return out, nil
+}
+
 // ---- Periods ----
 
 func (s *SupervisorService) ListPeriods(page, perPage int) ([]models.SupervisorPeriod, int64, error) {
