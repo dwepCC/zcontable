@@ -216,7 +216,7 @@ const Pdt621ListPage = ({ workspace }: Pdt621ListPageProps) => {
         dig: filterDig ?? undefined,
         assistant_user_id: filterAssistantId ?? undefined,
       });
-      await exportPdt621ReportExcel({ periodYm, rows: exportRows });
+      await exportPdt621ReportExcel({ periodYm, rows: exportRows, workspace });
       setMsg('Excel generado correctamente.');
     } catch (err) {
       setError(extractApiErrorMessage(err, 'No se pudo exportar a Excel.'));

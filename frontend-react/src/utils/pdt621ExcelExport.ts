@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import type { Pdt621ListRow } from '../services/pdt621';
 import { pdt621StatusLabel } from '../components/activity/pdt621Config';
+import { buildExcelLetterhead, type ExcelLetterheadWorkspace } from './excelLetterhead';
 
 // Fuente única para TODO el Excel (título, encabezado y datos) — a pedido: "Aptos Narrow" 10pt en
 // todo el archivo, sin excepciones de tamaño.
@@ -66,8 +67,12 @@ function styleCell(cell: ExcelJS.Cell, fill?: ExcelJS.Fill) {
   if (fill) cell.fill = fill;
 }
 
-export async function exportPdt621ReportExcel(options: { periodYm: string; rows: Pdt621ListRow[] }): Promise<void> {
-  const { periodYm, rows } = options;
+export async function exportPdt621ReportExcel(options: {
+  periodYm: string;
+  rows: Pdt621ListRow[];
+  workspace: ExcelLetterheadWorkspace;
+}): Promise<void> {
+  const { periodYm, rows, workspace } = options;
   if (rows.length === 0) {
     throw new Error('No hay datos para exportar.');
   }
@@ -76,15 +81,16 @@ export async function exportPdt621ReportExcel(options: { periodYm: string; rows:
   const sheet = workbook.addWorksheet('Control Vencimientos PDT 621');
   const totalCols = HEADERS.length;
 
-  sheet.mergeCells(1, 1, 1, totalCols);
-  const titleCell = sheet.getCell(1, 1);
-  titleCell.value = `CONTROL VENCIMIENTOS PDT 621 — ${periodYm}`;
-  titleCell.font = { name: FONT_NAME, size: FONT_SIZE, bold: true };
-  titleCell.alignment = { horizontal: 'left' };
-
-  sheet.mergeCells(2, 1, 2, totalCols);
-  sheet.getCell(2, 1).value = `Período: ${periodYm} · ${rows.length} empresa${rows.length === 1 ? '' : 's'}`;
-  sheet.getCell(2, 1).font = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FF64748B' } };
+  await buildExcelLetterhead({
+    sheet,
+    totalCols,
+    title: `CONTROL DE VENCIMIENTOS PDT 621${workspace === 'supervisor' ? ' — SUPERVISORES' : ' — ASISTENTES'}`,
+    periodYm,
+    companyCount: rows.length,
+    workspace,
+    fontName: FONT_NAME,
+    fontSize: FONT_SIZE,
+  });
 
   const headerRow = sheet.getRow(4);
   HEADERS.forEach((h, i) => {
