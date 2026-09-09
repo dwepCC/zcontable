@@ -3,8 +3,13 @@ import { saveAs } from 'file-saver';
 import type { Pdt621ListRow } from '../services/pdt621';
 import { pdt621StatusLabel } from '../components/activity/pdt621Config';
 
+// Fuente única para TODO el Excel (título, encabezado y datos) — a pedido: "Aptos Narrow" 10pt en
+// todo el archivo, sin excepciones de tamaño.
+const FONT_NAME = 'Aptos Narrow';
+const FONT_SIZE = 10;
+
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+const HEADER_FONT: Partial<ExcelJS.Font> = { name: FONT_NAME, size: FONT_SIZE, bold: true, color: { argb: 'FFFFFFFF' } };
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
   left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
@@ -56,6 +61,7 @@ function formatDateCell(iso?: string | null): string {
 }
 
 function styleCell(cell: ExcelJS.Cell, fill?: ExcelJS.Fill) {
+  cell.font = { name: FONT_NAME, size: FONT_SIZE };
   cell.border = THIN_BORDER;
   if (fill) cell.fill = fill;
 }
@@ -73,12 +79,12 @@ export async function exportPdt621ReportExcel(options: { periodYm: string; rows:
   sheet.mergeCells(1, 1, 1, totalCols);
   const titleCell = sheet.getCell(1, 1);
   titleCell.value = `CONTROL VENCIMIENTOS PDT 621 — ${periodYm}`;
-  titleCell.font = { size: 14, bold: true };
+  titleCell.font = { name: FONT_NAME, size: FONT_SIZE, bold: true };
   titleCell.alignment = { horizontal: 'left' };
 
   sheet.mergeCells(2, 1, 2, totalCols);
   sheet.getCell(2, 1).value = `Período: ${periodYm} · ${rows.length} empresa${rows.length === 1 ? '' : 's'}`;
-  sheet.getCell(2, 1).font = { size: 10, color: { argb: 'FF64748B' } };
+  sheet.getCell(2, 1).font = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FF64748B' } };
 
   const headerRow = sheet.getRow(4);
   HEADERS.forEach((h, i) => {
