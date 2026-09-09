@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { resolveBackendUrl } from '../../api/client';
 import {
   computePdt601DueMeta,
   formatPdt601DueDetail,
@@ -9,6 +10,7 @@ import {
   PDT601_APPROVED_STATUSES,
   resolvePdt601DueDate,
 } from '../../components/activity/pdt601Config';
+import FilePreviewModal from '../../components/FilePreviewModal';
 import { PAGE_WORKSPACE_CLASS } from '../../constants/pageLayout';
 import { activityModulePath, type ActivityWorkspace } from '../../navigation/activityRoutes';
 import { auth } from '../../services/auth';
@@ -26,6 +28,7 @@ import {
 } from '../../services/pdt601';
 import { currentPeriodYM } from '../../utils/supervisorLabels';
 import { extractApiErrorMessage } from '../../utils/apiError';
+import { downloadRemoteFile } from '../../utils/downloadFile';
 
 const EMPTY_PLANILLA: Pdt601PlanillaInput = {
   sin_planilla: false,
@@ -226,6 +229,8 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
   const [planilla, setPlanilla] = useState<Pdt601PlanillaInput>({ ...EMPTY_PLANILLA });
   const [planillaSaving, setPlanillaSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; fileName: string } | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const declaration = detail?.declaration;
@@ -984,26 +989,53 @@ const Pdt601DetailPage = ({ workspace }: Pdt601DetailPageProps) => {
           <p className="text-sm text-slate-500">Sin archivos cargados.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {attachments.map((a) => (
-              <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">
-                  <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
-                  {a.file_name}
-                </span>
-                <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
-                <a
-                  href={a.file_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary-700 text-xs font-medium shrink-0 hover:underline"
-                >
-                  Abrir
-                </a>
-              </li>
-            ))}
+            {attachments.map((a) => {
+              const fileUrl = resolveBackendUrl(a.file_url);
+              return (
+                <li key={a.id} className="py-2 flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate">
+                    <i className="fas fa-paperclip text-slate-400 mr-2" aria-hidden />
+                    {a.file_name}
+                  </span>
+                  <span className="text-xs text-slate-500 shrink-0">{formatStoredAt(a.created_at)}</span>
+                  <span className="flex items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setPreview({ url: fileUrl, fileName: a.file_name })}
+                      className="inline-flex items-center gap-1.5 text-primary-700 text-xs font-medium hover:underline"
+                    >
+                      <i className="fas fa-eye" aria-hidden />
+                      Ver
+                    </button>
+                    <button
+                      type="button"
+                      disabled={downloadingId === a.id}
+                      onClick={() => {
+                        setDownloadingId(a.id);
+                        void downloadRemoteFile(fileUrl, a.file_name).finally(() => setDownloadingId(null));
+                      }}
+                      className="inline-flex items-center gap-1.5 text-slate-600 text-xs font-medium hover:underline disabled:opacity-50"
+                    >
+                      <i className="fas fa-download" aria-hidden />
+                      {downloadingId === a.id ? 'Descargando…' : 'Descargar'}
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
+
+      {preview ? (
+        <FilePreviewModal
+          open
+          url={preview.url}
+          title={preview.fileName}
+          onClose={() => setPreview(null)}
+          onDownload={() => void downloadRemoteFile(preview.url, preview.fileName)}
+        />
+      ) : null}
     </div>
   );
 };
