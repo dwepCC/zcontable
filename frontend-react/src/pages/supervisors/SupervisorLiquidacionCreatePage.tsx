@@ -112,6 +112,7 @@ const SupervisorLiquidacionCreatePage = () => {
   const liquidationPeriodManualRef = useRef(Boolean(periodFromList));
   const [settlementStatus, setSettlementStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState('');
   const [taxSections, setTaxSections] = useState<TaxSettlementSectionsPayload>(() => defaultTaxSections(new Date().getFullYear()));
@@ -518,6 +519,34 @@ const SupervisorLiquidacionCreatePage = () => {
     await saveLiquidacion();
   };
 
+  // Botón "Resincronizar" en modo Ver (liquidaciones Emitidas): la sincronización normal
+  // (syncPdt601Planilla / syncPdt621Record) solo se dispara al GUARDAR desde /editar, y una vez
+  // Emitida esa ruta queda bloqueada — así que una liquidación emitida sin pasar antes por un
+  // guardado en Supervisores (o emitida antes de que existiera/cambiara esta sincronización, como
+  // el cambio de impuesto_periodo a saldo_favor_final) se queda con el Control PDT 601/621 vacío o
+  // desactualizado para siempre. Este botón reutiliza las mismas dos funciones de sincronización
+  // con los datos ya cargados de la liquidación (tax_sections guardado), sin necesidad de reabrir
+  // para editar.
+  const resyncControl = async () => {
+    if (!companyId || companyId <= 0) return;
+    const lp = liquidationPeriod.trim();
+    if (!/^\d{4}-\d{2}$/.test(lp)) return;
+    setResyncing(true);
+    try {
+      await Promise.all([syncPdt601Planilla(companyId, lp), syncPdt621Record(companyId, lp)]);
+      window.dispatchEvent(
+        new CustomEvent('miweb:toast', {
+          detail: {
+            type: 'success',
+            message: 'Control PDT 601/621 resincronizado con los datos de esta liquidación.',
+          },
+        }),
+      );
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   const periodLabelPreview = useMemo(
     () => periodLabelFromYM(liquidationPeriod.trim()) || liquidationPeriod,
     [liquidationPeriod],
@@ -733,13 +762,25 @@ const SupervisorLiquidacionCreatePage = () => {
               <TaxSettlementSectionsSummary sections={taxSectionsComputed} />
             </div>
           ) : null}
-          <div className="pt-2 border-t border-slate-100">
+          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3">
             <Link
               to={listBackTo}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Volver al listado
             </Link>
+            {canUpdate && settlementStatus === 'emitida' ? (
+              <button
+                type="button"
+                onClick={() => void resyncControl()}
+                disabled={resyncing}
+                title="Vuelve a empujar ventas/compras/IGV/renta de esta liquidación hacia el Control PDT 601 y el Control PDT 621, por si quedaron sin sincronizar o desactualizados."
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-primary-300 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <i className={`fas ${resyncing ? 'fa-spinner fa-spin' : 'fa-rotate'} text-xs`} aria-hidden />
+                {resyncing ? 'Resincronizando…' : 'Resincronizar Control PDT 601/621'}
+              </button>
+            ) : null}
           </div>
         </section>
       ) : (
